@@ -1,0 +1,102 @@
+{
+    "swing1.mp4": {
+        "handedness": "right",
+        "player": "손성빈",
+        "team": "롯데"
+    },
+    "swing2.mp4": {
+        "handedness": "right",
+        "player": "카메론",
+        "team": "두산"
+    },
+    "swing3.mp4": {
+        "handedness": "left",
+        "player": "오그레디",
+        "team": "한화"
+    },
+    "swing4.mp4": {
+        "handedness": "left",
+        "player": "최인호",
+        "team": "한화"
+    },
+    "swing5.mp4": {
+        "handedness": "right",
+        "player": "강정호",
+        "team": "이외"
+    },
+    "swing6.mp4": {
+        "handedness": "right",
+        "player": "최정",
+        "team": "ssg"
+    },
+    "swing7.mp4": {
+        "handedness": "left",
+        "player": "강백호",
+        "team": "kt"
+    },
+    "swing8.mp4": {
+        "handedness": "left",
+        "player": "최지훈",
+        "team": "ssg"
+    },
+    "swing9.mp4": {
+        "handedness": "right",
+        "player": "배정대",
+        "team": "kt"
+    },
+    "swing10.mp4": {
+        "handedness": "left",
+        "player": "나성범",
+        "team": "kia"
+    },
+    "swing11.mp4": {
+        "handedness": "right",
+        "player": "유강남",
+        "team": "롯데"
+    },
+    "swing12.mp4": {
+        "handedness": "right",
+        "player": "전준우",
+        "team": "롯데"
+    },
+    "swing13.mp4": {
+        "handedness": "left",
+        "player": "홍창기",
+        "team": "lg"
+    },
+    "swing14.mp4": {
+        "handedness": "left",
+        "player": "정은원",
+        "team": "한화"
+    },
+    "swing15.mp4": {
+        "handedness": "left",
+        "player": "김혜성",
+        "team": "키움"
+    },
+    "swing16.mp4": {
+        "handedness": "right",
+        "player": "전민재",
+        "team": "롯데"
+    },
+    "swing17.mp4": {
+        "handedness": "right",
+        "player": "홍성흔",
+        "team": "이외"
+    },
+    "swing18.mp4": {
+        "handedness": "left",
+        "player": "손아섭",
+        "team": "nc"
+    },
+    "swing19.mp4": {
+        "handedness": "left",
+        "player": "이정후",
+        "team": "키움"
+    },
+    "swing20.mp4": {
+        "handedness": "right",
+        "player": "한태양",
+        "team": "롯데"
+    }
+}
