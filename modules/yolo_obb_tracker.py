@@ -148,7 +148,7 @@ def track_target_player_and_bat(video_path, model, player_cls=2, bat_cls=0):
     else:
         b_coords_list = [[np.nan] * 5 for _ in range(len(base_df))]
         
-    b_cols = ['centerx', 'centery', 'width', 'height', 'angle']
+    b_cols = ['cx', 'cy', 'w', 'h', 'r']
     final_bat_df = pd.concat([base_df, pd.DataFrame(b_coords_list, columns=b_cols)], axis=1)
 
     print("모든 처리 완료")
