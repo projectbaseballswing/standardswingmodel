@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 from scipy.signal import savgol_filter
 
@@ -12,7 +13,7 @@ def interpolate_coordinates(df, max_gap=4):
       max_gap: 이 프레임 수 이상 연속 결측 시 플래그에 기록 (기본값 4)
       
     [return]
-      
+      dataFrame
     """
     
     # 원본 데이터를 훼손하지 않기 위해 복사본 생성
@@ -47,6 +48,7 @@ def interpolate_coordinates(df, max_gap=4):
     
     return result_df, long_missing_flags
 
+
 # 이상치 -> 스무딩 필터 적용
 def apply_smoothing_filter(df, window_length=7, polyorder=2):
     """
@@ -59,7 +61,7 @@ def apply_smoothing_filter(df, window_length=7, polyorder=2):
       polyorder: 다항식 차수 (기본값 2. 야구 스윙 궤적에는 2~3이 적당함)
     
     [return]
-      
+      dataFrame
     """
     
     result_df = df.copy()
@@ -88,3 +90,31 @@ def apply_smoothing_filter(df, window_length=7, polyorder=2):
         result_df[col] = savgol_filter(result_df[col], window_length=current_window, polyorder=polyorder)
 
     return result_df
+
+def process_angle_unwrapping(df, angle_col='angle'):
+    """
+    불연속적인 각도(r) 데이터를 연속적인 곡선으로 펼쳐준다.
+    ex) 
+    추출 값 88 -> 89 -> -89 -> -88 
+    보정 값 88 -> 89 -> 91 -> 92
+    
+    [parameter]
+      df : 보정할 데이터프레임
+      angle_col : 각도 저장된 column
+    
+    [return]
+      dataFrame
+    """
+    # YOLO의 r 값이 라디안(Radian) 단위라면 period는 np.pi (180도) 입니다.
+    # 만약 degree(도) 단위라면 period=180 으로 설정해야 합니다.
+    
+    # 1. 결측치가 보간된 각도 배열 가져오기
+    angles = df[angle_col].values
+    
+    # 2. unwrap 적용 (불연속 구간을 이어붙여서 180도, 360도, 720도 이상으로 무한히 확장)
+    unwrapped_angles = np.unwrap(angles, period=np.pi)
+    
+    # 3. 데이터프레임에 덮어쓰기
+    df[angle_col] = unwrapped_angles
+    
+    return df
