@@ -100,13 +100,12 @@ def process_angle_unwrapping(df, angle_col='angle'):
     
     [parameter]
       df : 보정할 데이터프레임
-      angle_col : 각도 저장된 column
+      angle_col : 각도 저장된 column (radian 단위)
     
     [return]
       dataFrame
     """
-    # YOLO의 r 값이 라디안(Radian) 단위라면 period는 np.pi (180도) 입니다.
-    # 만약 degree(도) 단위라면 period=180 으로 설정해야 합니다.
+    # YOLO의 r 값은 Radian 단위 / period는 np.pi (180도)
     
     # 1. 결측치가 보간된 각도 배열 가져오기
     angles = df[angle_col].values

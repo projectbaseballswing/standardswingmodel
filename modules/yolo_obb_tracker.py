@@ -61,13 +61,13 @@ def track_target_player_and_bat(video_path, model, player_cls=2, bat_cls=0):
                 
                 cx, cy, w, h, _ = result.obb.xywhr[i].cpu().numpy()
                 
-                # Player는 xyxy(4개) Bat은 xyxyxyxy(8개) 좌표
+                # Player는 xyxy(4개) Bat은 xywhr(5개) 좌표
                 if cls_id == player_cls:
                     # Player: ROI를 위해 수평/수직을 유지하는 외곽 박스 좌표 사용 (xmin, ymin, xmax, ymax)
                     coords = result.obb.xyxy[i].cpu().numpy().flatten().tolist()
                 elif cls_id == bat_cls:
-                    # Bat: 기울기 확인을 위해 8개 꼭짓점 좌표 유지
-                    coords = result.obb.xyxyxyxy[i].cpu().numpy().flatten().tolist()
+                    # Bat: 기울기 확인을 위해 각도가 포함된 좌표 사용 (centerx, centery, width, height, radian)
+                    coords = result.obb.xywhr[i].cpu().numpy().flatten().tolist()
                 
                 tracking_data.append({
                     'frame': frame_idx,
@@ -144,11 +144,11 @@ def track_target_player_and_bat(video_path, model, player_cls=2, bat_cls=0):
     if target_bat_id is not None:
         target_b_df = df_bats[df_bats['track_id'] == target_bat_id][['frame', 'coords']]
         merged_b_df = pd.merge(base_df, target_b_df, on='frame', how='left')
-        b_coords_list = [c if isinstance(c, list) else [np.nan] * 8 for c in merged_b_df['coords']]
+        b_coords_list = [c if isinstance(c, list) else [np.nan] * 5 for c in merged_b_df['coords']]
     else:
-        b_coords_list = [[np.nan] * 8 for _ in range(len(base_df))]
+        b_coords_list = [[np.nan] * 5 for _ in range(len(base_df))]
         
-    b_cols = ['x1', 'y1', 'x2', 'y2', 'x3', 'y3', 'x4', 'y4']
+    b_cols = ['centerx', 'centery', 'width', 'height', 'angle']
     final_bat_df = pd.concat([base_df, pd.DataFrame(b_coords_list, columns=b_cols)], axis=1)
 
     print("모든 처리 완료")
