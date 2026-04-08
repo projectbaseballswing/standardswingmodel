@@ -107,16 +107,22 @@ def process_angle_unwrapping(df, angle_col='angle'):
     """
     # YOLO의 r 값은 Radian 단위 / period는 np.pi (180도)
     
-    # 1. 결측치가 보간된 각도 배열 가져오기
-    angles = df[angle_col].values
+    result_df = df.copy()
     
-    # 2. unwrap 적용 (불연속 구간을 이어붙여서 180도, 360도, 720도 이상으로 무한히 확장)
-    unwrapped_angles = np.unwrap(angles, period=np.pi)
+    # 1. 값이 존재하는(NaN이 아닌) 행의 인덱스와 데이터만 추출
+    valid_mask = result_df[angle_col].notna()
+    valid_angles = result_df.loc[valid_mask, angle_col].values
     
-    # 3. 데이터프레임에 덮어쓰기
-    df[angle_col] = unwrapped_angles
+    if len(valid_angles) == 0:
+        return result_df
+        
+    # 2. 정상 각도들에 대해서만 Unwrap 수행
+    unwrapped_valid_angles = np.unwrap(valid_angles, period=np.pi)
     
-    return df
+    # 3. 쫙 펴진 각도를 원래 자리에 덮어쓰기 (NaN 자리는 그대로 NaN 유지됨)
+    result_df.loc[valid_mask, angle_col] = unwrapped_valid_angles
+    
+    return result_df
 
 def enforce_bbox_boundaries(df, img_width, img_height):
     """
