@@ -117,3 +117,34 @@ def process_angle_unwrapping(df, angle_col='angle'):
     df[angle_col] = unwrapped_angles
     
     return df
+
+def enforce_bbox_boundaries(df, img_width, img_height):
+    """
+    스무딩 처리된 바운딩 박스(xyxy) 좌표가 
+    영상 화면 밖으로 나가거나 역전(min > max)되는 현상 방지
+    
+    [parameter]
+      df: Player의 좌표 데이터프레임 (xmin, ymin, xmax, ymax 포함)
+      img_width: 영상의 가로 픽셀 크기
+      img_height: 영상의 세로 픽셀 크기
+    [return]
+      dataFrame
+    """
+    # 원본 데이터를 훼손하지 않기 위해 복사본 생성
+    result_df = df.copy()
+    
+    # 데이터가 비어있거나 필수 컬럼이 없으면 그대로 반환
+    required_cols = ['xmin', 'ymin', 'xmax', 'ymax']
+    if result_df.empty or not all(col in result_df.columns for col in required_cols):
+        return result_df
+
+    # 1. 화면 밖으로 나가는 좌표 방지 (Clipping)
+    result_df[['xmin', 'xmax']] = result_df[['xmin', 'xmax']].clip(0, img_width)
+    result_df[['ymin', 'ymax']] = result_df[['ymin', 'ymax']].clip(0, img_height)
+
+    # 2. 좌표 역전 방지 (xmin이 xmax 이상이 되지 않도록 강제 조정)
+    # 최소한 1픽셀의 너비와 높이는 유지하도록 처리
+    result_df['xmin'] = np.minimum(result_df['xmin'], result_df['xmax'] - 1)
+    result_df['ymin'] = np.minimum(result_df['ymin'], result_df['ymax'] - 1)
+
+    return result_df
