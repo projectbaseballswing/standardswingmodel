@@ -13,7 +13,7 @@ def interpolate_coordinates(df, max_gap=4):
       max_gap: 이 프레임 수 이상 연속 결측 시 플래그에 기록 (기본값 4)
       
     [return]
-      dataFrame
+      dataFrame, array
     """
     
     # 원본 데이터를 훼손하지 않기 위해 복사본 생성
@@ -91,9 +91,11 @@ def apply_smoothing_filter(df, window_length=7, polyorder=2):
 
     return result_df
 
-def process_angle_unwrapping(df, angle_col='angle'):
+def process_angle_unwrapping(df, angle_col='angle', width_col='width', height_col='height'):
     """
-    불연속적인 각도(r) 데이터를 연속적인 곡선으로 펼쳐준다.
+    불연속적인 각도(r) 데이터를 연속적인 곡선으로 펼쳐주고, 배트 길이를 반영해 각도를 보정한다.
+    (yolo obb model은 0-90도의 각도만 인식하기 때문)
+    
     ex) 
     추출 값 88 -> 89 -> -89 -> -88 
     보정 값 88 -> 89 -> 91 -> 92
@@ -109,17 +111,34 @@ def process_angle_unwrapping(df, angle_col='angle'):
     
     result_df = df.copy()
     
-    # 1. 값이 존재하는(NaN이 아닌) 행의 인덱스와 데이터만 추출
-    valid_mask = result_df[angle_col].notna()
-    valid_angles = result_df.loc[valid_mask, angle_col].values
+    # 1. 값이 존재하는(NaN이 아닌) 유효한 데이터 마스크 추출
+    valid_mask = result_df[angle_col].notna() & result_df[width_col].notna() & result_df[height_col].notna()
     
-    if len(valid_angles) == 0:
+    if not valid_mask.any():
         return result_df
         
-    # 2. 정상 각도들에 대해서만 Unwrap 수행
+    # 장축/단축 보정 (Axis Alignment)
+    # 배트는 항상 height보다 width가 큼 -> width가 긴 쪽이 되도록 각도 통일
+    swap_mask = valid_mask & (result_df[width_col] < result_df[height_col])
+    
+    if swap_mask.any():
+        # 1) 각도에 90도(pi/2)를 더해서 장축 기준으로 돌려줌
+        result_df.loc[swap_mask, angle_col] += (np.pi / 2)
+        
+        # 2) w와 h의 값을 서로 맞바꿈
+        temp_w = result_df.loc[swap_mask, width_col].copy()
+        result_df.loc[swap_mask, width_col] = result_df.loc[swap_mask, height_col]
+        result_df.loc[swap_mask, height_col] = temp_w
+        
+    # 3) 90도를 더하면서 기존 범위를 벗어난 값들을 다시 -90도 ~ 90도(-pi/2 ~ pi/2) 안으로 정규화
+    result_df.loc[valid_mask, angle_col] = (result_df.loc[valid_mask, angle_col] + np.pi / 2) % np.pi - np.pi / 2
+
+    # 언래핑 (Unwrapping)
+    # 4. 축이 모두 통일된 정상 각도들에 대해서만 Unwrap 수행
+    valid_angles = result_df.loc[valid_mask, angle_col].values
     unwrapped_valid_angles = np.unwrap(valid_angles, period=np.pi)
     
-    # 3. 쫙 펴진 각도를 원래 자리에 덮어쓰기 (NaN 자리는 그대로 NaN 유지됨)
+    # 5. 쫙 펴진 각도를 원래 자리에 덮어쓰기
     result_df.loc[valid_mask, angle_col] = unwrapped_valid_angles
     
     return result_df
