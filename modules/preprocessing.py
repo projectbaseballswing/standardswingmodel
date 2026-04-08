@@ -91,7 +91,7 @@ def apply_smoothing_filter(df, window_length=7, polyorder=2):
 
     return result_df
 
-def process_angle_unwrapping(df, angle_col='angle', width_col='width', height_col='height'):
+def process_angle_unwrapping(df, angle_col='r', width_col='w', height_col='h'):
     """
     불연속적인 각도(r) 데이터를 연속적인 곡선으로 펼쳐주고, 배트 길이를 반영해 각도를 보정한다.
     (yolo obb model은 0-90도의 각도만 인식하기 때문)
@@ -173,3 +173,42 @@ def enforce_bbox_boundaries(df, img_width, img_height):
     result_df['ymin'] = np.minimum(result_df['ymin'], result_df['ymax'] - 1)
 
     return result_df
+
+def preprocess_player(player_df, video_w, video_h):
+    '''
+    Player 좌표 데이터 전처리 프로세스
+    결측치 보정 -> 이상치 보정 -> 뒤틀림 및 영역 벗어남 보정 -> df to np
+    
+    [parameter]
+      player_df : yolo model로 추출된 player 좌표 데이터
+      video_w, video_h : 영상 크기
+      
+    [return]
+      player_np : 전처리 완료된 numpy
+      p_flags : 결측값이 발견된 프레임 목록
+    '''
+    player_interp, p_flags = interpolate_coordinates(player_df)
+    player_smooth = apply_smoothing_filter(player_interp, window_length=7, polyorder=2)
+    
+    final_player_df = enforce_bbox_boundaries(player_smooth, video_w, video_h)
+    player_np = final_player_df.to_numpy()[:,1:]
+    
+    return player_np, p_flags
+
+def preprocess_bat(bat_df):
+    '''
+    Bat 좌표 데이터 전처리 프로세스
+    각도 언래핑(0~90도를 연속값으로 보정) -> 결측치 보정 -> 이상치 보정 -> df to np
+    
+    [parameter]
+      bat_df : yolo model로 추출된 bat 좌표 데이터
+      
+    [return]
+      bat_np : 전처리 완료된 numpy
+    '''
+    bat_unwrap = process_angle_unwrapping(bat_df)
+    bat_interp, b_flags = interpolate_coordinates(bat_unwrap) 
+    final_bat_df = apply_smoothing_filter(bat_interp, window_length=7, polyorder=3)  
+    bat_np = final_bat_df.to_numpy()[:,1:]
+    
+    return bat_np
