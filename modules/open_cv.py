@@ -1,6 +1,7 @@
-from utils.video_roi_left import read_video, process_roi, unify_left_all
-from utils.features_add import make_features_single_video
-from utils.yolo_preprocessing import max_consecutive_none, max_consecutive_none_middle, should_discard, fill_remaining_none
+import cv2
+from modules.utils.video_roi_left import read_video, process_roi, unify_left_all
+from modules.utils.features_add import make_features_single_video
+from modules.utils.yolo_preprocessing import max_consecutive_none, max_consecutive_none_middle, should_discard, fill_remaining_none
 
 
 # video_path: 비디오 한 개의 경로, yolo_model: 욜로 모델, metadata: 좌우유무 파일
@@ -188,6 +189,6 @@ yolo_model = ""
 save_dir = 'output_numpy'
 metadata_dict = "metadata.json"
 
-process_all_videos(video_dir, yolo_model, save_dir, metadata_dict)
+# process_all_videos(video_dir, yolo_model, save_dir, metadata_dict)
 
 
