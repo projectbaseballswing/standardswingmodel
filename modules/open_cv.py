@@ -1,11 +1,20 @@
-from utils.video_roi_left import read_video, process_roi, unify_left_all
-from utils.features_add import make_features_single_video
-from utils.yolo_preprocessing import max_consecutive_none, max_consecutive_none_middle, should_discard, fill_remaining_none
+import cv2
+from modules.utils.video_roi_left import read_video, process_roi, unify_left_all
+from modules.utils.features_add import make_features_single_video
+from modules.utils.yolo_preprocessing import max_consecutive_none, max_consecutive_none_middle, should_discard, fill_remaining_none
+from modules.yolo_obb_tracker import track_target_player_and_bat
+from modules.preprocessing import preprocess_player, preprocess_bat
 
+def get_video_size(video_path):
+    cap = cv2.VideoCapture(video_path)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    
+    return (width, height)
 
 # video_path: 비디오 한 개의 경로, yolo_model: 욜로 모델, metadata: 좌우유무 파일
 def process_video(video_path, yolo_model, is_left=False):
-
     # 비디오 > 프레임 리스트로 바꿈 + fps 같이 반환
     frames, fps = read_video(video_path)
     dt = 1 / fps
@@ -16,26 +25,40 @@ def process_video(video_path, yolo_model, is_left=False):
     # --------------------------------
     # --------------------------------
     # !! yolo_inference 이 부분 구현 !! > 바뀐 부분
-    person_bboxes= yolo_inference(yolo_model, frames)
-
+    extracted_data = track_target_player_and_bat(yolo_model, frames)
 
     # 반환된게 아무것도 없을 때 none반환: bat_angles은 bat_bboxes 퍄생이기 때문에 bat_bboxes만 체크
-    if person_bboxes is None:
-      print('반환되는 값이 없습니다.')
-      return None
+    if extracted_data["player"] is None:
+        print("Target Not Found")
+        return None, None
+    
+    # Player 전처리
+    # 결측치 보정 -> 이상치 보정 -> 뒤틀림 및 영역 벗어남 보정 -> df to np
+    player_df = extracted_data["player"]
+    player_np, is_max_gap_exceeded = preprocess_player(player_df, W, H)
+    
+    # Bat 전처리
+    # 각도 언래핑(0~90도를 연속값으로 보정) -> 결측치 보정 -> 이상치 보정 -> df to np
+    bat_df = extracted_data["bat"]
+    bat_np = preprocess_bat(bat_df)
+
+    '''
+    [ 여기까지 진행했을 때 변수 목록 ]
+    player_np : player xyxy 데이터 (numpy) [xmin, ymin, xmax, ymax]
+    is_max_gap_exceeded : player의 결측 프레임이 연속 5 이상인지 여부 (boolean)
+    bat_np : bat xywhr 데이터 (numpy) [cx, cy, w, h, r]
+    '''
 
     # YOLO 결과 결측 검증 > 프레임이 5개 이상 연속으로 결측치가 있으면 영상 안씀
-    if should_discard(person_bboxes, max_allowed_gap=5):
+    if is_max_gap_exceeded:
         print('person_bboxes의 결측치가 많습니다.')
-        return None
+        return None, None
 
-    # 남은 앞, 뒤프레임 결측 채우기: fill 해서 사용
-    person_bboxes = fill_remaining_none(person_bboxes)
-
+    return player_np, bat_np
 
     # --------------------------------
     # --------------------------------
-    # roi 클립
+    roi 클립
     roi_frames = []
     roi_infos = []
 
@@ -188,6 +211,6 @@ yolo_model = ""
 save_dir = 'output_numpy'
 metadata_dict = "metadata.json"
 
-process_all_videos(video_dir, yolo_model, save_dir, metadata_dict)
+# process_all_videos(video_dir, yolo_model, save_dir, metadata_dict)
 
 

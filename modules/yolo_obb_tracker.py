@@ -18,14 +18,14 @@ def score_weight(p_area, min_bat_dist, center_dist,
     '''
     return (p_area * area_weight) - (min_bat_dist * bat_dist_weight) - (center_dist * center_dist_weight)
 
-def track_target_player_and_bat(video_path, model, player_cls=2, bat_cls=0):
+def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
     '''
     영상에서 각 타자와 배트를 추적하고 
     가중치로 평가해 점수가 가장 높은 객체를 타겟으로 설정한다.
     
     [parameter]
-      video_path : 분석하고자 하는 영상 경로
       model : custom-yolo-obb-model
+      frames : 분석하고자 하는 영상의 프레임 목록
       player_cls : model에 학습되어있는 player class
       bat_cls : model에 학습되어있는 bat class
     
@@ -38,19 +38,23 @@ def track_target_player_and_bat(video_path, model, player_cls=2, bat_cls=0):
     
     # 전체 영상 객체 추적 및 데이터 수집
     print("[1] 전체 영상 객체 추적 및 데이터 수집 시작")
-    cap = cv2.VideoCapture(video_path)
+    # cap = cv2.VideoCapture(video_path)
     
-    img_width, img_height = int(cap.get(3)), int(cap.get(4))
-    image_center = (img_width / 2, img_height / 2)
+    height, width, _ = frames[0].shape
+    image_center = (width / 2, height / 2)
     
     tracking_data = []
     frame_idx = 0
+    frames_length = len(frames)
     
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret: break
-        frame_idx += 1
+    while frame_idx < frames_length:
+        frame = frames[frame_idx]
         
+        if frame_idx == 0:
+            # persist=True는 분석한 프레임 정보를 저장해 다음 분석 시 동일한 객체인지 판별하는데 사용된다.
+            # 따라서 새 영상을 분석할 때 이전 영상의 기억을 지워줘야 함 -> 첫 프레임에서 persist=False를 돌리고 시작
+            model.track(frame, conf=0.1, persist=False, verbose=False)
+            
         results = model.track(frame, conf=0.1, persist=True, verbose=False)
         result = results[0]
         
@@ -61,13 +65,13 @@ def track_target_player_and_bat(video_path, model, player_cls=2, bat_cls=0):
                 
                 cx, cy, w, h, _ = result.obb.xywhr[i].cpu().numpy()
                 
-                # Player는 xyxy(4개) Bat은 xyxyxyxy(8개) 좌표
+                # Player는 xyxy(4개) Bat은 xywhr(5개) 좌표
                 if cls_id == player_cls:
                     # Player: ROI를 위해 수평/수직을 유지하는 외곽 박스 좌표 사용 (xmin, ymin, xmax, ymax)
                     coords = result.obb.xyxy[i].cpu().numpy().flatten().tolist()
                 elif cls_id == bat_cls:
-                    # Bat: 기울기 확인을 위해 8개 꼭짓점 좌표 유지
-                    coords = result.obb.xyxyxyxy[i].cpu().numpy().flatten().tolist()
+                    # Bat: 기울기 확인을 위해 각도가 포함된 좌표 사용 (centerx, centery, width, height, radian)
+                    coords = result.obb.xywhr[i].cpu().numpy().flatten().tolist()
                 
                 tracking_data.append({
                     'frame': frame_idx,
@@ -76,7 +80,7 @@ def track_target_player_and_bat(video_path, model, player_cls=2, bat_cls=0):
                     'cx': cx, 'cy': cy, 'area': w * h,
                     'coords': coords
                 })
-    cap.release()
+        frame_idx += 1
     
     df = pd.DataFrame(tracking_data)
     if df.empty:
@@ -100,7 +104,7 @@ def track_target_player_and_bat(video_path, model, player_cls=2, bat_cls=0):
             p_cx, p_cy, p_area = p_row['cx'], p_row['cy'], p_row['area']
             
             b_in_frame = df_bats[df_bats['frame'] == f_idx]
-            min_bat_dist = img_width
+            min_bat_dist = width
             closest_bat_id = None
             
             if not b_in_frame.empty:
@@ -144,11 +148,11 @@ def track_target_player_and_bat(video_path, model, player_cls=2, bat_cls=0):
     if target_bat_id is not None:
         target_b_df = df_bats[df_bats['track_id'] == target_bat_id][['frame', 'coords']]
         merged_b_df = pd.merge(base_df, target_b_df, on='frame', how='left')
-        b_coords_list = [c if isinstance(c, list) else [np.nan] * 8 for c in merged_b_df['coords']]
+        b_coords_list = [c if isinstance(c, list) else [np.nan] * 5 for c in merged_b_df['coords']]
     else:
-        b_coords_list = [[np.nan] * 8 for _ in range(len(base_df))]
+        b_coords_list = [[np.nan] * 5 for _ in range(len(base_df))]
         
-    b_cols = ['x1', 'y1', 'x2', 'y2', 'x3', 'y3', 'x4', 'y4']
+    b_cols = ['cx', 'cy', 'w', 'h', 'r']
     final_bat_df = pd.concat([base_df, pd.DataFrame(b_coords_list, columns=b_cols)], axis=1)
 
     print("모든 처리 완료")
