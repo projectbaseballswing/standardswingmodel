@@ -3,17 +3,19 @@ import pandas as pd
 from scipy.signal import savgol_filter
 
 # 결측값 -> 선형 보간
-def interpolate_coordinates(df, max_gap=4):
+# 결측값 -> 선형 보간
+def interpolate_coordinates(df, max_gap=5):
     """
     좌표 데이터프레임의 결측치를 선형 보간하고, 
-    지정된 길이 이상의 연속된 결측 구간 프레임 번호를 반환한다.
+    지정된 길이 이상의 연속된 결측 구간이 존재하는지 여부를 반환한다.
     
     [parameter]
       df: 보간할 데이터프레임 (Player 또는 Bat)
       max_gap: 이 프레임 수 이상 연속 결측 시 플래그에 기록 (기본값 4)
       
     [return]
-      dataFrame, array
+      result_df (dataFrame)
+      is_max_gap_exceeded (boolean) : 연속된 결측 프레임이 임계값 이상 발견될 경우 true
     """
     
     # 원본 데이터를 훼손하지 않기 위해 복사본 생성
@@ -22,9 +24,9 @@ def interpolate_coordinates(df, max_gap=4):
     # 'frame' 컬럼을 제외한 나머지 좌표 컬럼 이름만 추출 (xmin, ymin... 또는 x1, y1...)
     coord_cols = [col for col in result_df.columns if col != 'frame']
     
-    # 데이터가 아예 없는 경우 그대로 반환
+    # 데이터가 아예 없는 경우 반환
     if result_df.empty or len(coord_cols) == 0:
-        return result_df, []
+        return None, False
 
     # 1. 긴 결측 구간 찾기 (플래그용)
     # 첫 번째 좌표 컬럼(예: xmin 또는 x1)을 기준으로 결측 여부(NaN) 확인
@@ -34,19 +36,21 @@ def interpolate_coordinates(df, max_gap=4):
     # 연속된 결측 구간을 그룹화
     na_groups = (is_na != is_na.shift()).cumsum()
     
-    long_missing_flags = []
+    is_max_gap_exceeded = False
+    
     # 결측치(True)인 그룹들만 모아서 검사
     for _, group in result_df[is_na].groupby(na_groups):
         if len(group) >= max_gap:
-            # max_gap 이상 연속 결측된 프레임 번호들을 리스트에 추가
-            long_missing_flags.extend(group['frame'].tolist())
+            # 연속 결측 프레임이 임계값 이상 발견되면 True
+            is_max_gap_exceeded = True
+            break
             
     # 2. 선형 보간 수행
     # method='linear': 점과 점 사이를 직선으로 채움
     # limit_direction='both': 영상의 맨 처음이나 맨 끝에 결측이 있어도 채워줌
     result_df[coord_cols] = result_df[coord_cols].interpolate(method='linear', limit_direction='both')
     
-    return result_df, long_missing_flags
+    return result_df, is_max_gap_exceeded
 
 
 # 이상치 -> 스무딩 필터 적용
@@ -174,26 +178,26 @@ def enforce_bbox_boundaries(df, img_width, img_height):
 
     return result_df
 
-def preprocess_player(player_df, video_w, video_h):
+def preprocess_player(player_df, img_width, img_height):
     '''
     Player 좌표 데이터 전처리 프로세스
     결측치 보정 -> 이상치 보정 -> 뒤틀림 및 영역 벗어남 보정 -> df to np
     
     [parameter]
       player_df : yolo model로 추출된 player 좌표 데이터
-      video_w, video_h : 영상 크기
+      img_width, img_height : 영상 크기
       
     [return]
       player_np : 전처리 완료된 numpy
-      p_flags : 결측값이 발견된 프레임 목록
+      is_max_gap_exceeded : 연속된 결측 프레임이 임계값 이상 발견될 경우
     '''
-    player_interp, p_flags = interpolate_coordinates(player_df)
+    player_interp, is_max_gap_exceeded = interpolate_coordinates(player_df)
     player_smooth = apply_smoothing_filter(player_interp, window_length=7, polyorder=2)
     
-    final_player_df = enforce_bbox_boundaries(player_smooth, video_w, video_h)
+    final_player_df = enforce_bbox_boundaries(player_smooth, img_width, img_height)
     player_np = final_player_df.to_numpy()[:,1:]
     
-    return player_np, p_flags
+    return player_np, is_max_gap_exceeded
 
 def preprocess_bat(bat_df):
     '''
