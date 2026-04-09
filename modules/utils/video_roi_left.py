@@ -1,3 +1,6 @@
+import cv2
+import numpy as np
+
 # read_video / process_roi / unify_left_all
 
 ################################################################
@@ -5,7 +8,6 @@
 ################################################################
 
 # 영상 읽기
-
 def read_video(video_path):
     cap = cv2.VideoCapture(video_path)
 
