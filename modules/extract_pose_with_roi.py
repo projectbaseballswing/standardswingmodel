@@ -19,8 +19,6 @@ from scipy.signal import savgol_filter
 # =========================
 
 
-MODEL_PATH = r"./reference_swing/models/pose_landmarker.task"
-
 # Landmark is considered missing if visibility is below this threshold or non-finite.
 
 VISIBILITY_TH = 0.45   
@@ -202,52 +200,52 @@ def _empty_row(frame_idx: int) -> Dict[str, float]:
 
 
 def _extract_raw_dataframe(
+    landmarker,
     roi_frames: List[np.ndarray],
     roi_infos: List[Optional[dict]],
     fps: float,
 ) -> pd.DataFrame:
     rows = []
-    with create_landmarker(MODEL_PATH) as landmarker:
-        for frame_idx, (frame, roi_info) in enumerate(zip(roi_frames, roi_infos)):
-            if frame is None or roi_info is None:
-                rows.append(_empty_row(frame_idx))
-                continue
+    for frame_idx, (frame, roi_info) in enumerate(zip(roi_frames, roi_infos)):
+        if frame is None or roi_info is None:
+            rows.append(_empty_row(frame_idx))
+            continue
 
-            height, width = frame.shape[:2]
-            timestamp_ms = int((frame_idx / fps) * 1000) if fps > 0 else frame_idx * 33
+        height, width = frame.shape[:2]
+        timestamp_ms = int((frame_idx / fps) * 1000) if fps > 0 else frame_idx * 33
 
-            mp_image = mp.Image(
-                image_format=mp.ImageFormat.SRGB,
-                data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
-            )
-            result = landmarker.detect_for_video(mp_image, timestamp_ms)
+        mp_image = mp.Image(
+            image_format=mp.ImageFormat.SRGB,
+            data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
+        )
+        result = landmarker.detect_for_video(mp_image, timestamp_ms)
 
-            row = {
-                "frame_idx": frame_idx,
-                "pose_detected": int(len(result.pose_landmarks) > 0),
-                "frame_width": width,
-                "frame_height": height,
-            }
-            
-            # 포즈가 검출되지 않으면 해당 프레임의 모든 핵심 관절 값을 NaN으로 채운다.
-            if len(result.pose_landmarks) == 0:
-                for joint_name in CORE_JOINTS.keys():
-                    for suffix in ["_x", "_y", "_z", "_visibility", "_presence"]:
-                        row[f"{joint_name}{suffix}"] = np.nan
-                rows.append(row)
-                continue
-
-            landmarks = result.pose_landmarks[0]
-            for joint_name, joint_idx in CORE_JOINTS.items():
-                lm = landmarks[joint_idx]
-                # mediapipe의 x, y는 프레임의 normalized 좌표이므로 ROI frame 크기를 곱해 픽셀 좌표로 변환한다
-                row[f"{joint_name}_x"] = float(lm.x * width)
-                row[f"{joint_name}_y"] = float(lm.y * height)
-                row[f"{joint_name}_z"] = float(lm.z)
-                row[f"{joint_name}_visibility"] = float(getattr(lm, "visibility", np.nan))
-                row[f"{joint_name}_presence"] = float(getattr(lm, "presence", np.nan)) if hasattr(lm, "presence") else np.nan
-
+        row = {
+            "frame_idx": frame_idx,
+            "pose_detected": int(len(result.pose_landmarks) > 0),
+            "frame_width": width,
+            "frame_height": height,
+        }
+        
+        # 포즈가 검출되지 않으면 해당 프레임의 모든 핵심 관절 값을 NaN으로 채운다.
+        if len(result.pose_landmarks) == 0:
+            for joint_name in CORE_JOINTS.keys():
+                for suffix in ["_x", "_y", "_z", "_visibility", "_presence"]:
+                    row[f"{joint_name}{suffix}"] = np.nan
             rows.append(row)
+            continue
+
+        landmarks = result.pose_landmarks[0]
+        for joint_name, joint_idx in CORE_JOINTS.items():
+            lm = landmarks[joint_idx]
+            # mediapipe의 x, y는 프레임의 normalized 좌표이므로 ROI frame 크기를 곱해 픽셀 좌표로 변환한다
+            row[f"{joint_name}_x"] = float(lm.x * width)
+            row[f"{joint_name}_y"] = float(lm.y * height)
+            row[f"{joint_name}_z"] = float(lm.z)
+            row[f"{joint_name}_visibility"] = float(getattr(lm, "visibility", np.nan))
+            row[f"{joint_name}_presence"] = float(getattr(lm, "presence", np.nan)) if hasattr(lm, "presence") else np.nan
+
+        rows.append(row)
 
     return pd.DataFrame(rows)
 
@@ -563,7 +561,8 @@ def extract_pose_with_roi(
     if len(roi_frames) != len(roi_infos):
         raise ValueError("roi_frames와 roi_infos의 길이가 같아야 합니다.")
 
-    raw_df = _extract_raw_dataframe(roi_frames, roi_infos, fps)
+    with create_landmarker(MODEL_PATH) as landmarker :
+        raw_df = _extract_raw_dataframe(landmarker, roi_frames, roi_infos, fps)
     pre_df = _apply_preprocessing(raw_df, fps)
     if pre_df is None:
         return None
