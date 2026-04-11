@@ -4,6 +4,7 @@ from modules.utils.features_add import make_features_single_video
 from modules.utils.yolo_preprocessing import max_consecutive_none, max_consecutive_none_middle, should_discard, fill_remaining_none
 from modules.yolo_obb_tracker import track_target_player_and_bat
 from modules.preprocessing import preprocess_player, preprocess_bat
+from modules.extract_pose_with_roi import extract_pose_with_roi
 
 def get_video_size(video_path):
     cap = cv2.VideoCapture(video_path)
