@@ -1,5 +1,5 @@
 import cv2
-from modules.utils.video_roi_left import read_video, process_roi, unify_left_all
+from modules.utils.video_roi_left import read_video, process_roi, unify_left_all, normalize_landmarks_sequence
 from modules.utils.features_add import make_features_single_video
 from modules.utils.yolo_preprocessing import max_consecutive_none, max_consecutive_none_middle, should_discard, fill_remaining_none
 from modules.yolo_obb_tracker import track_target_player_and_bat
@@ -59,7 +59,7 @@ def process_video(video_path, yolo_model, is_left=False):
 
     # --------------------------------
     # --------------------------------
-    roi 클립
+    # roi 클립
     roi_frames = []
     roi_infos = []
 
@@ -93,7 +93,8 @@ def process_video(video_path, yolo_model, is_left=False):
     bat_positions = []
     bat_angles = []
 
-    bat_positions, bat_angles = detect_bat_with_wrist(frames, wrist_landmarks, yolo_model)
+    # visibility 추가로 받음: 넘파이 형태 
+    bat_positions, bat_angles, visibility  = detect_bat_with_wrist(frames, wrist_landmarks, yolo_model)
 
     if should_discard(bat_positions, max_allowed_gap=5):
         print('bat 검출 실패 많음')
@@ -112,11 +113,12 @@ def process_video(video_path, yolo_model, is_left=False):
         )
         
     # 정규화 코드 추가 
+    all_landmarks_final = normalize_landmarks_sequence(all_landmarks, visibility)
 
     # 최종 피처는 [x1 y1 z1 x2 y2 z2...]... 형태로 나옴
     # 임팩트 부분을 기준으로 프레임 정렬(프레임 개수 맞추기) + 남은 피처 추가
     # 구현
-    final_data = make_features_single_video(all_landmarks, bat_angles, bat_positions, dt)
+    final_data = make_features_single_video(all_landmarks_final, bat_angles, bat_positions, dt)
 
     return final_data
 
@@ -213,5 +215,4 @@ save_dir = 'output_numpy'
 metadata_dict = "metadata.json"
 
 # process_all_videos(video_dir, yolo_model, save_dir, metadata_dict)
-
 
