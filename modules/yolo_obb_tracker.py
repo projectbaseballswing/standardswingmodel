@@ -64,7 +64,6 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
                 track_id = int(result.obb.id[i].item())
                 
                 cx, cy, w, h, _ = result.obb.xywhr[i].cpu().numpy()
-                
                 # Player는 xyxy(4개) Bat은 xywhr(5개) 좌표
                 if cls_id == player_cls:
                     # Player: ROI를 위해 수평/수직을 유지하는 외곽 박스 좌표 사용 (xmin, ymin, xmax, ymax)
@@ -72,6 +71,8 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
                 elif cls_id == bat_cls:
                     # Bat: 기울기 확인을 위해 각도가 포함된 좌표 사용 (centerx, centery, width, height, radian)
                     coords = result.obb.xywhr[i].cpu().numpy().flatten().tolist()
+                else:
+                    continue
                 
                 tracking_data.append({
                     'frame': frame_idx,
@@ -90,6 +91,10 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
     print("[2] 글로벌 스코어링 진행")
     df_players = df[df['class_id'] == player_cls]
     df_bats = df[df['class_id'] == bat_cls]
+    
+    if df_players.empty: 
+        print("Player Not Found")
+        return None
     
     score_board = {}
     player_associated_bats = {} 
@@ -149,12 +154,12 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
         target_b_df = df_bats[df_bats['track_id'] == target_bat_id][['frame', 'coords']]
         merged_b_df = pd.merge(base_df, target_b_df, on='frame', how='left')
         b_coords_list = [c if isinstance(c, list) else [np.nan] * 5 for c in merged_b_df['coords']]
+        b_cols = ['cx', 'cy', 'w', 'h', 'r']
+        final_bat_df = pd.concat([base_df, pd.DataFrame(b_coords_list, columns=b_cols)], axis=1)
     else:
-        b_coords_list = [[np.nan] * 5 for _ in range(len(base_df))]
+        print("경고: 타겟 배트가 감지되지 않았습니다.")
+        final_bat_df = None
         
-    b_cols = ['cx', 'cy', 'w', 'h', 'r']
-    final_bat_df = pd.concat([base_df, pd.DataFrame(b_coords_list, columns=b_cols)], axis=1)
-
     print("모든 처리 완료")
     
     # 4. 딕셔너리로 묶어서 반환
