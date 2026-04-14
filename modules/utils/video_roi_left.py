@@ -50,14 +50,19 @@ def process_roi(frame, bbox, target_size=256, pad=20):
 
     #############################################
     # bbox좌표: yolo가 어떤걸주느냐에 따라 바뀔 부분
-    x1, y1, x2, y2 = bbox
 
     # 1. bbox에 padding 추가
     # 사람 주변 여유 공간 확보: 팔/배트 잘리는 문제 방지
-    x1 = int(x1 - pad)
-    y1 = int(y1 - pad)
-    x2 = int(x2 + pad)
-    y2 = int(y2 + pad)
+    bbox = np.array(bbox).reshape(-1)
+    
+    xyxy = bbox.copy() 
+    
+    xyxy[[0, 1]] -= pad  
+    xyxy[[2, 3]] += pad
+    
+    xyxy = xyxy.astype(int)
+    
+    x1, y1, x2, y2 = xyxy
 
     # 2. 이미지 밖으로 나간 좌표를 다시 안으로 넣음
     x1 = max(0, x1)

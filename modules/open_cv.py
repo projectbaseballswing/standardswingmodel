@@ -55,7 +55,6 @@ def process_video(video_path, yolo_model, is_left=False):
         print('person_bboxes의 결측치가 많습니다.')
         return None, None
 
-    return player_np, bat_np
 
     # --------------------------------
     # --------------------------------
@@ -67,10 +66,10 @@ def process_video(video_path, yolo_model, is_left=False):
     for i in range(len(frames)):
 
         frame = frames[i]
-        person_bbox = person_bboxes[i]
+        person_bbox = player_np[i]
 
         # 구현
-        roi, roi_info = process_roi(frame, person_bbox, target_size=256, pad=20)
+        roi, roi_info = process_roi(frame, player_np[i], target_size=256, pad=20)
 
         roi_frames.append(roi)
         roi_infos.append(roi_info)
