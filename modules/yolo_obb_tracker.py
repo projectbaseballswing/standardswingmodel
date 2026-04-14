@@ -55,7 +55,7 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
     while frame_idx < frames_length:
         frame = frames[frame_idx]
             
-        results = model.track(frame, conf=0.1, persist=True, verbose=False)
+        results = model.track(frame, conf=0.01, persist=True, imgsz=1280, verbose=False)
         result = results[0]
         
         if result.obb is not None and result.obb.id is not None:
