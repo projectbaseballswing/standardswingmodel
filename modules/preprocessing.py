@@ -3,19 +3,17 @@ import pandas as pd
 from scipy.signal import savgol_filter
 
 # 결측값 -> 선형 보간
-# 결측값 -> 선형 보간
-def interpolate_coordinates(df, max_gap=5):
+def interpolate_coordinates(df):
     """
     좌표 데이터프레임의 결측치를 선형 보간하고, 
     지정된 길이 이상의 연속된 결측 구간이 존재하는지 여부를 반환한다.
     
     [parameter]
       df: 보간할 데이터프레임 (Player 또는 Bat)
-      max_gap: 이 프레임 수 이상 연속 결측 시 플래그에 기록 (기본값 4)
       
     [return]
       result_df (dataFrame)
-      is_max_gap_exceeded (boolean) : 연속된 결측 프레임이 임계값 이상 발견될 경우 true
+      max_missing_gap (int) : 결측치가 연속된 최대 프레임 수
     """
     
     # 원본 데이터를 훼손하지 않기 위해 복사본 생성
@@ -26,32 +24,23 @@ def interpolate_coordinates(df, max_gap=5):
     
     # 데이터가 아예 없는 경우 반환
     if result_df.empty or len(coord_cols) == 0:
-        return None, False
+        return None, 0
 
-    # 1. 긴 결측 구간 찾기 (플래그용)
-    # 첫 번째 좌표 컬럼(예: xmin 또는 x1)을 기준으로 결측 여부(NaN) 확인
+    # 1. 연속 결측 프레임(Max Gap) 최대값 계산
     ref_col = coord_cols[0]
-    is_na = result_df[ref_col].isna()
+    is_missing = result_df[ref_col].isna()
     
-    # 연속된 결측 구간을 그룹화
-    na_groups = (is_na != is_na.shift()).cumsum()
-    
-    is_max_gap_exceeded = False
-    
-    # 결측치(True)인 그룹들만 모아서 검사
-    for _, group in result_df[is_na].groupby(na_groups):
-        if len(group) >= max_gap:
-            # 연속 결측 프레임이 임계값 이상 발견되면 True
-            is_max_gap_exceeded = True
-            break
+    if not is_missing.any():
+      max_missing_gap = 0
+    else:
+      max_missing_gap = int(is_missing.groupby((~is_missing).cumsum()).sum().max())
             
     # 2. 선형 보간 수행
     # method='linear': 점과 점 사이를 직선으로 채움
     # limit_direction='both': 영상의 맨 처음이나 맨 끝에 결측이 있어도 채워줌
     result_df[coord_cols] = result_df[coord_cols].interpolate(method='linear', limit_direction='both')
     
-    return result_df, is_max_gap_exceeded
-
+    return result_df, max_missing_gap
 
 # 이상치 -> 스무딩 필터 적용
 def apply_smoothing_filter(df, window_length=7, polyorder=2):
