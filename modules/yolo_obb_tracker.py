@@ -47,13 +47,13 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
     frame_idx = 0
     frames_length = len(frames)
     
+    # 새 영상 분석 시작 전에 이전 추적 기록을 명시적으로 초기화
+    if hasattr(model, 'predictor') and model.predictor is not None and hasattr(model.predictor, 'trackers'):
+        for tracker in model.predictor.trackers:
+            tracker.reset()
+        
     while frame_idx < frames_length:
         frame = frames[frame_idx]
-        
-        if frame_idx == 0:
-            # persist=True는 분석한 프레임 정보를 저장해 다음 분석 시 동일한 객체인지 판별하는데 사용된다.
-            # 따라서 새 영상을 분석할 때 이전 영상의 기억을 지워줘야 함 -> 첫 프레임에서 persist=False를 돌리고 시작
-            model.track(frame, conf=0.1, persist=False, verbose=False)
             
         results = model.track(frame, conf=0.1, persist=True, verbose=False)
         result = results[0]
