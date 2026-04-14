@@ -4,11 +4,11 @@ import pandas as pd
 from ultralytics import YOLO
 
 # 두 좌표의 거리 계산
-def calculate_distance(pt1, pt2):
+def _calculate_distance(pt1, pt2):
     return np.sqrt((pt1[0] - pt2[0])**2 + (pt1[1] - pt2[1])**2)
 
 # Target Player 선정을 위한 가중치 계산
-def score_weight(p_area, min_bat_dist, center_dist, 
+def _score_weight(p_area, min_bat_dist, center_dist, 
                  area_weight=0.5, bat_dist_weight=2.0, center_dist_weight=1.0):
     '''
     target player 선정을 위한 가중치 계산
@@ -114,7 +114,7 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
             
             if not b_in_frame.empty:
                 for _, b_row in b_in_frame.iterrows():
-                    dist = calculate_distance((p_cx, p_cy), (b_row['cx'], b_row['cy']))
+                    dist = _calculate_distance((p_cx, p_cy), (b_row['cx'], b_row['cy']))
                     if dist < min_bat_dist:
                         min_bat_dist = dist
                         closest_bat_id = b_row['track_id'] 
@@ -122,8 +122,8 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
             if closest_bat_id is not None:
                 bat_id_counts[closest_bat_id] = bat_id_counts.get(closest_bat_id, 0) + 1
             
-            center_dist = calculate_distance((p_cx, p_cy), image_center)
-            frame_score = score_weight(p_area, min_bat_dist, center_dist)
+            center_dist = _calculate_distance((p_cx, p_cy), image_center)
+            frame_score = _score_weight(p_area, min_bat_dist, center_dist)
             total_score += frame_score
             
         score_board[player_id] = total_score / len(p_group)

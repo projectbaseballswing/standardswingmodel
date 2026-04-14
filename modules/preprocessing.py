@@ -3,7 +3,7 @@ import pandas as pd
 from scipy.signal import savgol_filter
 
 # 결측값 -> 선형 보간
-def interpolate_coordinates(df):
+def _interpolate_coordinates(df):
     """
     좌표 데이터프레임의 결측치를 선형 보간하고, 
     지정된 길이 이상의 연속된 결측 구간이 존재하는지 여부를 반환한다.
@@ -43,7 +43,7 @@ def interpolate_coordinates(df):
     return result_df, max_missing_gap
 
 # 이상치 -> 스무딩 필터 적용
-def apply_smoothing_filter(df, window_length=7, polyorder=2):
+def _apply_smoothing_filter(df, window_length=7, polyorder=2):
     """
     보간된 좌표 데이터프레임에 Savitzky-Golay 필터를 적용하여
     튀는 값(노이즈)을 부드럽게 보정한다.
@@ -84,7 +84,7 @@ def apply_smoothing_filter(df, window_length=7, polyorder=2):
 
     return result_df
 
-def process_angle_unwrapping(df, angle_col='r', width_col='w', height_col='h'):
+def _process_angle_unwrapping(df, angle_col='r', width_col='w', height_col='h'):
     """
     불연속적인 각도(r) 데이터를 연속적인 곡선으로 펼쳐주고, 배트 길이를 반영해 각도를 보정한다.
     (yolo obb model은 0-90도의 각도만 인식하기 때문)
@@ -136,7 +136,7 @@ def process_angle_unwrapping(df, angle_col='r', width_col='w', height_col='h'):
     
     return result_df
 
-def enforce_bbox_boundaries(df, img_width, img_height):
+def _enforce_bbox_boundaries(df, img_width, img_height):
     """
     스무딩 처리된 바운딩 박스(xyxy) 좌표가 
     영상 화면 밖으로 나가거나 역전(min > max)되는 현상 방지
@@ -180,10 +180,10 @@ def preprocess_player(player_df, img_width, img_height):
       player_np : 전처리 완료된 numpy
       is_max_gap_exceeded : 연속된 결측 프레임이 임계값 이상 발견될 경우
     '''
-    player_interp, is_max_gap_exceeded = interpolate_coordinates(player_df)
-    player_smooth = apply_smoothing_filter(player_interp, window_length=7, polyorder=2)
+    player_interp, is_max_gap_exceeded = _interpolate_coordinates(player_df)
+    player_smooth = _apply_smoothing_filter(player_interp, window_length=7, polyorder=2)
     
-    final_player_df = enforce_bbox_boundaries(player_smooth, img_width, img_height)
+    final_player_df = _enforce_bbox_boundaries(player_smooth, img_width, img_height)
     player_np = final_player_df.to_numpy()[:,1:]
     
     return player_np, is_max_gap_exceeded
@@ -199,9 +199,9 @@ def preprocess_bat(bat_df):
     [return]
       bat_np : 전처리 완료된 numpy
     '''
-    bat_unwrap = process_angle_unwrapping(bat_df)
-    bat_interp, b_flags = interpolate_coordinates(bat_unwrap) 
-    final_bat_df = apply_smoothing_filter(bat_interp, window_length=7, polyorder=3)  
+    bat_unwrap = _process_angle_unwrapping(bat_df)
+    bat_interp, b_flags = _interpolate_coordinates(bat_unwrap) 
+    final_bat_df = _apply_smoothing_filter(bat_interp, window_length=7, polyorder=3)  
     bat_np = final_bat_df.to_numpy()[:,1:]
     
     return bat_np
