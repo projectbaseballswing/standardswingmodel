@@ -25,7 +25,6 @@ def process_video(video_path, yolo_model, is_left=False):
     # 사람 좌표만 먼저 추출
     # --------------------------------
     # --------------------------------
-    # !! yolo_inference 이 부분 구현 !! > 바뀐 부분
     extracted_data = track_target_player_and_bat(yolo_model, frames)
     
     # Player 전처리
@@ -35,12 +34,12 @@ def process_video(video_path, yolo_model, is_left=False):
         print("Player Not Found")
         return None, None
     player_np, max_missing_gap = preprocess_player(player_df, W, H)
-    print(max_missing_gap)
     
     # YOLO 결과 결측 검증 > 프레임이 5개 이상 연속으로 결측치가 있으면 영상 안씀
-    if max_missing_gap >= 10:
-        print('person_bboxes의 결측치가 많습니다.')
-        return player_np, None
+    # 모델 성능으로 인해 임시 건너뛰기 합니다
+    # if max_missing_gap >= 30:
+    #     print('person_bboxes의 결측치가 많습니다.')
+    #     return player_np, None
     
     # Bat 전처리
     # 각도 언래핑(0~90도를 연속값으로 보정) -> 결측치 보정 -> 이상치 보정 -> df to np
