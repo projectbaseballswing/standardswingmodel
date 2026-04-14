@@ -3,8 +3,8 @@ from visualizations.object_tracking import object_tracking
 from ultralytics import YOLO
 
 def main():
-    video_path = "한화_4_오재원.mp4" # 영상 1개의 경로 입력
-    yolo_model_path = "weights/custom_yolo_model.pt"
+    video_path = "" # 영상 1개의 경로 입력
+    yolo_model_path = "weights/custom_yolo_model2.pt"
     yolo_model = YOLO(yolo_model_path)
     player_np, bat_np = process_video(video_path, yolo_model)
     
