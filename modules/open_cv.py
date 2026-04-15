@@ -25,41 +25,42 @@ def process_video(video_path, yolo_model, is_left=False):
     # 사람 좌표만 먼저 추출
     # --------------------------------
     # --------------------------------
-    # !! yolo_inference 이 부분 구현 !! > 바뀐 부분
     extracted_data = track_target_player_and_bat(yolo_model, frames)
-
-    # 반환된게 아무것도 없을 때 none반환: bat_angles은 bat_bboxes 퍄생이기 때문에 bat_bboxes만 체크
-    if extracted_data["player"] is None:
-        print("Target Not Found")
-        return None, None
     
     # Player 전처리
     # 결측치 보정 -> 이상치 보정 -> 뒤틀림 및 영역 벗어남 보정 -> df to np
     player_df = extracted_data["player"]
-    player_np, is_max_gap_exceeded = preprocess_player(player_df, W, H)
+    if player_df is None:
+        print("Player Not Found")
+        return None, None
+    player_np, max_missing_gap = preprocess_player(player_df, W, H)
+    
+    # YOLO 결과 결측 검증 > 프레임이 5개 이상 연속으로 결측치가 있으면 영상 안씀
+    # 모델 성능으로 인해 임시 건너뛰기 합니다
+    # if max_missing_gap >= 30:
+    #     print('person_bboxes의 결측치가 많습니다.')
+    #     return player_np, None
     
     # Bat 전처리
     # 각도 언래핑(0~90도를 연속값으로 보정) -> 결측치 보정 -> 이상치 보정 -> df to np
     bat_df = extracted_data["bat"]
+    if bat_df is None:
+        print("Bat Not Found")
+        return player_np, None
     bat_np = preprocess_bat(bat_df)
 
     '''
     [ 여기까지 진행했을 때 변수 목록 ]
     player_np : player xyxy 데이터 (numpy) [xmin, ymin, xmax, ymax]
-    is_max_gap_exceeded : player의 결측 프레임이 연속 5 이상인지 여부 (boolean)
+    max_missing_gap : player의 최대 연속 결측 프레임 수 (integer)
     bat_np : bat xywhr 데이터 (numpy) [cx, cy, w, h, r]
     '''
-
-    # YOLO 결과 결측 검증 > 프레임이 5개 이상 연속으로 결측치가 있으면 영상 안씀
-    if is_max_gap_exceeded:
-        print('person_bboxes의 결측치가 많습니다.')
-        return None, None
 
     return player_np, bat_np
 
     # --------------------------------
     # --------------------------------
-    roi 클립
+    # roi 클립
     roi_frames = []
     roi_infos = []
 

@@ -4,11 +4,11 @@ import pandas as pd
 from ultralytics import YOLO
 
 # 두 좌표의 거리 계산
-def calculate_distance(pt1, pt2):
+def _calculate_distance(pt1, pt2):
     return np.sqrt((pt1[0] - pt2[0])**2 + (pt1[1] - pt2[1])**2)
 
 # Target Player 선정을 위한 가중치 계산
-def score_weight(p_area, min_bat_dist, center_dist, 
+def _score_weight(p_area, min_bat_dist, center_dist, 
                  area_weight=0.5, bat_dist_weight=2.0, center_dist_weight=1.0):
     '''
     target player 선정을 위한 가중치 계산
@@ -47,15 +47,15 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
     frame_idx = 0
     frames_length = len(frames)
     
+    # 새 영상 분석 시작 전에 이전 추적 기록을 명시적으로 초기화
+    if hasattr(model, 'predictor') and model.predictor is not None and hasattr(model.predictor, 'trackers'):
+        for tracker in model.predictor.trackers:
+            tracker.reset()
+        
     while frame_idx < frames_length:
         frame = frames[frame_idx]
-        
-        if frame_idx == 0:
-            # persist=True는 분석한 프레임 정보를 저장해 다음 분석 시 동일한 객체인지 판별하는데 사용된다.
-            # 따라서 새 영상을 분석할 때 이전 영상의 기억을 지워줘야 함 -> 첫 프레임에서 persist=False를 돌리고 시작
-            model.track(frame, conf=0.1, persist=False, verbose=False)
             
-        results = model.track(frame, conf=0.1, persist=True, verbose=False)
+        results = model.track(frame, conf=0.01, persist=True, imgsz=1280, verbose=False)
         result = results[0]
         
         if result.obb is not None and result.obb.id is not None:
@@ -64,7 +64,6 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
                 track_id = int(result.obb.id[i].item())
                 
                 cx, cy, w, h, _ = result.obb.xywhr[i].cpu().numpy()
-                
                 # Player는 xyxy(4개) Bat은 xywhr(5개) 좌표
                 if cls_id == player_cls:
                     # Player: ROI를 위해 수평/수직을 유지하는 외곽 박스 좌표 사용 (xmin, ymin, xmax, ymax)
@@ -72,6 +71,8 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
                 elif cls_id == bat_cls:
                     # Bat: 기울기 확인을 위해 각도가 포함된 좌표 사용 (centerx, centery, width, height, radian)
                     coords = result.obb.xywhr[i].cpu().numpy().flatten().tolist()
+                else:
+                    continue
                 
                 tracking_data.append({
                     'frame': frame_idx,
@@ -91,6 +92,10 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
     df_players = df[df['class_id'] == player_cls]
     df_bats = df[df['class_id'] == bat_cls]
     
+    if df_players.empty: 
+        print("Player Not Found")
+        return None
+    
     score_board = {}
     player_associated_bats = {} 
     
@@ -109,7 +114,7 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
             
             if not b_in_frame.empty:
                 for _, b_row in b_in_frame.iterrows():
-                    dist = calculate_distance((p_cx, p_cy), (b_row['cx'], b_row['cy']))
+                    dist = _calculate_distance((p_cx, p_cy), (b_row['cx'], b_row['cy']))
                     if dist < min_bat_dist:
                         min_bat_dist = dist
                         closest_bat_id = b_row['track_id'] 
@@ -117,8 +122,8 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
             if closest_bat_id is not None:
                 bat_id_counts[closest_bat_id] = bat_id_counts.get(closest_bat_id, 0) + 1
             
-            center_dist = calculate_distance((p_cx, p_cy), image_center)
-            frame_score = score_weight(p_area, min_bat_dist, center_dist)
+            center_dist = _calculate_distance((p_cx, p_cy), image_center)
+            frame_score = _score_weight(p_area, min_bat_dist, center_dist)
             total_score += frame_score
             
         score_board[player_id] = total_score / len(p_group)
@@ -149,12 +154,12 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
         target_b_df = df_bats[df_bats['track_id'] == target_bat_id][['frame', 'coords']]
         merged_b_df = pd.merge(base_df, target_b_df, on='frame', how='left')
         b_coords_list = [c if isinstance(c, list) else [np.nan] * 5 for c in merged_b_df['coords']]
+        b_cols = ['cx', 'cy', 'w', 'h', 'r']
+        final_bat_df = pd.concat([base_df, pd.DataFrame(b_coords_list, columns=b_cols)], axis=1)
     else:
-        b_coords_list = [[np.nan] * 5 for _ in range(len(base_df))]
+        print("경고: 타겟 배트가 감지되지 않았습니다.")
+        final_bat_df = None
         
-    b_cols = ['cx', 'cy', 'w', 'h', 'r']
-    final_bat_df = pd.concat([base_df, pd.DataFrame(b_coords_list, columns=b_cols)], axis=1)
-
     print("모든 처리 완료")
     
     # 4. 딕셔너리로 묶어서 반환
