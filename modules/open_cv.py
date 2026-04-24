@@ -82,7 +82,8 @@ def process_video(video_path, yolo_model, is_left=False):
     # all_landmarks: [x,y,z,1], [x,y,z,1], [x,z,y,0]... 형태로 나옴
     # wrist_landmarks는 원본 좌표만 (정규환 안된거)
     # roi_infos = [ {frame1 정보}, {frame2 정보}, {frame3 정보}, ...]
-    all_landmarks, wrist_landmarks = extract_pose_with_roi(roi_frames,roi_infos,fps)
+    # visibility 추가로 받음: 넘파이 형태 
+    all_landmarks, wrist_landmarks, visibility = extract_pose_with_roi(roi_frames,roi_infos,fps)
 
     if all_landmarks is None:
         print('landmarks 없음')
@@ -94,8 +95,8 @@ def process_video(video_path, yolo_model, is_left=False):
     bat_positions = []
     bat_angles = []
 
-    # visibility 추가로 받음: 넘파이 형태 
-    bat_positions, bat_angles, visibility  = detect_bat_with_wrist(frames, wrist_landmarks, yolo_model)
+    
+    bat_positions, bat_angles = detect_bat_with_wrist(frames, wrist_landmarks, yolo_model)
 
     if should_discard(bat_positions, max_allowed_gap=5):
         print('bat 검출 실패 많음')
