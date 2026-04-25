@@ -1,5 +1,5 @@
 import cv2
-from modules.utils.video_roi_left import read_video, process_roi, unify_left_all
+from modules.utils.video_roi_left import read_video, process_roi, unify_left_all, normalize_landmarks_sequence
 from modules.utils.features_add import make_features_single_video
 from modules.utils.yolo_preprocessing import max_consecutive_none, max_consecutive_none_middle, should_discard, fill_remaining_none
 from modules.yolo_obb_tracker import track_target_player_and_bat
@@ -68,10 +68,10 @@ def process_video(video_path, yolo_model, is_left=False):
     for i in range(len(frames)):
 
         frame = frames[i]
-        person_bbox = person_bboxes[i]
+        person_bbox = player_np[i]
 
         # 구현
-        roi, roi_info = process_roi(frame, person_bbox, target_size=256, pad=20)
+        roi, roi_info = process_roi(frame, player_np[i], target_size=256, pad=20)
 
         roi_frames.append(roi)
         roi_infos.append(roi_info)
@@ -82,7 +82,8 @@ def process_video(video_path, yolo_model, is_left=False):
     # all_landmarks: [x,y,z,1], [x,y,z,1], [x,z,y,0]... 형태로 나옴
     # wrist_landmarks는 원본 좌표만 (정규환 안된거)
     # roi_infos = [ {frame1 정보}, {frame2 정보}, {frame3 정보}, ...]
-    all_landmarks, wrist_landmarks = extract_pose_with_roi(roi_frames,roi_infos,fps)
+    # visibility 추가로 받음: 넘파이 형태 
+    all_landmarks, wrist_landmarks, visibility = extract_pose_with_roi(roi_frames,roi_infos,fps)
 
     if all_landmarks is None:
         print('landmarks 없음')
@@ -94,6 +95,7 @@ def process_video(video_path, yolo_model, is_left=False):
     bat_positions = []
     bat_angles = []
 
+    
     bat_positions, bat_angles = detect_bat_with_wrist(frames, wrist_landmarks, yolo_model)
 
     if should_discard(bat_positions, max_allowed_gap=5):
@@ -113,11 +115,12 @@ def process_video(video_path, yolo_model, is_left=False):
         )
         
     # 정규화 코드 추가 
+    all_landmarks_final = normalize_landmarks_sequence(all_landmarks, visibility)
 
     # 최종 피처는 [x1 y1 z1 x2 y2 z2...]... 형태로 나옴
     # 임팩트 부분을 기준으로 프레임 정렬(프레임 개수 맞추기) + 남은 피처 추가
     # 구현
-    final_data = make_features_single_video(all_landmarks, bat_angles, bat_positions, dt)
+    final_data = make_features_single_video(all_landmarks_final, bat_angles, bat_positions, dt)
 
     return final_data
 
@@ -214,5 +217,4 @@ save_dir = 'output_numpy'
 metadata_dict = "metadata.json"
 
 # process_all_videos(video_dir, yolo_model, save_dir, metadata_dict)
-
 
