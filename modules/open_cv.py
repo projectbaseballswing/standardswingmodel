@@ -83,12 +83,13 @@ def process_video(video_path, yolo_model, is_left=False):
     # wrist_landmarks는 원본 좌표만 (정규환 안된거)
     # roi_infos = [ {frame1 정보}, {frame2 정보}, {frame3 정보}, ...]
     # visibility 추가로 받음: 넘파이 형태 
-    all_landmarks, wrist_landmarks, visibility = extract_pose_with_roi(roi_frames,roi_infos,fps)
+    pose_result = extract_pose_with_roi(roi_frames, roi_infos, fps)
 
-    if all_landmarks is None:
-        print('landmarks 없음')
-        return None
+    if pose_result is None:
+    print("landmarks 없음")
+    return None
 
+    all_landmarks, wrist_landmarks, visibility, bat_landmarks = pose_result
     # --------------------------------
     # --------------------------------
     # bat 정보 추출
