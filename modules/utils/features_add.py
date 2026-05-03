@@ -1,5 +1,5 @@
 # final_data = make_features(all_landmarks, bat_angles, bat_positions, dt)
-def make_features_single_video(all_landmarks, bat_angles, bat_positions, dt):
+def make_features_single_video(all_landmarks, bat_angles, bat_positions, visibility, dt):
 
 
     '''
@@ -11,15 +11,28 @@ def make_features_single_video(all_landmarks, bat_angles, bat_positions, dt):
 
     # 1. 임팩트 찾기
     # 배트 속도가 가장 빠른 순간 = 임팩트라고 가정
-    impact_idx = find_impact_frame(bat_positions)
+    impact_idx = _find_impact_frame(bat_positions)
 
     # 2. 정렬 + 길이 통일
     # 임팩트를 중심으로 앞뒤 동일하게 자름
     target_len = 80
     pre_ratio = 0.75
-    lm = align_sequence(all_landmarks, impact_idx, target_len, pre_ratio)
-    angle = align_sequence(bat_angles, impact_idx, target_len, pre_ratio)
-    pos = align_sequence(bat_positions, impact_idx, target_len, pre_ratio)
+    lm = _align_sequence(all_landmarks, impact_idx, target_len, pre_ratio)
+    angle = _align_sequence(bat_angles, impact_idx, target_len, pre_ratio)
+    pos = _align_sequence(bat_positions, impact_idx, target_len, pre_ratio)
+    vis = _align_sequence(visibility, impact_idx, target_len, pre_ratio)
+
+    # 한 관절이 x,y,z,visibility 순서로 피처가 되도록 설정 
+    coords = lm        # (T,12,3)
+    mask   = vis       # (T,12)
+
+    coords_with_mask = np.concatenate([
+        coords,
+        mask[..., None]
+    ], axis=2)  # (T,12,4)
+
+    # [x,y,z,visibilty] -> [x],[y],[z]... 처럼 하나의 피처가 될수 있도록 바꿈 
+    coords_feat = coords_with_mask.reshape(len(coords), -1)
 
     # 3. 피처 생성
     # lm: 관절 좌표 / angle: 배트 각도 / pos: 배트 위치
@@ -52,23 +65,23 @@ def make_features_single_video(all_landmarks, bat_angles, bat_positions, dt):
     left_ankle  = lm[:, 10, :]
     right_ankle = lm[:, 11, :]
 
-    angle_left_elbow = calculate_angle(left_shoulder, left_elbow, left_wrist)
-    angle_right_elbow = calculate_angle(right_shoulder, right_elbow, right_wrist)
+    angle_left_elbow = _calculate_angle(left_shoulder, left_elbow, left_wrist)
+    angle_right_elbow = _calculate_angle(right_shoulder, right_elbow, right_wrist)
 
-    angle_left_knee = calculate_angle(left_hip, left_knee, left_ankle)
-    angle_right_knee = calculate_angle(right_hip, right_knee, right_ankle)
+    angle_left_knee = _calculate_angle(left_hip, left_knee, left_ankle)
+    angle_right_knee = _calculate_angle(right_hip, right_knee, right_ankle)
 
     # 몸통(상체)이 어느 방향을 보고 있는지 (회전 방향)
-    angle_torso = calculate_torso_angle(left_shoulder, right_shoulder,left_hip, right_hip)
+    angle_torso = _calculate_torso_angle(left_shoulder, right_shoulder,left_hip, right_hip)
 
     # 회전 각도 피처 생성
-    angle_hip_rotation = calculate_rotation_angle(left_hip, right_hip)
-    angle_shoulder_rotation = calculate_rotation_angle(left_shoulder, right_shoulder)
+    angle_hip_rotation = _calculate_rotation_angle(left_hip, right_hip)
+    angle_shoulder_rotation = _calculate_rotation_angle(left_shoulder, right_shoulder)
 
     # 회전 속도 계산: 각도가 얼마냐 빨리 변하냐
     wrist_center = (left_wrist + right_wrist) / 2
 
-    hip_rotation_velocity, shoulder_rotation_velocity, wrist_velocity = compute_all_velocities(
+    hip_rotation_velocity, shoulder_rotation_velocity, wrist_velocity = _compute_all_velocities(
     left_hip, right_hip,
     left_shoulder, right_shoulder,
     wrist_center,
@@ -92,14 +105,14 @@ def make_features_single_video(all_landmarks, bat_angles, bat_positions, dt):
 
     # 배트 계산
     # 각속도 크기(bat speed) + 각속도 반환(angular_velocity)
-    bat_speed, bat_angular_velocity = compute_bat_speed(angle, dt)
+    bat_speed, bat_angular_velocity = _compute_bat_speed(angle, dt)
 
 
     # 피처 합치기
     features = np.concatenate([
 
     # 1. landmark (flatten)
-    lm.reshape(len(lm), -1),
+    coords_feat,
 
     # 2. relative positions
     rel_wrist,
@@ -136,7 +149,7 @@ def make_features_single_video(all_landmarks, bat_angles, bat_positions, dt):
 # 임팩트 찾기
 # 배트 속도가 가장 빠른 프레임 = 임팩트
 # pos: 배트 위치로 찾음
-def find_impact_frame(pos):
+def _find_impact_frame(pos):
     speeds = []
     for i in range(1, len(pos)):
         # pos[i] - pos[i-1] → 이동 벡터
@@ -149,7 +162,7 @@ def find_impact_frame(pos):
 # 정렬 + 길이 통일
 # 임팩트를 중심으로 시퀀스를 잘라서 길이를 딱 맞춤: 80으로 통일(임팩트기준 앞:60, 뒤:20)
 # seq: 시계열 데이터 (landmarks / angle / pos 중 하나) / impact_idx: 임팩트 프레임 번호 / target_len: 최종 길이
-def align_sequence(seq, impact_idx, target_len=80, pre_ratio=0.75):
+def _align_sequence(seq, impact_idx, target_len=80, pre_ratio=0.75):
     half = target_len // 2 # 40
     
     # 앞/뒤 필요한 길이
@@ -190,7 +203,7 @@ def align_sequence(seq, impact_idx, target_len=80, pre_ratio=0.75):
 #################################
 # 관절 좌표 추가 피처 생성
 
-def calculate_angle(a, b, c):
+def _calculate_angle(a, b, c):
     """
     a, b, c: (T, 3)
     b를 기준으로 각도 계산 (a-b-c)
@@ -222,7 +235,7 @@ def calculate_angle(a, b, c):
 
     return np.degrees(angle)   # (T,)
 
-def calculate_torso_angle(left_shoulder, right_shoulder,
+def _calculate_torso_angle(left_shoulder, right_shoulder,
                           left_hip, right_hip):
     """
     골반 기준으로 상체가 어디 방향으로 돌아갔는지
@@ -248,7 +261,7 @@ def calculate_torso_angle(left_shoulder, right_shoulder,
     return np.degrees(angle)
 
 
-def calculate_rotation_angle(left_point, right_point):
+def _calculate_rotation_angle(left_point, right_point):
     # x,y만 구할거임
   
     # 왼쪽 → 오른쪽 방향 벡터
@@ -267,7 +280,7 @@ def calculate_rotation_angle(left_point, right_point):
     return np.degrees(angle)
 
 
-def compute_all_velocities(
+def _compute_all_velocities(
     left_hip, right_hip,
     left_shoulder, right_shoulder,
     wrist_center,
@@ -323,7 +336,7 @@ def compute_all_velocities(
 #################################
 # 배트 추가 피처 생성
 
-def compute_bat_speed(angle, dt): 
+def _compute_bat_speed(angle, dt): 
     """
     각속도 크기(bat speed) + 각속도 반환(angular_velocity)
     각속도로 사용

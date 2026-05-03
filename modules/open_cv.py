@@ -1,5 +1,5 @@
 import cv2
-from modules.utils.video_roi_left import read_video, process_roi, unify_left_all, normalize_landmarks_sequence
+from modules.utils.video_roi_left import read_video, process_roi, normalize_landmarks_sequence
 from modules.utils.features_add import make_features_single_video
 from modules.utils.yolo_preprocessing import max_consecutive_none, max_consecutive_none_middle, should_discard, fill_remaining_none
 from modules.yolo_obb_tracker import track_target_player_and_bat
@@ -14,11 +14,20 @@ def get_video_size(video_path):
     
     return (width, height)
 
+# 좌우 통일 함수: 좌타인 경우 프레임을 좌우반전시킴 
+def flip_video_frames(frames):
+    return [cv2.flip(frame, 1) for frame in frames]
+
 # video_path: 비디오 한 개의 경로, yolo_model: 욜로 모델, metadata: 좌우유무 파일
 def process_video(video_path, yolo_model, is_left=False):
     # 비디오 > 프레임 리스트로 바꿈 + fps 같이 반환
     frames, fps = read_video(video_path)
     dt = 1 / fps
+    
+    # 좌우 통일: 우타로 고정
+    if is_left:
+        frames = flip_video_frames(frames) 
+    
     # 프레임 height, width
     H, W = frames[0].shape[:2]
 
@@ -86,7 +95,7 @@ def process_video(video_path, yolo_model, is_left=False):
     pose_result = extract_pose_with_roi(roi_frames, roi_infos, fps)
 
     if pose_result is None:
-    print("landmarks 없음")
+        print("landmarks 없음")
     return None
 
     all_landmarks, visibility, bat_landmarks = pose_result
@@ -106,22 +115,14 @@ def process_video(video_path, yolo_model, is_left=False):
     bat_positions = fill_remaining_none(bat_positions)
     bat_angles = fill_remaining_none(bat_angles)
 
-    # 좌우 통일 / W: width
-    if is_left:
-        all_landmarks, bat_positions, bat_angles = unify_left_all(
-            all_landmarks,
-            bat_positions,
-            bat_angles,
-            W
-        )
         
     # 정규화 코드 추가 
     all_landmarks_final = normalize_landmarks_sequence(all_landmarks, visibility)
 
-    # 최종 피처는 [x1 y1 z1 x2 y2 z2...]... 형태로 나옴
+    # 최종 피처는 [x1 y1 z1 신뢰도 x2 y2 z2 신뢰도 ...]... 형태로 나옴
     # 임팩트 부분을 기준으로 프레임 정렬(프레임 개수 맞추기) + 남은 피처 추가
     # 구현
-    final_data = make_features_single_video(all_landmarks_final, bat_angles, bat_positions, dt)
+    final_data = make_features_single_video(all_landmarks_final, bat_angles, bat_positions, visibility, dt)
 
     return final_data
 
