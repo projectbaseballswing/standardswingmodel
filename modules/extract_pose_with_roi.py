@@ -93,19 +93,13 @@ def extract_pose_with_roi(
     roi_infos: List[Optional[dict]],
     fps: float,
     model_path: Optional[str] = None,
-) -> Optional[Tuple[
-    List[np.ndarray],
-    List[np.ndarray],
-    List[np.ndarray],
-    List[np.ndarray],
-]]:
+) -> Optional[Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]]:
     """
     ROI 프레임에서 pose를 추출하고,
     원본 프레임 좌표계로 복원한 landmark 리스트를 반환
 
     Returns:
         all_landmarks: frame마다 shape (12, 4)
-        wrist_landmarks: frame마다 shape (2, 4)
         visibility: frame마다 shape (12,)
         bat_landmarks: frame마다 shape (6, 4)
 

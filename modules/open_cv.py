@@ -89,7 +89,7 @@ def process_video(video_path, yolo_model, is_left=False):
     print("landmarks 없음")
     return None
 
-    all_landmarks, wrist_landmarks, visibility, bat_landmarks = pose_result
+    all_landmarks, visibility, bat_landmarks = pose_result
     # --------------------------------
     # --------------------------------
     # bat 정보 추출

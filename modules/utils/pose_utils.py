@@ -86,8 +86,6 @@ OUTPUT_JOINT_ORDER: List[str] = [
     "left_ankle", "right_ankle",
 ]
 
-# wrist_landmarks 출력 순서: shape (T, 2, 4)
-WRIST_OUTPUT_ORDER: List[str] = ["left_wrist", "right_wrist"]
 
 # bat_landmarks 출력 순서: shape (T, 6, 4)
 # 각 손에 대해 wrist -> pinky -> index 순서로 둡니다.

@@ -382,12 +382,10 @@ def pack_output_arrays(
 
     Returns:
         all_landmarks:   List[np.ndarray], frame마다 shape (12, 4)
-        wrist_landmarks: List[np.ndarray], frame마다 shape (2, 4)
         visibility:      List[np.ndarray], frame마다 shape (12,)
         bat_landmarks:   List[np.ndarray], frame마다 shape (6, 4)
     """
     all_landmarks: List[np.ndarray] = []
-    wrist_landmarks: List[np.ndarray] = []
     visibility: List[np.ndarray] = []
     bat_landmarks: List[np.ndarray] = []
 
@@ -399,8 +397,7 @@ def pack_output_arrays(
         restored_bat = restore_landmarks_to_original_frame(bat_arr, roi_infos[i])
 
         all_landmarks.append(restored_core)
-        wrist_landmarks.append(restored_core[4:6].copy())
         visibility.append(_pack_visibility_array(df, i, OUTPUT_JOINT_ORDER))
         bat_landmarks.append(restored_bat)
 
-    return all_landmarks, wrist_landmarks, visibility, bat_landmarks
+    return all_landmarks, visibility, bat_landmarks
