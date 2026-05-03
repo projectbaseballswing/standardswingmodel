@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from modules.utils.pose_landmarker import create_landmarker, DEFAULT_MEDIAPIPE_MODEL_PATH
-from modules.utils.pose_utils import CORE_JOINTS
+from modules.utils.pose_utils import POSE_JOINTS
 from modules.utils.pose_preprocessing import apply_preprocessing, pack_output_arrays
 
 
@@ -23,7 +23,7 @@ def _empty_row(frame_idx: int) -> Dict[str, float]:
         "frame_height": np.nan,
     }
 
-    for joint_name in CORE_JOINTS.keys():
+    for joint_name in POSE_JOINTS.keys():
         for suffix in ["_x", "_y", "_z", "_visibility", "_presence"]:
             row[f"{joint_name}{suffix}"] = np.nan
 
@@ -63,7 +63,7 @@ def _extract_raw_dataframe(
         }
 
         if len(result.pose_landmarks) == 0:
-            for joint_name in CORE_JOINTS.keys():
+            for joint_name in POSE_JOINTS.keys():
                 for suffix in ["_x", "_y", "_z", "_visibility", "_presence"]:
                     row[f"{joint_name}{suffix}"] = np.nan
             rows.append(row)
@@ -71,7 +71,7 @@ def _extract_raw_dataframe(
 
         landmarks = result.pose_landmarks[0]
 
-        for joint_name, joint_idx in CORE_JOINTS.items():
+        for joint_name, joint_idx in POSE_JOINTS.items():
             lm = landmarks[joint_idx]
 
             row[f"{joint_name}_x"] = float(lm.x * width)
@@ -93,14 +93,15 @@ def extract_pose_with_roi(
     roi_infos: List[Optional[dict]],
     fps: float,
     model_path: Optional[str] = None,
-) -> Optional[Tuple[List[np.ndarray], List[np.ndarray]]]:
+) -> Optional[Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]]:
     """
     ROI 프레임에서 pose를 추출하고,
     원본 프레임 좌표계로 복원한 landmark 리스트를 반환
 
     Returns:
-        all_landmarks: 각 frame마다 shape (12, 4)
-        wrist_landmarks: 각 frame마다 shape (2, 4)
+        all_landmarks: frame마다 shape (12, 4)
+        visibility: frame마다 shape (12,)
+        bat_landmarks: frame마다 shape (6, 4)
 
     Notes:
         - 영상 1개 처리 시 landmarker는 내부에서 1회 생성됩니다.

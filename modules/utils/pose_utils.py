@@ -8,7 +8,8 @@ MAX_INTERP_GAP_FRAMES = 4
 MAX_EDGE_FILL_FRAMES = 4
 
 # Motion jump ratio thresholds (relative to shoulder width) for each joint.
-# 기준은 배정대, 허경민, 강백호, 김강민, 정훈, 한동희 영상 데이터셋에서 구한 결과를 기반으로 jump ratio의 threshold를 joint별로 다르게 설정한 것입니다. 일단은 일괄적으로 0.5로 설정하려다가, 관절별로 jump ratio의 분포가 꽤 달라서 joint별로 다르게 설정하는 것이 낫겠다고 판단해서 이렇게 설정함. 향후 데이터셋이 확정되면 다시 검증해보고 조정하겠습니다.
+# 기준은 현재 보유한 스윙 영상에서 관절별 jump ratio 분포를 확인한 뒤 설정한 초기값입니다.
+# 데이터셋이 확정되면 다시 검증하고 조정할 예정입니다.
 HIP_JUMP_RATIO_TH = 0.22
 SHOULDER_JUMP_RATIO_TH = 0.40
 ELBOW_JUMP_RATIO_TH = 0.80
@@ -31,21 +32,20 @@ MOTION_JUMP_RATIO_THRESHOLDS: Dict[str, float] = {
     "right_elbow": ELBOW_JUMP_RATIO_TH,
     "left_wrist": WRIST_JUMP_RATIO_TH,
     "right_wrist": WRIST_JUMP_RATIO_TH,
+    "left_pinky": WRIST_JUMP_RATIO_TH,
+    "right_pinky": WRIST_JUMP_RATIO_TH,
+    "left_index": WRIST_JUMP_RATIO_TH,
+    "right_index": WRIST_JUMP_RATIO_TH,
     "left_knee": KNEE_JUMP_RATIO_TH,
     "right_knee": KNEE_JUMP_RATIO_TH,
     "left_ankle": ANKLE_JUMP_RATIO_TH,
     "right_ankle": ANKLE_JUMP_RATIO_TH,
 }
 
-OUTPUT_JOINT_ORDER: List[str] = [
-    "left_shoulder", "right_shoulder",
-    "left_elbow", "right_elbow",
-    "left_wrist", "right_wrist",
-    "left_hip", "right_hip",
-    "left_knee", "right_knee",
-    "left_ankle", "right_ankle",
-]
-
+# =========================
+# Landmark definitions
+# =========================
+# 후단 정규화/feature 단계에서 기본으로 사용하는 12개 핵심 관절입니다.
 CORE_JOINTS: Dict[str, int] = {
     "left_shoulder": 11,
     "right_shoulder": 12,
@@ -60,6 +60,56 @@ CORE_JOINTS: Dict[str, int] = {
     "left_ankle": 27,
     "right_ankle": 28,
 }
+
+# 배트 각도/손 위치 보조 feature용 손 landmark입니다.
+# wrist는 CORE_JOINTS에 이미 있으므로 여기에는 추가 손가락 landmark만 둡니다.
+HAND_EXTRA_JOINTS: Dict[str, int] = {
+    "left_pinky": 17,
+    "right_pinky": 18,
+    "left_index": 19,
+    "right_index": 20,
+}
+
+# MediaPipe에서 실제로 추출하고 전처리할 전체 landmark 집합입니다.
+POSE_JOINTS: Dict[str, int] = {
+    **CORE_JOINTS,
+    **HAND_EXTRA_JOINTS,
+}
+
+# all_landmarks 출력 순서: shape (T, 12, 4)
+OUTPUT_JOINT_ORDER: List[str] = [
+    "left_shoulder", "right_shoulder",
+    "left_elbow", "right_elbow",
+    "left_wrist", "right_wrist",
+    "left_hip", "right_hip",
+    "left_knee", "right_knee",
+    "left_ankle", "right_ankle",
+]
+
+
+# bat_landmarks 출력 순서: shape (T, 6, 4)
+# 각 손에 대해 wrist -> pinky -> index 순서로 둡니다.
+
+BAT_JOINT_ORDER: List[str] = [
+    "left_wrist", "left_pinky", "left_index",
+    "right_wrist", "right_pinky", "right_index",
+]
+
+# left/right swap index pairs for each output array.
+OUTPUT_LEFT_RIGHT_PAIRS: List[Tuple[int, int]] = [
+    (0, 1),    # shoulder
+    (2, 3),    # elbow
+    (4, 5),    # wrist
+    (6, 7),    # hip
+    (8, 9),    # knee
+    (10, 11),  # ankle
+]
+
+BAT_LEFT_RIGHT_PAIRS: List[Tuple[int, int]] = [
+    (0, 3),  # wrist
+    (1, 4),  # pinky
+    (2, 5),  # index
+]
 
  
 def contiguous_true_segments(mask: np.ndarray) -> List[Tuple[int, int]]:
