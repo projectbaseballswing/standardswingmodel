@@ -118,7 +118,8 @@ def process_roi(frame, bbox, target_size=256, pad=20):
 ################################################################
 ################################################################
 # 좌우 반전 
-
+# 안쓸거임 
+'''
 def unify_left_all(all_landmarks, bat_positions, bat_angles, W):
     """
     왼손 타자 데이터를 오른손 기준으로 변환
@@ -142,14 +143,14 @@ def unify_left_all(all_landmarks, bat_positions, bat_angles, W):
     # -----------------------------
     # MediaPipe 기준 index
     
-    '''
+
     norm_left_shoulder, norm_right_shoulder,
     norm_left_elbow, norm_right_elbow,
     norm_left_wrist, norm_right_wrist,
     norm_left_hip, norm_right_hip,
     norm_left_knee, norm_right_knee,
     norm_left_ankle, norm_right_ankle
-    '''
+
     
     LEFT_RIGHT_PAIRS = [
         (0, 1),  # shoulder
@@ -182,6 +183,7 @@ def unify_left_all(all_landmarks, bat_positions, bat_angles, W):
 
     return flipped_landmarks, flipped_bat_angles
 
+'''
 
 ################################################################
 ################################################################
@@ -193,29 +195,29 @@ def normalize_landmarks_sequence(all_landmarks, visibility, eps=1e-8):
         return all_landmarks
 
     # 기준 프레임 선택: 프레임 중 가장 기준으로 잡기 좋은 프레임 선택
-    ref_idx = select_reference_frame(all_landmarks, visibility)
+    ref_idx = _select_reference_frame(all_landmarks, visibility)
     if ref_idx is None:
         return all_landmarks
 
     ref_frame = all_landmarks[ref_idx]
 
     # 몸 기준으로 좌표축을 만듦
-    basis = build_reference_basis(ref_frame, eps)
+    basis = _build_reference_basis(ref_frame, eps)
     if basis is None:
         return all_landmarks
 
     # 사람 크기 통일
-    body_scale = compute_body_scale(all_landmarks, eps)
+    body_scale = _compute_body_scale(all_landmarks, eps)
     if not np.isfinite(body_scale) or body_scale < eps:
         return all_landmarks
 
     # 전체 정규화
-    return apply_normalization(all_landmarks, basis, body_scale, eps)
+    return _apply_normalization(all_landmarks, basis, body_scale, eps)
 
 ################################################################
 
 # 기준 프레임 선택 
-def select_reference_frame(all_landmarks, visibility=None):
+def _select_reference_frame(all_landmarks, visibility=None):
     '''
     기준 좌표계를 만들 reference frame 선택.
       - 양쪽 hip / shoulder가 모두 valid해야 함
@@ -285,7 +287,7 @@ def select_reference_frame(all_landmarks, visibility=None):
 ################################################################
 
 # 사람 기준 좌표계 만들기: 사람의 방향을 통일시킬 수 있는 기준 좌표를 만든다. 
-def build_reference_basis(frame, eps=1e-8):
+def _build_reference_basis(frame, eps=1e-8):
     """
     reference frame에서 기준 좌표계의 basis 생성.
 
@@ -309,7 +311,7 @@ def build_reference_basis(frame, eps=1e-8):
     shoulder_center = (lsho + rsho) / 2.0
 
     # x축: 몸의 가로 방향: 좌우 기준 고정
-    x_axis = normalize_vec(rhip - lhip, eps)
+    x_axis = _normalize_vec(rhip - lhip, eps)
     # 길이가 0이거나 이상하면 → 바로 none반환
     if x_axis is None:
         return None
@@ -319,11 +321,11 @@ def build_reference_basis(frame, eps=1e-8):
 
     # z축 (몸 앞/뒤 방향): 앞뒤 기준 고정
     # x와 y에 수직인 방향 생성: 정확한 3D 좌표축 완성
-    z_axis = normalize_vec(np.cross(x_axis, y_temp), eps)
+    z_axis = _normalize_vec(np.cross(x_axis, y_temp), eps)
     if z_axis is None:
         return None
 
-    y_axis = normalize_vec(np.cross(z_axis, x_axis), eps)
+    y_axis = _normalize_vec(np.cross(z_axis, x_axis), eps)
     if y_axis is None:
         return None
 
@@ -333,7 +335,7 @@ def build_reference_basis(frame, eps=1e-8):
 ################################################################
 
 # 길이를 1로 만든다
-def normalize_vec(v, eps=1e-8):
+def _normalize_vec(v, eps=1e-8):
     """
     벡터를 정규화해서 반환.
     길이가 0에 가깝거나 비정상 값이면 None 반환.
@@ -355,7 +357,7 @@ def normalize_vec(v, eps=1e-8):
 
 ################################################################
 
-def compute_body_scale(all_landmarks, eps=1e-8):
+def _compute_body_scale(all_landmarks, eps=1e-8):
     """
     사람 body scale을 robust하게(이상치에 강하게 계산) 계산
 
@@ -366,6 +368,16 @@ def compute_body_scale(all_landmarks, eps=1e-8):
 
     # 각 프레임에서 계산된 body 크기를 저장할 공간
     scales = []
+
+    '''
+    norm_left_shoulder, norm_right_shoulder,
+    norm_left_elbow, norm_right_elbow,
+    norm_left_wrist, norm_right_wrist,
+    norm_left_hip, norm_right_hip,
+    norm_left_knee, norm_right_knee,
+    norm_left_ankle, norm_right_ankle
+    '''
+    
 
     for frame in all_landmarks:
         # 관절 좌표 꺼내기
@@ -412,7 +424,7 @@ def compute_body_scale(all_landmarks, eps=1e-8):
 ################################################################
 
 # 최종 정규화 코드 
-def apply_normalization(all_landmarks, basis, body_scale, eps=1e-8):
+def _apply_normalization(all_landmarks, basis, body_scale, eps=1e-8):
     """
     landmark sequence 정규화
     각 프레임 landmark를
@@ -438,11 +450,16 @@ def apply_normalization(all_landmarks, basis, body_scale, eps=1e-8):
             continue
 
         # numpy 배열로 변환(혹시나 안되어 있으면)
-        frame = np.asarray(frame)
+        coords = np.asarray(frame)
 
-        # 좌표 / mask 분리: mask는 정규화하면 안됨
-        coords = frame[:, :3]   # (N, 3)
-        extra  = frame[:, 3:]   # (N, 1) or more
+        '''
+        norm_left_shoulder, norm_right_shoulder,
+        norm_left_elbow, norm_right_elbow,
+        norm_left_wrist, norm_right_wrist,
+        norm_left_hip, norm_right_hip,
+        norm_left_knee, norm_right_knee,
+        norm_left_ankle, norm_right_ankle
+        '''
 
         # 왼쪽/오른쪽 hip 좌표 가져오기 
         lhip = coords[6]
@@ -465,10 +482,7 @@ def apply_normalization(all_landmarks, basis, body_scale, eps=1e-8):
         # scale 정규화: 크기 정규화 -> 키 차이 제거 / 모두 같은 크기로 맞춤
         norm_coords = rel / body_scale
 
-        # 다시 좌표 + mask합치기 
-        norm_frame = np.concatenate([norm_coords, extra], axis=1)
-
-        normalized_sequence.append(norm_frame)
+        normalized_sequence.append(norm_coords)
 
     return normalized_sequence
 
