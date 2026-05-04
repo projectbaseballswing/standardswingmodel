@@ -153,20 +153,18 @@ def collapse_bad_frames(missing_mask: pd.DataFrame) -> pd.DataFrame:
 def apply_edge_fill(
     df: pd.DataFrame,
     missing_mask: pd.DataFrame,
-    observed_mask: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    영상 시작/끝의 짧은 full-missing 구간은 가장 가까운 valid 프레임 값으로 채움
+    영상 시작/끝의 짧은 full-missing 구간은 가장 가까운 valid 프레임 값으로 채움.
     """
     df = df.copy()
     missing_mask = missing_mask.copy()
-    observed_mask = observed_mask.copy()
 
     full_missing = missing_mask.all(axis=1).to_numpy(dtype=bool)
     n = len(full_missing)
 
     if n == 0:
-        return df, missing_mask, observed_mask
+        return df, missing_mask
 
     # 시작 부분 full-missing
     lead_len = 0
@@ -180,7 +178,6 @@ def apply_edge_fill(
                 for suffix in ["_x", "_y", "_z"]:
                     df.at[dst_idx, f"{joint}{suffix}"] = df.at[src_idx, f"{joint}{suffix}"]
                 missing_mask.at[dst_idx, joint] = False
-                observed_mask.at[dst_idx, joint] = 0
 
     # 끝 부분 full-missing
     full_missing = missing_mask.all(axis=1).to_numpy(dtype=bool)
@@ -197,22 +194,19 @@ def apply_edge_fill(
                 for suffix in ["_x", "_y", "_z"]:
                     df.at[dst_idx, f"{joint}{suffix}"] = df.at[src_idx, f"{joint}{suffix}"]
                 missing_mask.at[dst_idx, joint] = False
-                observed_mask.at[dst_idx, joint] = 0
 
-    return df, missing_mask, observed_mask
+    return df, missing_mask
 
 
 def interpolate_short_gaps(
     values: np.ndarray,
     missing: np.ndarray,
     max_gap: int,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """
-    짧은 missing 구간만 선형 보간
+    짧은 missing 구간만 선형 보간.
     """
     out = values.astype(float).copy()
-    interp_mask = np.zeros(len(out), dtype=bool)
-
     segments = contiguous_true_segments(missing)
 
     for s, e in segments:
@@ -230,15 +224,14 @@ def interpolate_short_gaps(
             continue
 
         out[s:e + 1] = np.linspace(out[left], out[right], seg_len + 2)[1:-1]
-        interp_mask[s:e + 1] = True
 
-    return out, interp_mask
+    return out
 
 
 def apply_preprocessing(df: pd.DataFrame, fps: float) -> Optional[pd.DataFrame]:
     """
     raw landmark dataframe에 대해
-    visibility missing + motion missing + edge fill + interpolation + smoothing 적용
+    visibility missing + motion missing + edge fill + interpolation + smoothing 적용.
     """
     df = df.copy()
 
@@ -249,14 +242,7 @@ def apply_preprocessing(df: pd.DataFrame, fps: float) -> Optional[pd.DataFrame]:
     combined_missing = vis_missing | motion_missing
     combined_missing = collapse_bad_frames(combined_missing)
 
-    # 1 = 원래 관측값, 0 = 보간/채움/결측
-    observed_mask = (~combined_missing).astype(int)
-
-    df, combined_missing, observed_mask = apply_edge_fill(
-        df,
-        combined_missing,
-        observed_mask,
-    )
+    df, combined_missing = apply_edge_fill(df, combined_missing)
 
     for joint in POSE_JOINTS.keys():
         joint_missing = combined_missing[joint].to_numpy(dtype=bool)
@@ -265,22 +251,13 @@ def apply_preprocessing(df: pd.DataFrame, fps: float) -> Optional[pd.DataFrame]:
             raw = df[f"{joint}{suffix}"].to_numpy(dtype=float)
             raw[joint_missing] = np.nan
 
-            interp_values, interp_mask = interpolate_short_gaps(
+            interp_values = interpolate_short_gaps(
                 raw,
                 joint_missing,
                 MAX_INTERP_GAP_FRAMES,
             )
             smooth_values = savgol_smooth_with_nans(interp_values, fps)
             df[f"{joint}{suffix}_filt"] = smooth_values
-
-             # _x, _y, _z 모두 같은 구간이 보간되므로, _x에서 한 번 업데이트하면 됩니다.
-            if suffix == "_x":
-                observed_mask.loc[interp_mask, joint] = 0
-
-        unresolved = ~np.isfinite(df[f"{joint}_x_filt"].to_numpy(dtype=float))
-        observed_mask.loc[unresolved, joint] = 0
-
-        df[f"{joint}_observed_mask"] = observed_mask[joint].to_numpy(dtype=int)
 
     return df
 
@@ -290,15 +267,22 @@ def restore_landmarks_to_original_frame(
     roi_info: Optional[dict],
 ) -> np.ndarray:
     """
-    ROI 좌표계를 원본 프레임 좌표계로 복원
+    ROI 좌표계를 원본 프레임 좌표계로 복원.
+
+    Input/Output shape:
+        (N, 3) = [x, y, z]
     """
+    landmarks = np.asarray(landmarks, dtype=float)
+
+    if landmarks.ndim != 2 or landmarks.shape[1] != 3:
+        raise ValueError("landmarks는 shape (N, 3)인 배열이어야 합니다.")
+
     restored = np.full_like(landmarks, np.nan, dtype=float)
 
     if landmarks.size == 0:
         return restored
 
     if roi_info is None:
-        restored[:, 3] = 0.0
         return restored
 
     scale = float(roi_info.get("scale", np.nan))
@@ -312,31 +296,27 @@ def restore_landmarks_to_original_frame(
         and np.isfinite(x1) and np.isfinite(y1)
         and np.isfinite(x_offset) and np.isfinite(y_offset)
     ):
-        restored[:, 3] = 0.0
         return restored
 
     for i, row in enumerate(landmarks):
-        x, y, z, observed_mask = row
+        x, y, z = row
 
         if not (np.isfinite(x) and np.isfinite(y) and np.isfinite(z)):
-            restored[i] = np.array([np.nan, np.nan, np.nan, 0.0], dtype=float)
+            restored[i] = np.array([np.nan, np.nan, np.nan], dtype=float)
             continue
 
         original_x = (x - x_offset) / scale + x1
         original_y = (y - y_offset) / scale + y1
         original_z = z / scale
 
-        restored[i] = np.array(
-            [original_x, original_y, original_z, float(observed_mask)],
-            dtype=float,
-        )
+        restored[i] = np.array([original_x, original_y, original_z], dtype=float)
 
     return restored
 
 
 def _pack_joint_array(df: pd.DataFrame, frame_idx: int, joint_order: List[str]) -> np.ndarray:
     """
-    지정된 joint_order에 맞춰 한 프레임의 [x_filt, y_filt, z_filt, observed_mask] 배열 생성
+    지정된 joint_order에 맞춰 한 프레임의 [x_filt, y_filt, z_filt] 배열 생성.
     """
     frame_landmarks = []
 
@@ -344,12 +324,11 @@ def _pack_joint_array(df: pd.DataFrame, frame_idx: int, joint_order: List[str]) 
         x = float(df.at[frame_idx, f"{joint}_x_filt"])
         y = float(df.at[frame_idx, f"{joint}_y_filt"])
         z = float(df.at[frame_idx, f"{joint}_z_filt"])
-        observed_mask = int(df.at[frame_idx, f"{joint}_observed_mask"])
 
         if not (np.isfinite(x) and np.isfinite(y) and np.isfinite(z)):
-            frame_landmarks.append(np.array([np.nan, np.nan, np.nan, 0.0], dtype=float))
+            frame_landmarks.append(np.array([np.nan, np.nan, np.nan], dtype=float))
         else:
-            frame_landmarks.append(np.array([x, y, z, float(observed_mask)], dtype=float))
+            frame_landmarks.append(np.array([x, y, z], dtype=float))
 
     return np.stack(frame_landmarks, axis=0)
 
@@ -362,9 +341,8 @@ def _pack_visibility_array(df: pd.DataFrame, frame_idx: int, joint_order: List[s
 
     for joint in joint_order:
         vis = float(df.at[frame_idx, f"{joint}_visibility"])
-        observed_mask = int(df.at[frame_idx, f"{joint}_observed_mask"])
 
-        if not np.isfinite(vis) or observed_mask == 0:
+        if not np.isfinite(vis):
             values.append(0.0)
         else:
             values.append(vis)
@@ -376,14 +354,9 @@ def _pack_visibility_array(df: pd.DataFrame, frame_idx: int, joint_order: List[s
 def pack_output_arrays(
     df: pd.DataFrame,
     roi_infos: List[Optional[dict]],
-) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    후처리된 dataframe을 최종 출력 형식으로 변환합니다.
-
-    Returns:
-        all_landmarks:   List[np.ndarray], frame마다 shape (12, 4)
-        visibility:      List[np.ndarray], frame마다 shape (12,)
-        bat_landmarks:   List[np.ndarray], frame마다 shape (6, 4)
+    후처리된 dataframe을 최종 출력 형식으로 변환
     """
     all_landmarks: List[np.ndarray] = []
     visibility: List[np.ndarray] = []
@@ -391,13 +364,17 @@ def pack_output_arrays(
 
     for i in range(len(df)):
         core_arr = _pack_joint_array(df, i, OUTPUT_JOINT_ORDER)
-        bat_arr = _pack_joint_array(df, i, BAT_JOINT_ORDER)
-
         restored_core = restore_landmarks_to_original_frame(core_arr, roi_infos[i])
+
+        bat_arr = _pack_joint_array(df, i, BAT_JOINT_ORDER)
         restored_bat = restore_landmarks_to_original_frame(bat_arr, roi_infos[i])
 
         all_landmarks.append(restored_core)
         visibility.append(_pack_visibility_array(df, i, OUTPUT_JOINT_ORDER))
         bat_landmarks.append(restored_bat)
 
-    return all_landmarks, visibility, bat_landmarks
+    return (
+        np.asarray(all_landmarks, dtype=float),
+        np.asarray(visibility, dtype=float),
+        np.asarray(bat_landmarks, dtype=float),
+    )

@@ -76,7 +76,7 @@ POSE_JOINTS: Dict[str, int] = {
     **HAND_EXTRA_JOINTS,
 }
 
-# all_landmarks 출력 순서: shape (T, 12, 4)
+# all_landmarks 출력 순서: shape (T, 12, 3)
 OUTPUT_JOINT_ORDER: List[str] = [
     "left_shoulder", "right_shoulder",
     "left_elbow", "right_elbow",
@@ -87,13 +87,13 @@ OUTPUT_JOINT_ORDER: List[str] = [
 ]
 
 
-# bat_landmarks 출력 순서: shape (T, 6, 4)
+# bat_landmarks 출력 순서: shape (T, 6, 3)
 # 각 손에 대해 wrist -> pinky -> index 순서로 둡니다.
-
 BAT_JOINT_ORDER: List[str] = [
     "left_wrist", "left_pinky", "left_index",
     "right_wrist", "right_pinky", "right_index",
 ]
+
 
 # left/right swap index pairs for each output array.
 OUTPUT_LEFT_RIGHT_PAIRS: List[Tuple[int, int]] = [
