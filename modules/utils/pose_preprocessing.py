@@ -14,8 +14,10 @@ from modules.utils.pose_utils import (
     MOTION_JUMP_RATIO_THRESHOLDS,
     OUTPUT_JOINT_ORDER,
     VISIBILITY_TH,
+    VISIBILITY_THRESHOLDS,
     MAX_EDGE_FILL_FRAMES,
     MAX_INTERP_GAP_FRAMES,
+    MAX_INTERP_GAP_FRAMES_BY_JOINT,
     SG_POLYORDER,
     contiguous_true_segments,
     choose_savgol_window,
@@ -64,11 +66,13 @@ def compute_visibility_missing(df: pd.DataFrame) -> pd.DataFrame:
         vis = df[f"{joint}_visibility"].to_numpy(dtype=float)
 
         coords_exist = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+        visibility_th = VISIBILITY_THRESHOLDS.get(joint, VISIBILITY_TH)
+
         vis_missing = (
             (pose_detected == 0)
             | (~coords_exist)
             | (~np.isfinite(vis))
-            | (vis < VISIBILITY_TH)
+            | (vis < visibility_th)
         )
         out[joint] = vis_missing
 
@@ -251,10 +255,15 @@ def apply_preprocessing(df: pd.DataFrame, fps: float) -> Optional[pd.DataFrame]:
             raw = df[f"{joint}{suffix}"].to_numpy(dtype=float)
             raw[joint_missing] = np.nan
 
+            max_interp_gap = MAX_INTERP_GAP_FRAMES_BY_JOINT.get(
+                joint,
+                MAX_INTERP_GAP_FRAMES,
+            )
+
             interp_values = interpolate_short_gaps(
                 raw,
                 joint_missing,
-                MAX_INTERP_GAP_FRAMES,
+                max_interp_gap,
             )
             smooth_values = savgol_smooth_with_nans(interp_values, fps)
             df[f"{joint}{suffix}_filt"] = smooth_values

@@ -3,25 +3,58 @@ import numpy as np
 
 
 # pose인식 thresholds
-VISIBILITY_TH = 0.45
-MAX_INTERP_GAP_FRAMES = 4
+VISIBILITY_TH = 0.45  # fallback/default
+VISIBILITY_THRESHOLDS: Dict[str, float] = {
+    "left_ankle": 0.45,
+    "left_elbow": 0.60,
+    "left_hip": 0.45,
+    "left_index": 0.75,
+    "left_knee": 0.45,
+    "left_pinky": 0.75,
+    "left_shoulder": 0.75,
+    "left_wrist": 0.70,
+    "right_ankle": 0.45,
+    "right_elbow": 0.60,
+    "right_hip": 0.45,
+    "right_index": 0.75,
+    "right_knee": 0.45,
+    "right_pinky": 0.75,
+    "right_shoulder": 0.75,
+    "right_wrist": 0.70,
+}
+
+MAX_INTERP_GAP_FRAMES = 4  # fallback/default
+MAX_INTERP_GAP_FRAMES_BY_JOINT: Dict[str, int] = {
+    "left_ankle": 4,
+    "left_elbow": 2,
+    "left_hip": 4,
+    "left_index": 0,
+    "left_knee": 4,
+    "left_pinky": 0,
+    "left_shoulder": 4,
+    "left_wrist": 1,
+    "right_ankle": 4,
+    "right_elbow": 2,
+    "right_hip": 4,
+    "right_index": 0,
+    "right_knee": 4,
+    "right_pinky": 0,
+    "right_shoulder": 4,
+    "right_wrist": 1,
+}
+
 MAX_EDGE_FILL_FRAMES = 4
 
 # Motion jump ratio thresholds (relative to shoulder width) for each joint.
 # 기준은 현재 보유한 스윙 영상에서 관절별 jump ratio 분포를 확인한 뒤 설정한 초기값입니다.
 # 데이터셋이 확정되면 다시 검증하고 조정할 예정입니다.
-HIP_JUMP_RATIO_TH = 0.22
-SHOULDER_JUMP_RATIO_TH = 0.40
-ELBOW_JUMP_RATIO_TH = 0.80
-WRIST_JUMP_RATIO_TH = 1.10
-KNEE_JUMP_RATIO_TH = 0.50
-ANKLE_JUMP_RATIO_TH = 0.65
-
-# Savitzky-Golay filter settings for smoothing after interpolation.
-SG_POLYORDER = 2
-SG_MIN_WINDOW = 5
-SG_MAX_WINDOW = 11
-SG_WINDOW_SEC = 0.12
+HIP_JUMP_RATIO_TH = 0.35
+SHOULDER_JUMP_RATIO_TH = 0.59
+ELBOW_JUMP_RATIO_TH = 0.92
+WRIST_JUMP_RATIO_TH = 0.90
+FINGER_JUMP_RATIO_TH = 0.75
+KNEE_JUMP_RATIO_TH = 0.56
+ANKLE_JUMP_RATIO_TH = 0.80
 
 MOTION_JUMP_RATIO_THRESHOLDS: Dict[str, float] = {
     "left_hip": HIP_JUMP_RATIO_TH,
@@ -32,15 +65,22 @@ MOTION_JUMP_RATIO_THRESHOLDS: Dict[str, float] = {
     "right_elbow": ELBOW_JUMP_RATIO_TH,
     "left_wrist": WRIST_JUMP_RATIO_TH,
     "right_wrist": WRIST_JUMP_RATIO_TH,
-    "left_pinky": WRIST_JUMP_RATIO_TH,
-    "right_pinky": WRIST_JUMP_RATIO_TH,
-    "left_index": WRIST_JUMP_RATIO_TH,
-    "right_index": WRIST_JUMP_RATIO_TH,
+    "left_pinky": FINGER_JUMP_RATIO_TH,
+    "right_pinky": FINGER_JUMP_RATIO_TH,
+    "left_index": FINGER_JUMP_RATIO_TH,
+    "right_index": FINGER_JUMP_RATIO_TH,
     "left_knee": KNEE_JUMP_RATIO_TH,
     "right_knee": KNEE_JUMP_RATIO_TH,
     "left_ankle": ANKLE_JUMP_RATIO_TH,
     "right_ankle": ANKLE_JUMP_RATIO_TH,
 }
+
+# Savitzky-Golay filter settings for smoothing after interpolation.
+SG_POLYORDER = 2
+SG_MIN_WINDOW = 5
+SG_MAX_WINDOW = 11
+SG_WINDOW_SEC = 0.12
+
 
 # =========================
 # Landmark definitions
