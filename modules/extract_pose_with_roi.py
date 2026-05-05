@@ -37,7 +37,7 @@ def _extract_raw_dataframe(
     fps: float,
 ) -> pd.DataFrame:
     """
-    ROI 프레임들에 대해 MediaPipe raw landmark dataframe 생성
+    ROI 프레임들에 대해 MediaPipe raw landmark dataframe 생성.
     """
     rows = []
 
@@ -76,7 +76,7 @@ def _extract_raw_dataframe(
 
             row[f"{joint_name}_x"] = float(lm.x * width)
             row[f"{joint_name}_y"] = float(lm.y * height)
-            row[f"{joint_name}_z"] = float(lm.z)
+            row[f"{joint_name}_z"] = float(lm.z * width)
             row[f"{joint_name}_visibility"] = float(getattr(lm, "visibility", np.nan))
             row[f"{joint_name}_presence"] = (
                 float(getattr(lm, "presence", np.nan))
@@ -93,18 +93,17 @@ def extract_pose_with_roi(
     roi_infos: List[Optional[dict]],
     fps: float,
     model_path: Optional[str] = None,
-) -> Optional[Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]]:
+) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
-    ROI 프레임에서 pose를 추출하고,
-    원본 프레임 좌표계로 복원한 landmark 리스트를 반환
+    ROI 프레임 시퀀스에서 pose landmark를 추출한 뒤 원본 프레임 좌표계로 복원합니다.
 
     Returns:
-        all_landmarks: frame마다 shape (12, 4)
-        visibility: frame마다 shape (12,)
-        bat_landmarks: frame마다 shape (6, 4)
+        all_landmarks: np.ndarray, shape (num_frames, 12, 3), [x, y, z]
+        visibility: np.ndarray, shape (num_frames, 12)
+        bat_landmarks: np.ndarray, shape (num_frames, 6, 3), [x, y, z]
 
     Notes:
-        - 영상 1개 처리 시 landmarker는 내부에서 1회 생성됩니다.
+        - num_frames는 입력 roi_frames의 길이입니다.
     """
     if roi_frames is None or roi_infos is None:
         return None
@@ -115,7 +114,7 @@ def extract_pose_with_roi(
 
     if model_path is None:
         model_path = DEFAULT_MEDIAPIPE_MODEL_PATH
-    
+
     with create_landmarker(model_path) as local_landmarker:
         raw_df = _extract_raw_dataframe(local_landmarker, roi_frames, roi_infos, fps)
 
