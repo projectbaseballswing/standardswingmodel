@@ -27,6 +27,9 @@ def process_video(video_path, yolo_model, is_left=False):
     # 좌우 통일: 우타로 고정
     if is_left:
         frames = flip_video_frames(frames) 
+        
+    print('우타자 기준으로 프레임이 고정되었는지 확인')
+    print(frames)
     
     # 프레임 height, width
     H, W = frames[0].shape[:2]
@@ -52,11 +55,11 @@ def process_video(video_path, yolo_model, is_left=False):
     
     # Bat 전처리
     # 각도 언래핑(0~90도를 연속값으로 보정) -> 결측치 보정 -> 이상치 보정 -> df to np
-    bat_df = extracted_data["bat"]
-    if bat_df is None:
-        print("Bat Not Found")
-        return player_np, None
-    bat_np = preprocess_bat(bat_df)
+    # bat_df = extracted_data["bat"]
+    # if bat_df is None:
+    #     print("Bat Not Found")
+    #     return player_np, None
+    # bat_np = preprocess_bat(bat_df)
 
     '''
     [ 여기까지 진행했을 때 변수 목록 ]
@@ -65,7 +68,7 @@ def process_video(video_path, yolo_model, is_left=False):
     bat_np : bat xywhr 데이터 (numpy) [cx, cy, w, h, r]
     '''
 
-    return player_np, bat_np
+    # return player_np, bat_np
 
     # --------------------------------
     # --------------------------------
@@ -84,28 +87,54 @@ def process_video(video_path, yolo_model, is_left=False):
 
         roi_frames.append(roi)
         roi_infos.append(roi_info)
+        
+    # 제대로 roi 되었는지 확인하기 위해 출력함 
+    print('')
+    print('')
+    print('')
+    print('roi 되었는지 확인 roi_frames')
+    print(roi_frames)
 
     # --------------------------------
     # --------------------------------
     # 원본 좌표로 복원한 후 정규화 진행
-    # all_landmarks: [x,y,z,1], [x,y,z,1], [x,z,y,0]... 형태로 나옴
-    # wrist_landmarks는 원본 좌표만 (정규환 안된거)
+    # all_landmarks: [x,y,z], [x,y,z], [x,z,y]... 형태로 나옴
+    # wrist_landmarks는 원본 좌표만 
     # roi_infos = [ {frame1 정보}, {frame2 정보}, {frame3 정보}, ...]
     # visibility 추가로 받음: 넘파이 형태 
     pose_result = extract_pose_with_roi(roi_frames, roi_infos, fps)
 
     if pose_result is None:
         print("landmarks 없음")
-    return None
+        return None
 
-    all_landmarks, visibility, bat_landmarks = pose_result
+    # bat_landmarks라고 되어 있었는데 밑에 wrist_landmarks라 되어 있어서 이름을 바꿨습니다. 
+    all_landmarks, visibility, wrist_landmarks = pose_result
+    
+    # 확인용 
+    print('')
+    print('')
+    print('')
+    print('관절 좌표 나오는지 확인 all_landmarks')
+    print(all_landmarks)
+    
+    print('')
+    print('')
+    print('')
+    print('신뢰도 나오는지 확인 visibility')
+    print(visibility)
+    
+    # 
+    print('프레임 수 빼고 동일해야 함 all_landmarks.shape & visibility.shape')
+    print(all_landmarks.shape, visibility.shape)
+    
+    # 배트 부분
     # --------------------------------
     # --------------------------------
     # bat 정보 추출
     bat_positions = []
     bat_angles = []
 
-    
     bat_positions, bat_angles = detect_bat_with_wrist(frames, wrist_landmarks, yolo_model)
 
     if should_discard(bat_positions, max_allowed_gap=5):
@@ -114,15 +143,31 @@ def process_video(video_path, yolo_model, is_left=False):
 
     bat_positions = fill_remaining_none(bat_positions)
     bat_angles = fill_remaining_none(bat_angles)
-
+    # --------------------------------
+    # --------------------------------
+    
         
     # 정규화 코드 추가 
     all_landmarks_final = normalize_landmarks_sequence(all_landmarks, visibility)
+    
+    # 확인용
+    print('')
+    print('')
+    print('')
+    print('정규화 되었는지 확인 all_landmarks_final')
+    print(all_landmarks_final)
 
     # 최종 피처는 [x1 y1 z1 신뢰도 x2 y2 z2 신뢰도 ...]... 형태로 나옴
     # 임팩트 부분을 기준으로 프레임 정렬(프레임 개수 맞추기) + 남은 피처 추가
-    # 구현
-    final_data = make_features_single_video(all_landmarks_final, bat_angles, bat_positions, visibility, dt)
+    # bat_angles, bat_positions > 제외
+    final_data = make_features_single_video(all_landmarks_final, visibility, dt)
+    
+    # 확인용 
+    print('')
+    print('')
+    print('')
+    print('모든 영상의 데이터가 같은 크기로 나와야 함 final_data.shape')
+    print(final_data.shape)
 
     return final_data
 

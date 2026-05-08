@@ -1,5 +1,5 @@
 # final_data = make_features(all_landmarks, bat_angles, bat_positions, dt)
-def make_features_single_video(all_landmarks, bat_angles, bat_positions, visibility, dt):
+def make_features_single_video(all_landmarks, visibility, dt):
 
 
     '''
@@ -10,17 +10,26 @@ def make_features_single_video(all_landmarks, bat_angles, bat_positions, visibil
     '''
 
     # 1. 임팩트 찾기
-    # 배트 속도가 가장 빠른 순간 = 임팩트라고 가정
-    impact_idx = _find_impact_frame(bat_positions)
+    # 양쪽 손목 중심 속도가 가장 빠른 순간 = 임팩트라고 가정
+    landmarks = all_landmarks
+    # 양손 x,y 좌표만 사용 
+    lw = landmarks[:, 4, :2]
+    rw = landmarks[:, 5, :2]
+    hand_center = (lw + rw) / 2 
+    impact_idx = _find_impact_frame(hand_center)
 
     # 2. 정렬 + 길이 통일
     # 임팩트를 중심으로 앞뒤 동일하게 자름
     target_len = 80
     pre_ratio = 0.75
     lm = _align_sequence(all_landmarks, impact_idx, target_len, pre_ratio)
-    angle = _align_sequence(bat_angles, impact_idx, target_len, pre_ratio)
-    pos = _align_sequence(bat_positions, impact_idx, target_len, pre_ratio)
     vis = _align_sequence(visibility, impact_idx, target_len, pre_ratio)
+    
+    # 배트 앵글
+    # angle = _align_sequence(bat_angles, impact_idx, target_len, pre_ratio)
+    # 배트 위치
+    # pos = _align_sequence(bat_positions, impact_idx, target_len, pre_ratio)
+    
 
     # 한 관절이 x,y,z,visibility 순서로 피처가 되도록 설정 
     coords = lm        # (T,12,3)
@@ -33,6 +42,14 @@ def make_features_single_video(all_landmarks, bat_angles, bat_positions, visibil
 
     # [x,y,z,visibilty] -> [x],[y],[z]... 처럼 하나의 피처가 될수 있도록 바꿈 
     coords_feat = coords_with_mask.reshape(len(coords), -1)
+    
+    # 확인용
+    print('')
+    print('')
+    print('')
+    print('한 관절 당 x,y,z,visibilty 나오는지 확인')
+    print(coords_feat)
+    
 
     # 3. 피처 생성
     # lm: 관절 좌표 / angle: 배트 각도 / pos: 배트 위치
@@ -105,7 +122,7 @@ def make_features_single_video(all_landmarks, bat_angles, bat_positions, visibil
 
     # 배트 계산
     # 각속도 크기(bat speed) + 각속도 반환(angular_velocity)
-    bat_speed, bat_angular_velocity = _compute_bat_speed(angle, dt)
+    # bat_speed, bat_angular_velocity = _compute_bat_speed(angle, dt)
 
 
     # 피처 합치기
@@ -134,8 +151,8 @@ def make_features_single_video(all_landmarks, bat_angles, bat_positions, visibil
     wrist_velocity[:, None],
 
     # 5. bat features
-    bat_speed[:, None],
-    bat_angular_velocity[:, None],
+    #bat_speed[:, None],
+    #bat_angular_velocity[:, None],
 
     ], axis=1)
 
@@ -147,17 +164,22 @@ def make_features_single_video(all_landmarks, bat_angles, bat_positions, visibil
 #################################
 
 # 임팩트 찾기
-# 배트 속도가 가장 빠른 프레임 = 임팩트
-# pos: 배트 위치로 찾음
+# 손목 속도가 가장 빠른 프레임 = 임팩트
+# pos: 양쪽 손목 좌표로 찾음
 def _find_impact_frame(pos):
-    speeds = []
-    for i in range(1, len(pos)):
-        # pos[i] - pos[i-1] → 이동 벡터
-        # # np.linalg.norm(...) → 벡터의 길이(크기)를 구하는 함수
-        dist = np.linalg.norm(pos[i] - pos[i-1])
-        speeds.append(dist)
-    # np.argmax(speeds) → 속도가 최대인 index 반환(프레임은 1부터 시작해서 +1해줌)
-    return np.argmax(speeds) + 1
+    
+    # 프레임 간 이동 벡터 계산
+    velocity = pos[1:] - pos[:-1]   # shape: (T-1, 2)
+    
+    # 이동 벡터의 크기 = 속도
+    speeds = np.linalg.norm(velocity, axis=1)  # shape: (T-1,)
+    
+    # 속도가 가장 큰 프레임 반환
+    # speeds는 1프레임 뒤 기준이라 +1
+    impact_idx = np.argmax(speeds) + 1
+
+    return impact_idx
+
 
 # 정렬 + 길이 통일
 # 임팩트를 중심으로 시퀀스를 잘라서 길이를 딱 맞춤: 80으로 통일(임팩트기준 앞:60, 뒤:20)
@@ -185,7 +207,7 @@ def _align_sequence(seq, impact_idx, target_len=80, pre_ratio=0.75):
     
     # 부족한 길이 계산
     left_pad_len = pre_len - left_actual
-    right_pad_len = pre_len - right_actual
+    right_pad_len = post_len - right_actual
 
     # 길이가 부족한 경우 패딩: 앞이나 뒤가 잘려서 80보다 짧아질 수 있음
     if left_pad_len > 0:
@@ -335,7 +357,7 @@ def _compute_all_velocities(
 #################################
 #################################
 # 배트 추가 피처 생성
-
+'''
 def _compute_bat_speed(angle, dt): 
     """
     각속도 크기(bat speed) + 각속도 반환(angular_velocity)
@@ -368,3 +390,4 @@ def _compute_bat_speed(angle, dt):
 
     return bat_speed, angular_velocity
 
+'''

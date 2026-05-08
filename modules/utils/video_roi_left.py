@@ -211,6 +211,15 @@ def normalize_landmarks_sequence(all_landmarks, visibility, eps=1e-8):
     if not np.isfinite(body_scale) or body_scale < eps:
         return all_landmarks
 
+    print('')
+    print('')
+    print('')
+    print('정규화 부분 확인')
+    print('기준 프레임 & 기준 축 & 사람 기준 scale')
+    print('기준 프레임: ', ref_frame)
+    print('기준 축: ', basis)
+    print('body_scale: ', body_scale)
+
     # 전체 정규화
     return _apply_normalization(all_landmarks, basis, body_scale, eps)
 
