@@ -337,7 +337,7 @@
     "기아_83_위즈덤.mp4": {
         "handedness": "right"
     }, 
-    "기아_84_박찬호.mp4": {
+    "기아_84_박찬호.mov": {
         "handedness": "right"
     }, 
 
@@ -888,6 +888,10 @@
         "handedness": "right"
     },
 
+    "롯데_37_윤동희.mp4": {
+        "handedness": "right"
+    },
+
     "롯데_38_윤동희.mp4": {
         "handedness": "right"
     },
@@ -993,11 +997,11 @@
     },
 
     "롯데_64_김민성.mp4": {
-        "handedness": "left"
+        "handedness": "right"
     },
 
     "롯데_65_김민성.mp4": {
-        "handedness": "left"
+        "handedness": "right"
     },
 
     "롯데_66_레이예스.mp4": {
@@ -1058,6 +1062,30 @@
 
     "롯데_80_고승민.mp4": {
         "handedness": "left"
+    },
+    
+    "롯데_81_손호영.mp4": {
+        "handedness": "right"
+    },
+        
+    "롯데_82_손호영.mp4": {
+        "handedness": "right"
+    },
+        
+    "롯데_83_손호영.mp4": {
+        "handedness": "right"
+    },
+        
+    "롯데_84_손호영.mp4": {
+        "handedness": "right"
+    },
+        
+    "롯데_85_손호영.mp4": {
+        "handedness": "right"
+    },
+            
+    "롯데_86_손성빈.mp4": {
+        "handedness": "right"
     },
 
     "삼성_1_김영웅.mp4": {
@@ -1189,7 +1217,7 @@
     },
 
     "삼성_33_강민호.mp4": {
-        "handedness": "left"
+        "handedness": "right"
     },
 
     "삼성_34_강민호.mp4": {
@@ -1351,7 +1379,71 @@
     "삼성_73_김현준.mp4": {
         "handedness": "left"
     },
-
+    
+    "삼성_74_이재현.mp4": {
+        "handedness": "right"
+    },
+        
+    "삼성_75_이재현.mp4": {
+        "handedness": "right"
+    },
+        
+    "삼성_76_이재현.mp4": {
+        "handedness": "right"
+    },
+        
+    "삼성_77_이재현.mp4": {
+        "handedness": "right"
+    },
+            
+    "삼성_78_김지찬.mp4": {
+        "handedness": "left"
+    },
+                
+    "삼성_79_김성윤.mp4": {
+        "handedness": "left"
+    },
+                    
+    "삼성_80_디아즈.mp4": {
+        "handedness": "left"
+    },
+                        
+    "삼성_81_김영웅.mp4": {
+        "handedness": "left"
+    },
+                            
+    "삼성_82_김영웅.mp4": {
+        "handedness": "left"
+    },
+                            
+    "삼성_83_김영웅.mp4": {
+        "handedness": "left"
+    },
+                            
+    "삼성_84_김영웅.mp4": {
+        "handedness": "left"
+    },
+                                
+    "삼성_85_이창용.mp4": {
+        "handedness": "right"
+    },
+                            
+    "삼성_86_양우현.mp4": {
+        "handedness": "left"
+    },
+                                
+    "삼성_87_양우현.mp4": {
+        "handedness": "left"
+    },
+                                
+    "삼성_88_양우현.mp4": {
+        "handedness": "left"
+    },
+                                
+    "삼성_89_양우현.mp4": {
+        "handedness": "left"
+    },
+    
     "이외_1_강정호.MOV": {
         "handedness": "right"
     },
@@ -1693,6 +1785,66 @@
     },
 
     "키움_76_이지영.mp4": {
+        "handedness": "right"
+    },
+    
+    "키움_77_박병호.mp4": {
+        "handedness": "right"
+    },
+        
+    "키움_78_박병호.mp4": {
+        "handedness": "right"
+    },
+        
+    "키움_79_박병호.mp4": {
+        "handedness": "right"
+    },
+        
+    "키움_80_박병호.mp4": {
+        "handedness": "right"
+    },
+        
+    "키움_81_박병호.mp4": {
+        "handedness": "right"
+    },
+        
+    "키움_82_박병호.mp4": {
+        "handedness": "right"
+    },
+        
+    "키움_83_박병호.mp4": {
+        "handedness": "right"
+    },
+        
+    "키움_84_박병호.mp4": {
+        "handedness": "right"
+    },
+            
+    "키움_85_김휘집.mp4": {
+        "handedness": "right"
+    },
+                
+    "키움_86_김휘집.mp4": {
+        "handedness": "right"
+    },
+                
+    "키움_87_김휘집.mp4": {
+        "handedness": "right"
+    },
+                
+    "키움_88_김휘집.mp4": {
+        "handedness": "right"
+    },
+                
+    "키움_89_김휘집.mp4": {
+        "handedness": "right"
+    },
+                
+    "키움_90_김휘집.mp4": {
+        "handedness": "right"
+    },
+                
+    "키움_91_김휘집.mp4": {
         "handedness": "right"
     },
 
@@ -2559,6 +2711,182 @@
     "LG_34_송찬의.mp4": {
         "handedness": "right"
     },
+    
+    "LG_35_오스틴.mp4": {
+        "handedness": "right"
+    },
+        
+    "LG_36_오스틴.mp4": {
+        "handedness": "right"
+    },
+        
+    "LG_37_오스틴.mp4": {
+        "handedness": "right"
+    },
+        
+    "LG_38_오스틴.mp4": {
+        "handedness": "right"
+    },
+            
+    "LG_39_오지환.mp4": {
+        "handedness": "left"
+    },
+                
+    "LG_40_오지환.mp4": {
+        "handedness": "left"
+    },
+                
+    "LG_41_오지환.mp4": {
+        "handedness": "left"
+    },
+                
+    "LG_42_오지환.mp4": {
+        "handedness": "left"
+    },
+                
+    "LG_43_오지환.mp4": {
+        "handedness": "left"
+    },
+                
+    "LG_44_오지환.mp4": {
+        "handedness": "left"
+    },
+                    
+    "LG_45_박동원.mp4": {
+        "handedness": "right"
+    },
+                        
+    "LG_46_박동원.mp4": {
+        "handedness": "right"
+    },
+                        
+    "LG_47_박동원.mp4": {
+        "handedness": "right"
+    },
+                        
+    "LG_48_박동원.mp4": {
+        "handedness": "right"
+    },
+                        
+    "LG_49_박동원.mp4": {
+        "handedness": "right"
+    },
+                        
+    "LG_50_박동원.mp4": {
+        "handedness": "right"
+    },
+                            
+    "LG_51_문성주.mp4": {
+        "handedness": "left"
+    },
+                                
+    "LG_52_신민재.mp4": {
+        "handedness": "left"
+    },
+                                    
+    "LG_53_신민재.mp4": {
+        "handedness": "left"
+    },
+                                    
+    "LG_54_신민재.mp4": {
+        "handedness": "left"
+    },
+                                    
+    "LG_55_신민재.mp4": {
+        "handedness": "left"
+    },
+                                    
+    "LG_56_신민재.mp4": {
+        "handedness": "left"
+    },
+                                    
+    "LG_57_신민재.mp4": {
+        "handedness": "left"
+    },
+                                        
+    "LG_58_박해민.mp4": {
+        "handedness": "left"
+    },
+                                            
+    "LG_58_신민재.mp4": {
+        "handedness": "left"
+    },
+                                            
+    "LG_59_박해민.mp4": {
+        "handedness": "left"
+    },
+                                                
+    "LG_59_신민재.mp4": {
+        "handedness": "left"
+    },
+                                                
+    "LG_60_박해민.mp4": {
+        "handedness": "left"
+    },
+                                                    
+    "LG_61_박해민.mp4": {
+        "handedness": "left"
+    },
+                                                        
+    "LG_62_박해민.mp4": {
+        "handedness": "left"
+    },
+                                                        
+    "LG_63_박해민.mp4": {
+        "handedness": "left"
+    },
+                                                    
+    "LG_64_박해민.mp4": {
+        "handedness": "left"
+    },
+                                                        
+    "LG_65_문보경.mp4": {
+        "handedness": "left"
+    },
+                                                            
+    "LG_66_문보경.mp4": {
+        "handedness": "left"
+    },
+                                                            
+    "LG_67_문보경.mp4": {
+        "handedness": "left"
+    },
+                                                                
+    "LG_68_김현종.mp4": {
+        "handedness": "right"
+    },
+                                                                    
+    "LG_69_구본혁.mp4": {
+        "handedness": "right"
+    },
+                                                                        
+    "LG_70_구본혁.mp4": {
+        "handedness": "right"
+    },
+                                                                        
+    "LG_71_구본혁.mp4": {
+        "handedness": "right"
+    },
+                                                                        
+    "LG_72_구본혁.mp4": {
+        "handedness": "right"
+    },
+                                                                        
+    "LG_73_구본혁.mp4": {
+        "handedness": "right"
+    },
+                                                                        
+    "LG_74_구본혁.mp4": {
+        "handedness": "right"
+    },
+                                                                        
+    "LG_75_구본혁.mp4": {
+        "handedness": "right"
+    },
+                                                                        
+    "LG_76_구본혁.mp4": {
+        "handedness": "right"
+    },
 
     "NC_1_손아섭.mp4": {
         "handedness": "left"
@@ -2855,393 +3183,445 @@
     "NC_74_김형준.mp4": {
         "handedness": "right"
     },
-            
-    "SSG_1_최정.mp4": {
-        "handedness": "right"
-    },
                 
-    "SSG_2_최정.mp4": {
-        "handedness": "right"
+    "NC_75_김주원.mp4": {
+        "handedness": "left"
     },
-                
-    "SSG_3_최정.mp4": {
-        "handedness": "right"
+                    
+    "NC_76_김주원.mp4": {
+        "handedness": "left"
     },
-                
-    "SSG_4_최정.mp4": {
-        "handedness": "right"
-    },
-                
-    "SSG_5_최정.mp4": {
-        "handedness": "right"
-    },
-                
-    "SSG_6_김강민.mp4": {
+                    
+    "NC_77_김주원.mp4": {
         "handedness": "right"
     },
                     
-    "SSG_7_김강민.mp4": {
-        "handedness": "right"
-    },
-                    
-    "SSG_8_김강민.mp4": {
-        "handedness": "right"
-    },
-                    
-    "SSG_9_김강민.mp4": {
-        "handedness": "right"
-    },
-                    
-    "SSG_10_김강민.mp4": {
+    "NC_78_김주원.mp4": {
         "handedness": "right"
     },
                         
-    "SSG_11_최지훈.mp4": {
+    "NC_79_박건우.mp4": {
+        "handedness": "right"
+    },
+                            
+    "NC_80_박건우.mp4": {
+        "handedness": "right"
+    },
+                                
+    "NC_81_서호철.mp4": {
+        "handedness": "right"
+    },
+                                    
+    "NC_82_박민우.mp4": {
+        "handedness": "left"
+    },
+                                        
+    "NC_83_박민우.mp4": {
+        "handedness": "left"
+    },
+                                        
+    "NC_84_박민우.mp4": {
+        "handedness": "left"
+    },
+                                        
+    "NC_85_박민우.mp4": {
+        "handedness": "left"
+    },
+                                        
+    "NC_86_박민우.mp4": {
+        "handedness": "left"
+    },
+            
+    "ssg_1_최정.mp4": {
+        "handedness": "right"
+    },
+                
+    "ssg_2_최정.mp4": {
+        "handedness": "right"
+    },
+                
+    "ssg_3_최정.mp4": {
+        "handedness": "right"
+    },
+                
+    "ssg_4_최정.mp4": {
+        "handedness": "right"
+    },
+                
+    "ssg_5_최정.mp4": {
+        "handedness": "right"
+    },
+                
+    "ssg_6_김강민.mp4": {
+        "handedness": "right"
+    },
+                    
+    "ssg_7_김강민.mp4": {
+        "handedness": "right"
+    },
+                    
+    "ssg_8_김강민.mp4": {
+        "handedness": "right"
+    },
+                    
+    "ssg_9_김강민.mp4": {
+        "handedness": "right"
+    },
+                    
+    "ssg_10_김강민.mp4": {
+        "handedness": "right"
+    },
+                        
+    "ssg_11_최지훈.mp4": {
         "handedness": "left"
     },
                             
-    "SSG_12_최지훈.mp4": {
+    "ssg_12_최지훈.mp4": {
         "handedness": "left"
     },
                                 
-    "SSG_13_최지훈.mp4": {
+    "ssg_13_최지훈.mp4": {
         "handedness": "left"
     },
                                 
-    "SSG_14_최지훈.mp4": {
+    "ssg_14_최지훈.mp4": {
         "handedness": "left"
     },
                                     
-    "SSG_15_최정.mp4": {
+    "ssg_15_최정.mp4": {
         "handedness": "right"
     },
                                         
-    "SSG_16_최정.mp4": {
+    "ssg_16_최정.mp4": {
         "handedness": "right"
     },
                                         
-    "SSG_17_최정.mp4": {
+    "ssg_17_최정.mp4": {
         "handedness": "right"
     },
                                             
-    "SSG_18_오태곤.mp4": {
+    "ssg_18_오태곤.mp4": {
         "handedness": "right"
     },
                                                 
-    "SSG_19_오태곤.mp4": {
+    "ssg_19_오태곤.mp4": {
         "handedness": "right"
     },
                                                 
-    "SSG_20_박지환.mp4": {
+    "ssg_20_박지환.mp4": {
         "handedness": "right"
     },
                                                     
-    "SSG_21_정준재.mp4": {
+    "ssg_21_정준재.mp4": {
         "handedness": "left"
     },
                                                         
-    "SSG_22_정준재.mp4": {
+    "ssg_22_정준재.mp4": {
         "handedness": "left"
     },
                                                         
-    "SSG_23_정준재.mp4": {
+    "ssg_23_정준재.mp4": {
         "handedness": "left"
     },
                                                         
-    "SSG_24_박지환.mp4": {
+    "ssg_24_박지환.mp4": {
         "handedness": "right"
     },
                                                             
-    "SSG_25_박지환.mp4": {
+    "ssg_25_박지환.mp4": {
         "handedness": "right"
     },
                                                             
-    "SSG_26_오태곤.mp4": {
+    "ssg_26_오태곤.mp4": {
         "handedness": "right"
     },
                                                                 
-    "SSG_27_박지환.mp4": {
+    "ssg_27_박지환.mp4": {
         "handedness": "right"
     },
                                                                 
-    "SSG_28_박지환.mp4": {
+    "ssg_28_박지환.mp4": {
         "handedness": "right"
     },
                                                                 
-    "SSG_29_김강민.mp4": {
+    "ssg_29_김강민.mp4": {
         "handedness": "right"
     },
                                                                 
-    "SSG_30_김성현.mp4": {
+    "ssg_30_김성현.mp4": {
         "handedness": "right"
     },
                                                                     
-    "SSG_31_에레디아.mp4": {
+    "ssg_31_에레디아.mp4": {
         "handedness": "right"
     },
                                                                         
-    "SSG_32_김강민.mp4": {
+    "ssg_32_김강민.mp4": {
         "handedness": "right"
     },
                                                                             
-    "SSG_33_김강민.mp4": {
+    "ssg_33_김강민.mp4": {
         "handedness": "right"
     },
                                                                             
-    "SSG_34_조형우.mp4": {
+    "ssg_34_조형우.mp4": {
         "handedness": "right"
     },
                                                                                 
-    "SSG_35_조형우.mp4": {
+    "ssg_35_조형우.mp4": {
         "handedness": "right"
     },
                                                                                 
-    "SSG_36_조형우.mp4": {
+    "ssg_36_조형우.mp4": {
         "handedness": "right"
     },
                                                                                 
-    "SSG_37_조형우.mp4": {
+    "ssg_37_조형우.mp4": {
         "handedness": "right"
     },
                                                                                 
-    "SSG_38_조형우.mp4": {
+    "ssg_38_조형우.mp4": {
         "handedness": "right"
     },
                                                                                 
-    "SSG_39_조형우.mp4": {
+    "ssg_39_조형우.mp4": {
         "handedness": "right"
     },
                                                                                 
-    "SSG_40_조형우.mp4": {
+    "ssg_40_조형우.mp4": {
         "handedness": "right"
     },
                                                                                 
-    "SSG_41_조형우.mp4": {
+    "ssg_41_조형우.mp4": {
         "handedness": "right"
     },
                                                                                     
-    "SSG_42_최준우.mp4": {
+    "ssg_42_최준우.mp4": {
         "handedness": "left"
     },
                                                                                         
-    "SSG_43_최준우.mp4": {
+    "ssg_43_최준우.mp4": {
         "handedness": "left"
     },
                                                                                         
-    "SSG_44_최준우.mp4": {
+    "ssg_44_최준우.mp4": {
         "handedness": "left"
     },
                                                                                             
-    "SSG_45_오태곤.mp4": {
+    "ssg_45_오태곤.mp4": {
         "handedness": "right"
     },
                                                                                                 
-    "SSG_46_오태곤.mp4": {
+    "ssg_46_오태곤.mp4": {
         "handedness": "right"
     },
                                                                                                 
-    "SSG_47_오태곤.mp4": {
+    "ssg_47_오태곤.mp4": {
         "handedness": "right"
     },
                                                                                                 
-    "SSG_48_오태곤.mp4": {
+    "ssg_48_오태곤.mp4": {
         "handedness": "right"
     },
                                                                                                 
-    "SSG_49_오태곤.mp4": {
+    "ssg_49_오태곤.mp4": {
         "handedness": "right"
     },
                                                                                                     
-    "SSG_50_김성현.mp4": {
+    "ssg_50_김성현.mp4": {
         "handedness": "right"
     },
                                                                                                         
-    "SSG_51_김성현.mp4": {
+    "ssg_51_김성현.mp4": {
         "handedness": "right"
     },
                                                                                                             
-    "SSG_52_한유섬.mp4": {
+    "ssg_52_한유섬.mp4": {
         "handedness": "left"
     },
                                                                                                                 
-    "SSG_53_한유섬.mp4": {
+    "ssg_53_한유섬.mp4": {
         "handedness": "left"
     },
                                                                                                                 
-    "SSG_54_한유섬.mp4": {
+    "ssg_54_한유섬.mp4": {
         "handedness": "left"
     },
                                                                                                                 
-    "SSG_55_한유섬.mp4": {
+    "ssg_55_한유섬.mp4": {
         "handedness": "left"
     },
                                                                                                                 
-    "SSG_56_한유섬.mp4": {
+    "ssg_56_한유섬.mp4": {
         "handedness": "left"
     },
                                                                                                                 
-    "SSG_57_한유섬.mp4": {
+    "ssg_57_한유섬.mp4": {
         "handedness": "left"
     },
                                                                                                                 
-    "SSG_58_한유섬.mp4": {
+    "ssg_58_한유섬.mp4": {
         "handedness": "left"
     },
                                                                                                                 
-    "SSG_59_한유섬.mp4": {
+    "ssg_59_한유섬.mp4": {
         "handedness": "left"
     },
                                                                                                                     
-    "SSG_60_추신수.mp4": {
+    "ssg_60_추신수.mp4": {
         "handedness": "left"
     },
                                                                                                                         
-    "SSG_61_김성현.mp4": {
+    "ssg_61_김성현.mp4": {
         "handedness": "right"
     },
                                                                                                                         
-    "SSG_62_추신수.mp4": {
+    "ssg_62_추신수.mp4": {
         "handedness": "left"
     },
                                                                                                                             
-    "SSG_63_추신수.mp4": {
+    "ssg_63_추신수.mp4": {
         "handedness": "left"
     },
                                                                                                                                 
-    "SSG_64_추신수.mp4": {
+    "ssg_64_추신수.mp4": {
         "handedness": "left"
     },
                                                                                                                                 
-    "SSG_65_추신수.mp4": {
+    "ssg_65_추신수.mp4": {
         "handedness": "left"
     },
                                                                                                                                 
-    "SSG_66_추신수.mp4": {
+    "ssg_66_추신수.mp4": {
         "handedness": "left"
     },
                                                                                                                                 
-    "SSG_67_추신수.mp4": {
+    "ssg_67_추신수.mp4": {
         "handedness": "left"
     },
                                                                                                                                 
-    "SSG_68_추신수.mp4": {
+    "ssg_68_추신수.mp4": {
         "handedness": "left"
     },
                                                                                                                                     
-    "SSG_69_에레디아.mp4": {
+    "ssg_69_에레디아.mp4": {
         "handedness": "right"
     },
                                                                                                                                         
-    "SSG_70_에레디아.mp4": {
+    "ssg_70_에레디아.mp4": {
         "handedness": "right"
     },
                                                                                                                                         
-    "SSG_71_에레디아.mp4": {
+    "ssg_71_에레디아.mp4": {
         "handedness": "right"
     },
                                                                                                                                         
-    "SSG_72_에레디아.mp4": {
+    "ssg_72_에레디아.mp4": {
         "handedness": "right"
     },
                                                                                                                                         
-    "SSG_73_에레디아.mp4": {
+    "ssg_73_에레디아.mp4": {
         "handedness": "right"
     },
                                                                                                                                             
-    "SSG_74_김성현.mp4": {
+    "ssg_74_김성현.mp4": {
         "handedness": "right"
     },
                                                                                                                                                 
-    "SSG_75_김성현.mp4": {
+    "ssg_75_김성현.mp4": {
         "handedness": "right"
     },
                                                                                                                                                 
-    "SSG_76_김성현.mp4": {
+    "ssg_76_김성현.mp4": {
         "handedness": "right"
     },
                                                                                                                                                     
-    "SSG_77_최지훈.mp4": {
+    "ssg_77_최지훈.mp4": {
         "handedness": "left"
     },
                                                                                                                                                         
-    "SSG_78_최지훈.mp4": {
+    "ssg_78_최지훈.mp4": {
         "handedness": "left"
     },
                                                                                                                                                         
-    "SSG_79_최지훈.mp4": {
+    "ssg_79_최지훈.mp4": {
         "handedness": "left"
     },
                                                                                                                                                         
-    "SSG_80_정준재.mp4": {
+    "ssg_80_정준재.mp4": {
         "handedness": "left"
     },
                                                                                                                                                             
-    "SSG_81_정준재.mp4": {
+    "ssg_81_정준재.mp4": {
         "handedness": "left"
     },
                                                                                                                                                                 
-    "SSG_82_박성한.mp4": {
+    "ssg_82_박성한.mp4": {
         "handedness": "left"
     },
                                                                                                                                                                     
-    "SSG_83_박성한.mp4": {
+    "ssg_83_박성한.mp4": {
         "handedness": "left"
     },
                                                                                                                                                                     
-    "SSG_84_박성한.mov": {
+    "ssg_84_박성한.mov": {
         "handedness": "left"
     },
                                                                                                                                                                         
-    "SSG_85_박성한.mov": {
+    "ssg_85_박성한.mov": {
         "handedness": "left"
     },
                                                                                                                                                                         
-    "SSG_86_박성한.mov": {
+    "ssg_86_박성한.mov": {
         "handedness": "left"
     },
                                                                                                                                                                         
-    "SSG_87_박성한.mov": {
+    "ssg_87_박성한.mov": {
         "handedness": "left"
     },
                                                                                                                                                                         
-    "SSG_88_박성한.mov": {
+    "ssg_88_박성한.mov": {
         "handedness": "left"
     },
                                                                                                                                                                         
-    "SSG_89_박성한.mp4": {
+    "ssg_89_박성한.mp4": {
         "handedness": "left"
     },
                                                                                                                                                                             
-    "SSG_90_고명준.mp4": {
+    "ssg_90_고명준.mp4": {
         "handedness": "right"
     },
                                                                                                                                                                                 
-    "SSG_91_고명준.mp4": {
+    "ssg_91_고명준.mp4": {
         "handedness": "right"
     },
                                                                                                                                                                                 
-    "SSG_92_고명준.mp4": {
+    "ssg_92_고명준.mp4": {
         "handedness": "right"
     },
                                                                                                                                                                                 
-    "SSG_93_고명준.mp4": {
+    "ssg_93_고명준.mp4": {
         "handedness": "right"
     },
                                                                                                                                                                                 
-    "SSG_94_고명준.mp4": {
+    "ssg_94_고명준.mp4": {
         "handedness": "right"
     },
                                                                                                                                                                                 
-    "SSG_95_고명준.mp4": {
+    "ssg_95_고명준.mp4": {
         "handedness": "right"
     },
                                                                                                                                                                                 
-    "SSG_96_고명준.mp4": {
+    "ssg_96_고명준.mp4": {
         "handedness": "right"
     },
                                                                                                                                                                                 
-    "SSG_97_박지환.mp4": {
+    "ssg_97_박지환.mp4": {
         "handedness": "right"
+    }
+                                                                                                                                                                                    
+    "ssg_98_최준우.mp4": {
+        "handedness": "left"
     }
 }
 
