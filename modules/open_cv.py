@@ -19,6 +19,7 @@ def flip_video_frames(frames):
     return [cv2.flip(frame, 1) for frame in frames]
 
 # video_path: 비디오 한 개의 경로, yolo_model: 욜로 모델, metadata: 좌우유무 파일
+# video_path = video_directory/파일이름 
 def process_video(video_path, yolo_model, is_left=False):
     # 비디오 > 프레임 리스트로 바꿈 + fps 같이 반환
     frames, fps = read_video(video_path)
@@ -29,7 +30,7 @@ def process_video(video_path, yolo_model, is_left=False):
         frames = flip_video_frames(frames) 
         
     print('우타자 기준으로 프레임이 고정되었는지 확인')
-    print(frames)
+    print(cv2.imshow(frames[0]))
     
     # 프레임 height, width
     H, W = frames[0].shape[:2]
@@ -49,9 +50,9 @@ def process_video(video_path, yolo_model, is_left=False):
     
     # YOLO 결과 결측 검증 > 프레임이 5개 이상 연속으로 결측치가 있으면 영상 안씀
     # 모델 성능으로 인해 임시 건너뛰기 합니다
-    # if max_missing_gap >= 30:
-    #     print('person_bboxes의 결측치가 많습니다.')
-    #     return player_np, None
+    if max_missing_gap >= 30:
+        print('person_bboxes의 결측치가 많습니다.')
+        return player_np, None
     
     # Bat 전처리
     # 각도 언래핑(0~90도를 연속값으로 보정) -> 결측치 보정 -> 이상치 보정 -> df to np
@@ -93,7 +94,7 @@ def process_video(video_path, yolo_model, is_left=False):
     print('')
     print('')
     print('roi 되었는지 확인 roi_frames')
-    print(roi_frames)
+    print(cv2.imshow(roi_frames[0]))
 
     # --------------------------------
     # --------------------------------
@@ -111,18 +112,7 @@ def process_video(video_path, yolo_model, is_left=False):
     # bat_landmarks라고 되어 있었는데 밑에 wrist_landmarks라 되어 있어서 이름을 바꿨습니다. 
     all_landmarks, visibility, wrist_landmarks = pose_result
     
-    # 확인용 
-    print('')
-    print('')
-    print('')
-    print('관절 좌표 나오는지 확인 all_landmarks')
-    print(all_landmarks)
-    
-    print('')
-    print('')
-    print('')
-    print('신뢰도 나오는지 확인 visibility')
-    print(visibility)
+
     
     # 
     print('프레임 수 빼고 동일해야 함 all_landmarks.shape & visibility.shape')
@@ -132,17 +122,17 @@ def process_video(video_path, yolo_model, is_left=False):
     # --------------------------------
     # --------------------------------
     # bat 정보 추출
-    bat_positions = []
-    bat_angles = []
+    # bat_positions = []
+    # bat_angles = []
 
-    bat_positions, bat_angles = detect_bat_with_wrist(frames, wrist_landmarks, yolo_model)
+    # bat_positions, bat_angles = detect_bat_with_wrist(frames, wrist_landmarks, yolo_model)
 
-    if should_discard(bat_positions, max_allowed_gap=5):
-        print('bat 검출 실패 많음')
-        return None
+    # if should_discard(bat_positions, max_allowed_gap=5):
+    #     print('bat 검출 실패 많음')
+    #     return None
 
-    bat_positions = fill_remaining_none(bat_positions)
-    bat_angles = fill_remaining_none(bat_angles)
+    # bat_positions = fill_remaining_none(bat_positions)
+    # bat_angles = fill_remaining_none(bat_angles)
     # --------------------------------
     # --------------------------------
     
@@ -155,7 +145,7 @@ def process_video(video_path, yolo_model, is_left=False):
     print('')
     print('')
     print('정규화 되었는지 확인 all_landmarks_final')
-    print(all_landmarks_final)
+    print(all_landmarks_final.shape)
 
     # 최종 피처는 [x1 y1 z1 신뢰도 x2 y2 z2 신뢰도 ...]... 형태로 나옴
     # 임팩트 부분을 기준으로 프레임 정렬(프레임 개수 맞추기) + 남은 피처 추가
@@ -188,26 +178,34 @@ results = {
 # video_dir: 영상들이 들어있는 폴더 경로 / yolo_model: YOLO 모델 /
 import os
 import gc
+import json 
 
+
+##### 나중에 코드 돌릴 때 수정필요 ####
+################################
+################################
 def process_all_videos(video_dir, yolo_model, save_dir, metadata_dict=None):
 
+    # 메타데이터 파일 읽기
+    if metadata_dict is not None:
+        with open(metadata_dict, "r", encoding="utf-8") as f:
+            metadata_dict = json.load(f)
+    else:
+        metadata_dict = {}
 
     for file_name in os.listdir(video_dir):
 
-        # 1. 영상 파일만 필터링
-        if not file_name.lower().endswith(('.mp4', '.avi', '.mov')):
-            continue
-
+        # 1. 파일 경로 = 파일 디렉토리 / 파일 이름 -> 이런식으로 합쳐짐 
         video_path = os.path.join(video_dir, file_name)
         
         # 2. 좌우 판단
         if metadata_dict is not None:
             # 해당 영상의 메타데이터 가져오기 / 없으면 빈 dict {}
             meta = metadata_dict.get(file_name, {})
-            # "handness" 값 가져오기 / "handness" 값 가져오기
-            handness = meta.get("handness", "right")
+            # "handedness" 값 가져오기 / "handedness" 값 가져오기
+            handedness = meta.get("handedness", "right")
             # left면 True, 아니면 False
-            is_left = (handness == "left")
+            is_left = (handedness == "left")
         else:
             is_left = False
             
@@ -231,7 +229,7 @@ def process_all_videos(video_dir, yolo_model, save_dir, metadata_dict=None):
         save_path = os.path.join(
             save_dir,
             file_name.replace(".mp4", ".npy")
-                     .replace(".avi", ".npy")
+                     .replace(".MOV", ".npy")
                      .replace(".mov", ".npy")
         )
 
@@ -251,6 +249,9 @@ def process_all_videos(video_dir, yolo_model, save_dir, metadata_dict=None):
 #---------------------------------------------------------
 #---------------------------------------------------------
 #---------------------------------------------------------
+##### 나중에 코드 돌릴 때 수정필요 ####
+################################
+################################
 
 import os
 import gc
@@ -258,9 +259,12 @@ import numpy as np
 import cv2
 
 # 실행 함수
+# 동영상 있는 폴더 
 video_dir = "videos"
 yolo_model = ""
+# 결과 저장할 폴더 이름
 save_dir = 'output_numpy'
+# 메타데이터 경로 
 metadata_dict = "metadata.json"
 
 # process_all_videos(video_dir, yolo_model, save_dir, metadata_dict)
