@@ -6,21 +6,21 @@ import numpy as np
 VISIBILITY_TH = 0.45  # fallback/default
 VISIBILITY_THRESHOLDS: Dict[str, float] = {
     "left_ankle": 0.45,
-    "left_elbow": 0.60,
+    "left_elbow": 0.50,
     "left_hip": 0.45,
     "left_index": 0.75,
     "left_knee": 0.45,
     "left_pinky": 0.75,
-    "left_shoulder": 0.75,
-    "left_wrist": 0.70,
+    "left_shoulder": 0.65,
+    "left_wrist": 0.50,
     "right_ankle": 0.45,
-    "right_elbow": 0.60,
+    "right_elbow": 0.50,
     "right_hip": 0.45,
     "right_index": 0.75,
     "right_knee": 0.45,
     "right_pinky": 0.75,
-    "right_shoulder": 0.75,
-    "right_wrist": 0.70,
+    "right_shoulder": 0.65,
+    "right_wrist": 0.50,
 }
 
 MAX_INTERP_GAP_FRAMES = 4  # fallback/default
@@ -48,13 +48,13 @@ MAX_EDGE_FILL_FRAMES = 4
 # Motion jump ratio thresholds (relative to shoulder width) for each joint.
 # 기준은 현재 보유한 스윙 영상에서 관절별 jump ratio 분포를 확인한 뒤 설정한 초기값입니다.
 # 데이터셋이 확정되면 다시 검증하고 조정할 예정입니다.
-HIP_JUMP_RATIO_TH = 0.35
-SHOULDER_JUMP_RATIO_TH = 0.59
-ELBOW_JUMP_RATIO_TH = 0.92
+HIP_JUMP_RATIO_TH = 0.27
+SHOULDER_JUMP_RATIO_TH = 0.42
+ELBOW_JUMP_RATIO_TH = 0.81
 WRIST_JUMP_RATIO_TH = 0.90
 FINGER_JUMP_RATIO_TH = 0.75
-KNEE_JUMP_RATIO_TH = 0.56
-ANKLE_JUMP_RATIO_TH = 0.80
+KNEE_JUMP_RATIO_TH = 0.48
+ANKLE_JUMP_RATIO_TH = 0.72
 
 MOTION_JUMP_RATIO_THRESHOLDS: Dict[str, float] = {
     "left_hip": HIP_JUMP_RATIO_TH,
