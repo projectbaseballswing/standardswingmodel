@@ -1,8 +1,7 @@
 """pose-only feature sequence 비교를 위한 DTW 유틸입니다.
 
 두 스윙 sequence의 진행 속도 차이를 보정하기 위해 DTW distance와
-alignment path를 계산합니다. YOLO, bat tracking, 영상 처리 로직에는
-의존하지 않습니다.
+alignment path를 계산합니다. 
 """
 
 from __future__ import annotations
