@@ -12,7 +12,7 @@ VISIBILITY_THRESHOLDS: Dict[str, float] = {
     "left_knee": 0.45,
     "left_pinky": 0.75,
     "left_shoulder": 0.65,
-    "left_wrist": 0.50,
+    "left_wrist": 0.10,
     "right_ankle": 0.45,
     "right_elbow": 0.50,
     "right_hip": 0.45,
@@ -20,7 +20,7 @@ VISIBILITY_THRESHOLDS: Dict[str, float] = {
     "right_knee": 0.45,
     "right_pinky": 0.75,
     "right_shoulder": 0.65,
-    "right_wrist": 0.50,
+    "right_wrist": 0.10,
 }
 
 MAX_INTERP_GAP_FRAMES = 4  # fallback/default
