@@ -214,11 +214,16 @@ def normalize_landmarks_sequence(all_landmarks, visibility, eps=1e-8):
     print('')
     print('')
     print('')
-    print('정규화 부분 확인')
+    print('정규화 부분 확인') 
     print('기준 프레임 & 기준 축 & 사람 기준 scale')
     print('기준 프레임: ', ref_frame)
     print('기준 축: ', basis)
     print('body_scale: ', body_scale)
+    
+    
+    # determinant 확인
+    det = np.linalg.det(basis)
+    print("basis determinant:", det)
 
     # 전체 정규화
     return _apply_normalization(all_landmarks, basis, body_scale, eps)
@@ -333,13 +338,14 @@ def _build_reference_basis(frame, eps=1e-8):
     z_axis = _normalize_vec(np.cross(x_axis, y_temp), eps)
     if z_axis is None:
         return None
+     
 
     y_axis = _normalize_vec(np.cross(z_axis, x_axis), eps)
     if y_axis is None:
         return None
 
-    # 최종 좌표계 반환
     return np.stack([x_axis, y_axis, z_axis], axis=1)
+
 
 ################################################################
 
@@ -490,6 +496,15 @@ def _apply_normalization(all_landmarks, basis, body_scale, eps=1e-8):
 
         # scale 정규화: 크기 정규화 -> 키 차이 제거 / 모두 같은 크기로 맞춤
         norm_coords = rel / body_scale
+        
+        RIGHT_WRIST = 5
+        LEFT_WRIST = 4
+
+        rwrist_x = norm_coords[RIGHT_WRIST, 0]
+        lwrist_x = norm_coords[LEFT_WRIST, 0]
+
+        print("right wrist x:", rwrist_x)
+        print("left wrist x:", lwrist_x)
 
         normalized_sequence.append(norm_coords)
 

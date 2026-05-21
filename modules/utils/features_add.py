@@ -1,3 +1,4 @@
+import numpy as np
 # final_data = make_features(all_landmarks, bat_angles, bat_positions, dt)
 def make_features_single_video(all_landmarks, visibility, dt):
 
@@ -15,7 +16,7 @@ def make_features_single_video(all_landmarks, visibility, dt):
     # 양손 x,y 좌표만 사용 
     lw = landmarks[:, 4, :2]
     rw = landmarks[:, 5, :2]
-    hand_center = (lw + rw) / 2 
+    hand_center = (lw + rw) / 2  
     impact_idx = _find_impact_frame(hand_center)
 
     # 2. 정렬 + 길이 통일
@@ -174,9 +175,9 @@ def _find_impact_frame(pos):
     # 이동 벡터의 크기 = 속도
     speeds = np.linalg.norm(velocity, axis=1)  # shape: (T-1,)
     
-    # 속도가 가장 큰 프레임 반환
+    # 속도가 가장 큰 프레임 반환 
     # speeds는 1프레임 뒤 기준이라 +1
-    impact_idx = np.argmax(speeds) + 1
+    impact_idx = np.nanargmax(speeds) + 1
 
     return impact_idx
 

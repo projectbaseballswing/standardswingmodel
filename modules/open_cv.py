@@ -1,4 +1,5 @@
 import cv2
+import numpy as np
 from modules.utils.video_roi_left import read_video, process_roi, normalize_landmarks_sequence
 from modules.utils.features_add import make_features_single_video
 from modules.utils.yolo_preprocessing import max_consecutive_none, max_consecutive_none_middle, should_discard, fill_remaining_none
@@ -21,16 +22,19 @@ def flip_video_frames(frames):
 # video_path: 비디오 한 개의 경로, yolo_model: 욜로 모델, metadata: 좌우유무 파일
 # video_path = video_directory/파일이름 
 def process_video(video_path, yolo_model, is_left=False):
+    print(is_left)
     # 비디오 > 프레임 리스트로 바꿈 + fps 같이 반환
     frames, fps = read_video(video_path)
     dt = 1 / fps
     
     # 좌우 통일: 우타로 고정
     if is_left:
-        frames = flip_video_frames(frames) 
+        frames = flip_video_frames(frames)  
         
     print('우타자 기준으로 프레임이 고정되었는지 확인')
-    print(cv2.imshow(frames[0]))
+    cv2.imshow("frame", frames[0])
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
     
     # 프레임 height, width
     H, W = frames[0].shape[:2]
@@ -94,7 +98,9 @@ def process_video(video_path, yolo_model, is_left=False):
     print('')
     print('')
     print('roi 되었는지 확인 roi_frames')
-    print(cv2.imshow(roi_frames[0]))
+    cv2.imshow("roi", roi_frames[0])
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
     # --------------------------------
     # --------------------------------
@@ -138,7 +144,7 @@ def process_video(video_path, yolo_model, is_left=False):
     
         
     # 정규화 코드 추가 
-    all_landmarks_final = normalize_landmarks_sequence(all_landmarks, visibility)
+    all_landmarks_final = np.array(normalize_landmarks_sequence(all_landmarks, visibility))
     
     # 확인용
     print('')
@@ -151,6 +157,12 @@ def process_video(video_path, yolo_model, is_left=False):
     # 임팩트 부분을 기준으로 프레임 정렬(프레임 개수 맞추기) + 남은 피처 추가
     # bat_angles, bat_positions > 제외
     final_data = make_features_single_video(all_landmarks_final, visibility, dt)
+    
+    print('')
+    print('')
+    print('')
+    print('final_data 앞 3개만 출력')
+    print(final_data[:3])
     
     # 확인용 
     print('')
@@ -179,22 +191,30 @@ results = {
 import os
 import gc
 import json 
+import unicodedata
 
 
 ##### 나중에 코드 돌릴 때 수정필요 ####
 ################################
 ################################
-def process_all_videos(video_dir, yolo_model, save_dir, metadata_dict=None):
+def process_all_videos(video_dir, yolo_model, save_dir, metadata_path=None):
 
     # 메타데이터 파일 읽기
-    if metadata_dict is not None:
-        with open(metadata_dict, "r", encoding="utf-8") as f:
+    if metadata_path is not None:
+        with open(metadata_path, "r", encoding="utf-8") as f:
             metadata_dict = json.load(f)
+            
+        metadata_dict = {
+            unicodedata.normalize("NFC", k): v
+            for k, v in metadata_dict.items()
+        }
     else:
         metadata_dict = {}
 
     for file_name in os.listdir(video_dir):
-
+        # 한글 정규화
+        file_name = unicodedata.normalize("NFC", file_name)
+        
         # 1. 파일 경로 = 파일 디렉토리 / 파일 이름 -> 이런식으로 합쳐짐 
         video_path = os.path.join(video_dir, file_name)
         
@@ -202,6 +222,10 @@ def process_all_videos(video_dir, yolo_model, save_dir, metadata_dict=None):
         if metadata_dict is not None:
             # 해당 영상의 메타데이터 가져오기 / 없으면 빈 dict {}
             meta = metadata_dict.get(file_name, {})
+            
+            print("file_name:", repr(file_name))
+            print("meta:", meta)
+            
             # "handedness" 값 가져오기 / "handedness" 값 가져오기
             handedness = meta.get("handedness", "right")
             # left면 True, 아니면 False
@@ -225,6 +249,26 @@ def process_all_videos(video_dir, yolo_model, save_dir, metadata_dict=None):
             print(f"[SKIP] {file_name}")
             continue
         
+        # 빈 데이터 skip
+        if len(output) == 0:
+            print(f"[EMPTY] {file_name}")
+            continue
+        
+        print(type(output))
+        print(np.array(output).shape)
+        
+        try:
+            print("output shape:", np.array(output).shape)
+
+        except Exception as e:
+            print("[SHAPE ERROR]", e)
+
+            for i, x in enumerate(output):
+                try:
+                    print(i, np.array(x).shape)
+                except:
+                    print(i, type(x))
+                    
        # 파일로 저장: 메모리 터지는거 방지
         save_path = os.path.join(
             save_dir,
@@ -232,6 +276,9 @@ def process_all_videos(video_dir, yolo_model, save_dir, metadata_dict=None):
                      .replace(".MOV", ".npy")
                      .replace(".mov", ".npy")
         )
+        
+        print("save path:", save_path)
+        print("output type:", type(output))
 
         np.save(save_path, output)
             
@@ -249,23 +296,23 @@ def process_all_videos(video_dir, yolo_model, save_dir, metadata_dict=None):
 #---------------------------------------------------------
 #---------------------------------------------------------
 #---------------------------------------------------------
-##### 나중에 코드 돌릴 때 수정필요 ####
-################################
-################################
+# ##### 나중에 코드 돌릴 때 수정필요 ####
+# ################################
+# ################################
 
-import os
-import gc
-import numpy as np
-import cv2
+# import os
+# import gc
+# import numpy as np
+# import cv2
 
-# 실행 함수
-# 동영상 있는 폴더 
-video_dir = "videos"
-yolo_model = ""
-# 결과 저장할 폴더 이름
-save_dir = 'output_numpy'
-# 메타데이터 경로 
-metadata_dict = "metadata.json"
+# # 실행 함수
+# # 동영상 있는 폴더 
+# video_dir = "videos"
+# yolo_model = ""
+# # 결과 저장할 폴더 이름
+# save_dir = 'output_numpy'
+# # 메타데이터 경로 
+# metadata_dict = "metadata.json"
 
-# process_all_videos(video_dir, yolo_model, save_dir, metadata_dict)
+# # process_all_videos(video_dir, yolo_model, save_dir, metadata_dict)
 
