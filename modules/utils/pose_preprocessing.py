@@ -252,7 +252,7 @@ def apply_preprocessing(df: pd.DataFrame, fps: float) -> Optional[pd.DataFrame]:
         joint_missing = combined_missing[joint].to_numpy(dtype=bool)
 
         for suffix in ["_x", "_y", "_z"]:
-            raw = df[f"{joint}{suffix}"].to_numpy(dtype=float)
+            raw = df[f"{joint}{suffix}"].to_numpy(dtype=float).copy()
             raw[joint_missing] = np.nan
 
             max_interp_gap = MAX_INTERP_GAP_FRAMES_BY_JOINT.get(
