@@ -18,7 +18,7 @@ def _score_weight(p_area, min_bat_dist, center_dist,
     '''
     return (p_area * area_weight) - (min_bat_dist * bat_dist_weight) - (center_dist * center_dist_weight)
 
-def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
+def track_target_player(model, frames, player_cls=2, bat_cls=0):
     '''
     영상에서 각 타자와 배트를 추적하고 
     가중치로 평가해 점수가 가장 높은 객체를 타겟으로 설정한다.
@@ -30,11 +30,10 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
       bat_cls : model에 학습되어있는 bat class
     
     [return]
-      { "player": 타겟 타자의 좌표 추적 값(pd.dataFrame),
-        "bat" : 타겟 배트의 좌표 추적 값(pd.dataFrame)}
+      타겟 타자의 좌표 추적 값(pd.dataFrame)
     '''
     
-    print("타겟 Player와 Bat를 추적합니다")
+    print("타겟 Player를 추적합니다")
     
     # 전체 영상 객체 추적 및 데이터 수집
     print("[1] 전체 영상 객체 추적 및 데이터 수집 시작")
@@ -131,9 +130,7 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
             player_associated_bats[player_id] = max(bat_id_counts, key=bat_id_counts.get)
         
     target_player_id = max(score_board, key=score_board.get)
-    target_bat_id = player_associated_bats.get(target_player_id, None)
-    
-    print(f"    타겟 Player ID: {target_player_id} / Bat ID: {target_bat_id}")
+    # target_bat_id = player_associated_bats.get(target_player_id, None)
 
     # Player와 Bat 좌표 데이터 병합 및 딕셔너리 반환
     print("[3] 타겟 Player & Bat 데이터 정리")
@@ -148,22 +145,8 @@ def track_target_player_and_bat(model, frames, player_cls=2, bat_cls=0):
     p_coords_list = [c if isinstance(c, list) else [np.nan] * 4 for c in merged_p_df['coords']]
     p_cols = ['xmin', 'ymin', 'xmax', 'ymax'] 
     final_player_df = pd.concat([base_df, pd.DataFrame(p_coords_list, columns=p_cols)], axis=1)
-    
-    # 3. Bat 데이터 완성
-    if target_bat_id is not None:
-        target_b_df = df_bats[df_bats['track_id'] == target_bat_id][['frame', 'coords']]
-        merged_b_df = pd.merge(base_df, target_b_df, on='frame', how='left')
-        b_coords_list = [c if isinstance(c, list) else [np.nan] * 5 for c in merged_b_df['coords']]
-        b_cols = ['cx', 'cy', 'w', 'h', 'r']
-        final_bat_df = pd.concat([base_df, pd.DataFrame(b_coords_list, columns=b_cols)], axis=1)
-    else:
-        print("경고: 타겟 배트가 감지되지 않았습니다.")
-        final_bat_df = None
         
     print("모든 처리 완료")
     
-    # 4. 딕셔너리로 묶어서 반환
-    return {
-        "player": final_player_df,
-        "bat": final_bat_df
-    }
+    # 3. 반환
+    return final_player_df

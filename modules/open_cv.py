@@ -2,9 +2,8 @@ import cv2
 import numpy as np
 from modules.utils.video_roi_left import read_video, process_roi, normalize_landmarks_sequence
 from modules.utils.features_add import make_features_single_video
-from modules.utils.yolo_preprocessing import max_consecutive_none, max_consecutive_none_middle, should_discard, fill_remaining_none
-from modules.yolo_obb_tracker import track_target_player_and_bat
-from modules.preprocessing import preprocess_player, preprocess_bat
+from modules.yolo_obb_tracker import track_target_player
+from modules.preprocessing import preprocess_player
 from modules.extract_pose_with_roi import extract_pose_with_roi
 
 def get_video_size(video_path):
@@ -42,11 +41,10 @@ def process_video(video_path, yolo_model, is_left=False):
     # 사람 좌표만 먼저 추출
     # --------------------------------
     # --------------------------------
-    extracted_data = track_target_player_and_bat(yolo_model, frames)
+    player_df = track_target_player(yolo_model, frames)
     
     # Player 전처리
     # 결측치 보정 -> 이상치 보정 -> 뒤틀림 및 영역 벗어남 보정 -> df to np
-    player_df = extracted_data["player"]
     if player_df is None:
         print("Player Not Found")
         return None, None
@@ -57,23 +55,12 @@ def process_video(video_path, yolo_model, is_left=False):
     if max_missing_gap >= 30:
         print('person_bboxes의 결측치가 많습니다.')
         return player_np, None
-    
-    # Bat 전처리
-    # 각도 언래핑(0~90도를 연속값으로 보정) -> 결측치 보정 -> 이상치 보정 -> df to np
-    # bat_df = extracted_data["bat"]
-    # if bat_df is None:
-    #     print("Bat Not Found")
-    #     return player_np, None
-    # bat_np = preprocess_bat(bat_df)
 
     '''
     [ 여기까지 진행했을 때 변수 목록 ]
     player_np : player xyxy 데이터 (numpy) [xmin, ymin, xmax, ymax]
     max_missing_gap : player의 최대 연속 결측 프레임 수 (integer)
-    bat_np : bat xywhr 데이터 (numpy) [cx, cy, w, h, r]
     '''
-
-    # return player_np, bat_np
 
     # --------------------------------
     # --------------------------------
@@ -106,7 +93,6 @@ def process_video(video_path, yolo_model, is_left=False):
     # --------------------------------
     # 원본 좌표로 복원한 후 정규화 진행
     # all_landmarks: [x,y,z], [x,y,z], [x,z,y]... 형태로 나옴
-    # wrist_landmarks는 원본 좌표만 
     # roi_infos = [ {frame1 정보}, {frame2 정보}, {frame3 정보}, ...]
     # visibility 추가로 받음: 넘파이 형태 
     pose_result = extract_pose_with_roi(roi_frames, roi_infos, fps)
@@ -115,32 +101,11 @@ def process_video(video_path, yolo_model, is_left=False):
         print("landmarks 없음")
         return None
 
-    # bat_landmarks라고 되어 있었는데 밑에 wrist_landmarks라 되어 있어서 이름을 바꿨습니다. 
-    all_landmarks, visibility, wrist_landmarks = pose_result
-    
-
+    all_landmarks, visibility = pose_result
     
     # 
     print('프레임 수 빼고 동일해야 함 all_landmarks.shape & visibility.shape')
     print(all_landmarks.shape, visibility.shape)
-    
-    # 배트 부분
-    # --------------------------------
-    # --------------------------------
-    # bat 정보 추출
-    # bat_positions = []
-    # bat_angles = []
-
-    # bat_positions, bat_angles = detect_bat_with_wrist(frames, wrist_landmarks, yolo_model)
-
-    # if should_discard(bat_positions, max_allowed_gap=5):
-    #     print('bat 검출 실패 많음')
-    #     return None
-
-    # bat_positions = fill_remaining_none(bat_positions)
-    # bat_angles = fill_remaining_none(bat_angles)
-    # --------------------------------
-    # --------------------------------
     
         
     # 정규화 코드 추가 
