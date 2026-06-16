@@ -1,4 +1,4 @@
-"""pose-only feature sequence 비교를 위한 DTW 유틸입니다.
+﻿"""pose-only feature sequence 비교를 위한 DTW 유틸입니다.
 
 두 스윙 sequence의 진행 속도 차이를 보정하기 위해 DTW distance와
 alignment path를 계산합니다. 
@@ -12,6 +12,9 @@ import numpy as np
 
 
 AlignmentPath = List[Tuple[int, int]]
+EXPECTED_SEQUENCE_LEN = 80
+EXPECTED_FEATURE_DIM = 64
+EXPECTED_SEQUENCE_SHAPE = (EXPECTED_SEQUENCE_LEN, EXPECTED_FEATURE_DIM)
 
 
 def _safe_array(values: np.ndarray) -> np.ndarray:
@@ -20,6 +23,8 @@ def _safe_array(values: np.ndarray) -> np.ndarray:
 
 
 def _safe_weights(feature_weights: Optional[Sequence[float]], n_features: int) -> np.ndarray:
+    if n_features != EXPECTED_FEATURE_DIM:
+        raise ValueError(f"feature dimension must be {EXPECTED_FEATURE_DIM}, got {n_features}")
     if feature_weights is None:
         return np.ones(n_features, dtype=float)
     weights = _safe_array(np.asarray(feature_weights, dtype=float))
@@ -48,6 +53,8 @@ def weighted_frame_distance(
         raise ValueError(f"frame shapes must match, got {x_arr.shape} and {y_arr.shape}")
     if x_arr.ndim != 1:
         raise ValueError(f"frames must be 1D arrays, got shape {x_arr.shape}")
+    if x_arr.shape != (EXPECTED_FEATURE_DIM,):
+        raise ValueError(f"frames must have length {EXPECTED_FEATURE_DIM}, got {x_arr.shape}")
 
     weights = _safe_weights(feature_weights, x_arr.shape[0])
     diff = x_arr - y_arr
@@ -78,6 +85,8 @@ def dtw_distance(
     y_seq = _safe_array(np.asarray(Y, dtype=float))
     if x_seq.ndim != 2 or y_seq.ndim != 2:
         raise ValueError(f"sequences must be 2D arrays, got {x_seq.shape} and {y_seq.shape}")
+    if x_seq.shape != EXPECTED_SEQUENCE_SHAPE or y_seq.shape != EXPECTED_SEQUENCE_SHAPE:
+        raise ValueError(f"sequences must have shape {EXPECTED_SEQUENCE_SHAPE}, got {x_seq.shape} and {y_seq.shape}")
     if x_seq.shape[1] != y_seq.shape[1]:
         raise ValueError(f"feature dimensions must match, got {x_seq.shape[1]} and {y_seq.shape[1]}")
     if x_seq.shape[0] == 0 or y_seq.shape[0] == 0:

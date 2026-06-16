@@ -1,4 +1,4 @@
-"""사용자 스윙 feature와 reference template을 비교하는 모듈입니다.
+﻿"""사용자 스윙 feature와 reference template을 비교하는 모듈입니다.
 
 `reference_templates.npz`와 scaler를 불러온 뒤, 사용자 feature sequence를
 global template 및 선수별 template과 DTW로 비교합니다. 결과는 similarity
@@ -15,7 +15,13 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 import numpy as np
 
 from modules.utils.dtw_utils import AlignmentPath, dtw_distance
-from modules.utils.feature_scaling import transform_feature_sequence
+from modules.utils.feature_scaling import (
+    EXPECTED_SEQUENCE_LEN,
+    EXPECTED_SEQUENCE_SHAPE,
+    transform_feature_sequence,
+    validate_feature_sequence,
+    validate_feature_vector,
+)
 from modules.utils.reference_template_builder import FEATURE_GROUPS, PHASES
 
 
@@ -35,6 +41,38 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _validate_template_stack(values: np.ndarray, name: str) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    if arr.ndim != 3 or arr.shape[1:] != EXPECTED_SEQUENCE_SHAPE:
+        raise ValueError(f"{name} must have shape (K, 80, 64), got {arr.shape}")
+    return arr
+
+
+def _validate_reference_templates(templates: Dict[str, Any]) -> Dict[str, Any]:
+    for key in ("global_mean_template", "global_std_template", "global_medoid_sequence"):
+        if key not in templates:
+            raise ValueError(f"reference template npz is missing required array: {key}")
+        templates[key] = validate_feature_sequence(templates[key], name=key)
+
+    if "global_count_template" in templates:
+        count = np.asarray(templates["global_count_template"])
+        if count.shape != (EXPECTED_SEQUENCE_LEN,):
+            raise ValueError(f"global_count_template must have shape ({EXPECTED_SEQUENCE_LEN},), got {count.shape}")
+
+    for key in ("label_mean_templates", "label_std_templates", "player_mean_templates", "player_std_templates"):
+        if key in templates:
+            templates[key] = _validate_template_stack(templates[key], key)
+
+    if "feature_weights" in templates and templates["feature_weights"] is not None:
+        templates["feature_weights"] = validate_feature_vector(templates["feature_weights"], "feature_weights")
+
+    metadata = templates.get("metadata", {})
+    feature_shape = metadata.get("feature_shape") if isinstance(metadata, dict) else None
+    if feature_shape is not None and list(feature_shape) != [EXPECTED_SEQUENCE_LEN, EXPECTED_SEQUENCE_SHAPE[1]]:
+        raise ValueError(f"metadata feature_shape must be [80, 64], got {feature_shape}")
+    return templates
+
+
 def load_reference_templates(path: str | Path) -> Dict[str, Any]:
     """reference_templates.npz를 읽어 비교에 필요한 배열과 metadata를 반환합니다."""
     in_path = Path(path)
@@ -44,7 +82,7 @@ def load_reference_templates(path: str | Path) -> Dict[str, Any]:
     templates: Dict[str, Any] = {name: data[name] for name in data.files}
     templates["metadata"] = json.loads(str(templates["metadata_json"].item())) if "metadata_json" in templates else {}
     templates["label_names"] = [str(x) for x in templates.get("label_names", [])]
-    return templates
+    return _validate_reference_templates(templates)
 
 
 def compute_similarity_score(distance: float, reference_mean: float, reference_std: float) -> float:
@@ -86,7 +124,7 @@ def _rmse_for_pairs(
     return float(np.sqrt(np.mean(arr * arr)))
 
 
-# feature group별 error를 계산합니다. 관절/상대위치/각도/속도 그룹별 차이를 확인할 때 사용합니다.
+# feature group별 error를 계산합니다. 관절/상대위치/각도/회전 그룹별 차이를 확인할 때 사용합니다.
 def compute_feature_group_error(
     user_sequence: np.ndarray,
     template_sequence: np.ndarray,
@@ -127,9 +165,12 @@ def compare_user_to_global_template(
 ) -> Dict[str, Any]:
     # 사용자 feature도 reference template 생성 때 저장한 scaler로 동일하게 변환합니다.
     # 모든 player template과 비교해 가장 가까운 template을 찾습니다.
-    user_scaled = transform_feature_sequence(user_sequence, scaler)
-    template = np.asarray(templates["global_mean_template"], dtype=float)
+    sequence = validate_feature_sequence(user_sequence, name="user feature")
+    user_scaled = transform_feature_sequence(sequence, scaler)
+    template = validate_feature_sequence(templates["global_mean_template"], name="global_mean_template")
     weights = feature_weights if feature_weights is not None else templates.get("feature_weights")
+    if weights is not None:
+        weights = validate_feature_vector(weights, "feature_weights")
     distance, path = dtw_distance(user_scaled, template, feature_weights=weights, sakoe_chiba_ratio=sakoe_chiba_ratio)
     ref_mean, ref_std = _calibration(templates)
     return {
@@ -149,10 +190,13 @@ def compare_user_to_label_templates(
     feature_weights: Optional[Sequence[float]] = None,
     sakoe_chiba_ratio: float = 0.15,
 ) -> Dict[str, Any]:
-    user_scaled = transform_feature_sequence(user_sequence, scaler)
+    sequence = validate_feature_sequence(user_sequence, name="user feature")
+    user_scaled = transform_feature_sequence(sequence, scaler)
     weights = feature_weights if feature_weights is not None else templates.get("feature_weights")
+    if weights is not None:
+        weights = validate_feature_vector(weights, "feature_weights")
     label_names = templates["label_names"]
-    label_templates = np.asarray(templates["label_mean_templates"], dtype=float)
+    label_templates = _validate_template_stack(templates["label_mean_templates"], "label_mean_templates")
     ref_mean, ref_std = _calibration(templates)
 
     results = []
@@ -190,9 +234,7 @@ def compare_user_to_templates(
     sakoe_chiba_ratio: float = 0.15,
 ) -> Dict[str, Any]:
     warnings = []
-    sequence = np.asarray(user_sequence, dtype=float)
-    if sequence.shape != (80, 67):
-        warnings.append(f"expected user feature shape (80, 67), got {sequence.shape}")
+    sequence = validate_feature_sequence(user_sequence, name="user feature")
 
     global_result = compare_user_to_global_template(sequence, templates, scaler, feature_weights, sakoe_chiba_ratio)
     label_results = compare_user_to_label_templates(sequence, templates, scaler, feature_weights, sakoe_chiba_ratio)

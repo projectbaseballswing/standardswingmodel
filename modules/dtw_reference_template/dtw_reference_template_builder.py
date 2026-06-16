@@ -1,7 +1,7 @@
 """DTW 기반 기준 스윙 템플릿을 생성하는 CLI입니다.
 
 입력은 이미 생성된 pose-only feature dataset입니다. 이 스크립트는
-영상을 다시 읽거나 pose landmark를 추출하지 않고, `(N, 80, 67)` feature
+영상을 다시 읽거나 pose landmark를 추출하지 않고, `(N, 80, 64)` feature
 sequence를 이용해 선수별 DTW template과 player-balanced global template을
 생성합니다.
 """
@@ -17,6 +17,9 @@ import numpy as np
 
 from modules.utils.feature_scaling import save_scaler
 from modules.utils.reference_template_builder import (
+    EXPECTED_FEATURE_DIM,
+    EXPECTED_SEQUENCE_LEN,
+    FEATURE_GROUPS,
     build_global_template_from_player_templates,
     build_label_templates,
     build_template_summary_rows,
@@ -140,21 +143,16 @@ def run(args: argparse.Namespace) -> None:
         "template_space": "scaled_pose_only_features",
         "template_build_method": "player_balanced_dtw_aligned_arithmetic_mean",
         "global_template_source": "player_level_templates",
+        "default_template": "global_mean_template",
         "raw_videos_averaged_directly_for_global": False,
         "quality_weighting_scope": "inside_player_template_construction_only" if args.quality_weighting else "disabled",
-        "feature_shape": [80, 67],
-        "feature_groups": {
-            "landmark_xyz_visibility": [0, 48],
-            "relative_positions": [48, 57],
-            "angles_deg": [57, 64],
-            "velocities": [64, 67],
-        },
+        "feature_shape": [EXPECTED_SEQUENCE_LEN, EXPECTED_FEATURE_DIM],
+        "feature_groups": {name: [start, end] for name, (start, end) in FEATURE_GROUPS.items()},
         "feature_weight_config": {
             "landmark_xyz_visibility": 0.7,
             "visibility_columns": 0.2,
             "relative_positions": 1.0,
-            "angles_deg": 1.2,
-            "velocities": 0.8,
+            "angle_rotation": 1.2,
         },
         "quality_summary": quality_summary,
         "player_template_quality_metadata": [
@@ -211,16 +209,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--features-npz", required=True)
     parser.add_argument("--per-video-csv", required=True)
     parser.add_argument("--metadata-csv", default=None)
-    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--out-dir", default="reference_templates_900_loo_mincount8")
     parser.add_argument("--feature-key", default=None)
-    parser.add_argument("--min-label-count", type=int, default=2)
+    parser.add_argument("--min-label-count", type=int, default=8)
     parser.add_argument("--max-nan-ratio", type=float, default=0.20)
     parser.add_argument("--view-group", default=None)
     parser.add_argument("--use-template-only", action="store_true")
     parser.set_defaults(quality_weighting=True)
     parser.add_argument("--quality-weighting", dest="quality_weighting", action="store_true")
     parser.add_argument("--no-quality-weighting", dest="quality_weighting", action="store_false")
-    parser.add_argument("--eval-mode", choices=["insample", "loo"], default="insample")
+    parser.add_argument("--eval-mode", choices=["insample", "loo"], default="loo")
     parser.add_argument("--sakoe-chiba-ratio", type=float, default=0.15)
     return parser
 

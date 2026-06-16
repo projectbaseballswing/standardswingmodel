@@ -1,4 +1,4 @@
-"""생성된 DTW reference template의 품질을 평가하는 모듈입니다.
+﻿"""생성된 DTW reference template의 품질을 평가하는 모듈입니다.
 
 각 sequence가 자기 label template에 얼마나 가까운지, 다른 label template과는
 얼마나 떨어져 있는지를 계산합니다. in-sample 평가와 leave-one-out 평가를
@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from modules.utils.dtw_utils import dtw_distance
+from modules.utils.feature_scaling import validate_feature_dataset, validate_feature_sequence, validate_feature_vector
 from modules.utils.reference_template_builder import build_dtw_aligned_mean_template, choose_medoid
 
 
@@ -63,9 +64,12 @@ def evaluate_reference_templates(
         raise ValueError("eval_mode must be 'insample' or 'loo'")
     if quality_scores is not None and len(quality_scores) != len(sequences):
         raise ValueError("quality_scores must have the same length as sequences")
+    sequences = validate_feature_dataset(sequences, name="evaluation sequences")
+    if feature_weights is not None:
+        validate_feature_vector(feature_weights, "feature_weights")
 
     label_template_map = {
-        str(label_name): np.asarray(template, dtype=float)
+        str(label_name): validate_feature_sequence(template, name=f"label template {label_name}")
         for label_name, template in zip(label_names, label_templates)
     }
     labels_as_str = [str(label) for label in labels]

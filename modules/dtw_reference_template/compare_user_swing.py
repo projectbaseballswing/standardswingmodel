@@ -1,7 +1,7 @@
 """사용자 스윙 feature를 reference template과 비교하는 CLI입니다.
 
 이 파일은 영상을 직접 처리하지 않습니다. 팀 feature pipeline 또는 별도
-전처리 코드가 만든 `(80, 67)` feature sequence를 입력으로 받아,
+전처리 코드가 만든 `(80, 64)` feature sequence를 입력으로 받아,
 `reference_templates.npz`와 `template_scaler.json`을 이용해 비교 결과를
 JSON으로 저장합니다.
 """
@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from modules.utils.feature_scaling import load_scaler
+from modules.utils.feature_scaling import EXPECTED_SEQUENCE_SHAPE, load_scaler, validate_feature_sequence
 from modules.utils.swing_comparator import compare_user_to_templates, load_reference_templates
 
 
@@ -61,11 +61,13 @@ def _load_feature_from_npz(path: str | Path, feature_key: Optional[str] = None) 
 
 
 def load_user_feature(args: argparse.Namespace) -> np.ndarray:
-    """CLI 인자에서 사용자 feature 입력을 읽어 `(80, 67)` 배열로 반환합니다."""
+    """CLI 인자에서 사용자 feature 입력을 읽어 `(80, 64)` 배열로 반환합니다."""
     if args.user_feature_npy:
-        return np.asarray(np.load(args.user_feature_npy, allow_pickle=True), dtype=float)
+        feature = np.asarray(np.load(args.user_feature_npy, allow_pickle=True), dtype=float)
+        return validate_feature_sequence(feature, name="user feature")
     if args.user_feature_npz:
-        return _load_feature_from_npz(args.user_feature_npz, feature_key=args.feature_key)
+        feature = _load_feature_from_npz(args.user_feature_npz, feature_key=args.feature_key)
+        return validate_feature_sequence(feature, name="user feature")
     raise ValueError("provide --user-feature-npy or --user-feature-npz")
 
 
@@ -110,7 +112,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Compare one user pose-only feature sequence to reference templates.")
+    parser = argparse.ArgumentParser(
+        description=f"Compare one user pose-only feature sequence with shape {EXPECTED_SEQUENCE_SHAPE} to reference templates."
+    )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--user-feature-npy", default=None)
     source.add_argument("--user-feature-npz", default=None)

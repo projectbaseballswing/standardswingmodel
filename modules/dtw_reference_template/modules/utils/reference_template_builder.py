@@ -1,4 +1,4 @@
-"""player-balanced DTW reference template 생성 모듈입니다.
+﻿"""player-balanced DTW reference template 생성 모듈입니다.
 
 팀 feature pipeline이 만든 pose-only feature sequence를 입력으로 받아
 선수별 DTW-aligned mean template을 만들고, 선수별 template들을 동일
@@ -20,17 +20,22 @@ import numpy as np
 import pandas as pd
 
 from modules.utils.dtw_utils import dtw_distance, pairwise_dtw_matrix
-from modules.utils.feature_scaling import fit_feature_scaler, transform_feature_sequence
+from modules.utils.feature_scaling import (
+    EXPECTED_FEATURE_DIM,
+    EXPECTED_SEQUENCE_LEN,
+    fit_feature_scaler,
+    transform_feature_sequence,
+    validate_feature_dataset,
+    validate_feature_names,
+    validate_feature_sequence,
+    validate_feature_vector,
+)
 
-
-EXPECTED_SEQUENCE_LEN = 80
-EXPECTED_FEATURE_DIM = 67
 
 FEATURE_GROUPS: Dict[str, Tuple[int, int]] = {
     "landmark_xyz_visibility": (0, 48),
     "relative_positions": (48, 57),
-    "angles_deg": (57, 64),
-    "velocities": (64, 67),
+    "angle_rotation": (57, 64),
 }
 
 PHASES: Dict[str, Tuple[int, int]] = {
@@ -96,7 +101,6 @@ def create_default_feature_weights(n_features: int = EXPECTED_FEATURE_DIM) -> np
     weights[3:48:4] = 0.2
     weights[48:57] = 1.0
     weights[57:64] = 1.2
-    weights[64:67] = 0.8
     return weights
 
 
@@ -200,11 +204,7 @@ def load_feature_dataset(
 
     data = np.load(npz_path, allow_pickle=True)
     features, loaded_key = _select_feature_array(data, feature_key)
-    features = np.asarray(features, dtype=float)
-    if features.ndim == 2:
-        features = features[None, :, :]
-    if features.shape[1:] != (EXPECTED_SEQUENCE_LEN, EXPECTED_FEATURE_DIM):
-        raise ValueError(f"expected feature shape (N, 80, 67), got {features.shape}")
+    features = validate_feature_dataset(features, name="feature dataset")
 
     video_arr = _load_npz_array(data, ["video_ids", "video_id", "ids"])
     label_arr = _load_npz_array(data, ["labels", "label"])
@@ -241,8 +241,7 @@ def load_feature_dataset(
         if feature_names_arr is not None
         else [f"feature_{i:02d}" for i in range(EXPECTED_FEATURE_DIM)]
     )
-    if len(feature_names) != EXPECTED_FEATURE_DIM:
-        raise ValueError(f"expected 67 feature names, got {len(feature_names)}")
+    feature_names = validate_feature_names(feature_names)
 
     labels: List[str] = []
     status: List[str] = []
@@ -416,6 +415,10 @@ def choose_medoid(
         raise ValueError("cannot choose medoid from an empty sequence list")
     if len(sequences) != len(video_ids):
         raise ValueError("sequences and video_ids length mismatch")
+    for idx, sequence in enumerate(sequences):
+        validate_feature_sequence(sequence, name=f"sequence[{idx}]")
+    if feature_weights is not None:
+        validate_feature_vector(feature_weights, "feature_weights")
     if len(sequences) == 1:
         return 0, str(video_ids[0]), np.zeros((1, 1), dtype=float)
     # medoid는 새로 만든 평균값이 아니라, 다른 sequence들과 평균 DTW 거리가 가장 작은 실제 sequence입니다.
@@ -463,7 +466,11 @@ def build_dtw_aligned_mean_template(
 
     if len(sequences) == 0:
         raise ValueError("at least one sequence is required to build a template")
-    medoid = np.asarray(medoid_sequence, dtype=float)
+    medoid = validate_feature_sequence(medoid_sequence, name="medoid_sequence")
+    for idx, sequence in enumerate(sequences):
+        validate_feature_sequence(sequence, name=f"sequence[{idx}]")
+    if feature_weights is not None:
+        validate_feature_vector(feature_weights, "feature_weights")
     weights = _safe_sample_weights(sample_weights, len(sequences))
     frame_buckets: List[List[np.ndarray]] = [[] for _ in range(medoid.shape[0])]
     weight_buckets: List[List[float]] = [[] for _ in range(medoid.shape[0])]
@@ -623,6 +630,21 @@ def save_reference_templates(
     feature_weights: Sequence[float],
     metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
+    validate_feature_vector(feature_weights, "feature_weights")
+    validate_feature_sequence(global_template.mean_template, name="global_mean_template")
+    validate_feature_sequence(global_template.std_template, name="global_std_template")
+    validate_feature_sequence(global_template.medoid_sequence, name="global_medoid_sequence")
+    if global_template.count_template.shape != (EXPECTED_SEQUENCE_LEN,):
+        raise ValueError(f"global_count_template must have shape ({EXPECTED_SEQUENCE_LEN},), got {global_template.count_template.shape}")
+    for idx, template in enumerate(label_templates):
+        validate_feature_sequence(template.mean_template, name=f"label_mean_templates[{idx}]")
+        validate_feature_sequence(template.std_template, name=f"label_std_templates[{idx}]")
+        validate_feature_sequence(template.medoid_sequence, name=f"label_medoid_sequences[{idx}]")
+        if template.count_template.shape != (EXPECTED_SEQUENCE_LEN,):
+            raise ValueError(
+                f"label_count_templates[{idx}] must have shape ({EXPECTED_SEQUENCE_LEN},), got {template.count_template.shape}"
+            )
+
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     labels = [template.label for template in label_templates]
@@ -712,7 +734,7 @@ def write_quality_report(
         "## 템플릿 성격",
         "- 이 모델은 player-balanced DTW-aligned reference template입니다.",
         "- 단일한 universal ideal swing이 아니라, 선별된 프로 선수 pose-only feature로 만든 기준 스윙 템플릿입니다.",
-        "- 현재 Bat/Yolo feature는 제외되어 있으며 pose-only feature만 사용합니다.",
+        "- 최종 DTW feature는 80 frame, 64 feature format만 사용합니다.",
         "",
         "## 데이터 선택",
         f"- 선택된 영상 수: {len(dataset.video_ids)}",

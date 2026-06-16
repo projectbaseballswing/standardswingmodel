@@ -1,8 +1,9 @@
-"""DTW 비교 전에 feature scale을 맞추는 유틸입니다.
+﻿"""DTW 비교 전에 final feature scale을 맞추는 유틸입니다.
 
-좌표, 각도, 속도 feature는 값의 범위가 다르기 때문에 그대로 DTW에
-넣으면 특정 feature가 distance를 과도하게 지배할 수 있습니다. 이 모듈은
-reference set 기준 median imputation과 mean/std scaling을 담당합니다.
+최종 DTW feature format은 한 sequence가 정확히 ``(80, 64)``이고, dataset은
+정확히 ``(N, 80, 64)``입니다. 이 모듈은 reference set 기준 median
+imputation과 mean/std scaling을 담당하며, scaler vector도 모두 64차원으로
+검증합니다.
 """
 
 from __future__ import annotations
@@ -13,6 +14,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
+
+
+EXPECTED_SEQUENCE_LEN = 80
+EXPECTED_FEATURE_DIM = 64
+EXPECTED_SEQUENCE_SHAPE = (EXPECTED_SEQUENCE_LEN, EXPECTED_FEATURE_DIM)
 
 
 def _finite_array(values: np.ndarray) -> np.ndarray:
@@ -39,6 +45,62 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def validate_feature_sequence(sequence: np.ndarray, name: str = "feature sequence") -> np.ndarray:
+    """Return ``sequence`` as float after enforcing the final ``(80, 64)`` shape."""
+
+    arr = np.asarray(sequence, dtype=float)
+    if arr.shape != EXPECTED_SEQUENCE_SHAPE:
+        raise ValueError(f"{name} must have shape {EXPECTED_SEQUENCE_SHAPE}, got {arr.shape}")
+    return arr
+
+
+def validate_feature_dataset(sequences: Sequence[np.ndarray], name: str = "feature dataset") -> np.ndarray:
+    """Return ``sequences`` as float after enforcing final ``(N, 80, 64)`` shape."""
+
+    arr = np.asarray(sequences, dtype=float)
+    if arr.ndim != 3 or arr.shape[1:] != EXPECTED_SEQUENCE_SHAPE:
+        raise ValueError(f"{name} must have shape (N, 80, 64), got {arr.shape}")
+    if arr.shape[0] < 1:
+        raise ValueError(f"{name} must contain at least one sequence")
+    return arr
+
+
+def validate_feature_vector(values: Sequence[float], name: str) -> np.ndarray:
+    """Return a 64-element vector as float."""
+
+    arr = np.asarray(values, dtype=float)
+    if arr.shape != (EXPECTED_FEATURE_DIM,):
+        raise ValueError(f"{name} must have length {EXPECTED_FEATURE_DIM}, got shape {arr.shape}")
+    return arr
+
+
+def validate_feature_names(feature_names: Sequence[str], name: str = "feature_names") -> list[str]:
+    names = [str(x) for x in feature_names]
+    if len(names) != EXPECTED_FEATURE_DIM:
+        raise ValueError(f"{name} must contain {EXPECTED_FEATURE_DIM} entries, got {len(names)}")
+    return names
+
+
+def validate_scaler(scaler: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate that a saved scaler matches the final 64D feature format."""
+
+    n_features = int(scaler.get("n_features", -1))
+    if n_features != EXPECTED_FEATURE_DIM:
+        raise ValueError(f"scaler n_features must be {EXPECTED_FEATURE_DIM}, got {n_features}")
+    n_frames = scaler.get("n_frames_per_sequence")
+    if n_frames is not None and int(n_frames) != EXPECTED_SEQUENCE_LEN:
+        raise ValueError(f"scaler n_frames_per_sequence must be {EXPECTED_SEQUENCE_LEN}, got {n_frames}")
+    for key in ("median", "mean", "std"):
+        if key not in scaler:
+            raise ValueError(f"scaler is missing required vector: {key}")
+        scaler[key] = validate_feature_vector(scaler[key], f"scaler[{key!r}]")
+    if "feature_weights" in scaler and scaler["feature_weights"] is not None:
+        scaler["feature_weights"] = validate_feature_vector(scaler["feature_weights"], "scaler['feature_weights']")
+    if "feature_names" in scaler and scaler["feature_names"] is not None:
+        scaler["feature_names"] = validate_feature_names(scaler["feature_names"], "scaler['feature_names']")
+    return scaler
+
+
 def fit_feature_scaler(
     sequences: Sequence[np.ndarray],
     feature_names: Optional[Sequence[str]] = None,
@@ -50,11 +112,7 @@ def fit_feature_scaler(
     median, mean, std를 계산합니다.
     """
 
-    if len(sequences) == 0:
-        raise ValueError("at least one reference sequence is required to fit scaler")
-    arr = _finite_array(np.asarray(sequences, dtype=float))
-    if arr.ndim != 3:
-        raise ValueError(f"sequences must have shape (N, T, F), got {arr.shape}")
+    arr = _finite_array(validate_feature_dataset(sequences, name="reference sequences"))
 
     flat = arr.reshape(-1, arr.shape[-1])
     median = np.nanmedian(flat, axis=0)
@@ -75,21 +133,23 @@ def fit_feature_scaler(
         "n_frames_per_sequence": int(arr.shape[1]),
     }
     if feature_names is not None:
-        scaler["feature_names"] = [str(x) for x in feature_names]
+        scaler["feature_names"] = validate_feature_names(feature_names)
     if feature_weights is not None:
-        scaler["feature_weights"] = np.asarray(feature_weights, dtype=float)
-    return scaler
+        scaler["feature_weights"] = validate_feature_vector(feature_weights, "feature_weights")
+    return validate_scaler(scaler)
 
 
 def transform_feature_sequence(sequence: np.ndarray, scaler: Dict[str, Any]) -> np.ndarray:
     """학습된 scaler를 하나의 sequence 또는 batch에 적용합니다."""
 
+    scaler = validate_scaler(scaler)
     arr = np.asarray(sequence, dtype=float).copy()
-    if arr.ndim not in (2, 3):
-        raise ValueError(f"sequence must have shape (T, F) or (N, T, F), got {arr.shape}")
-    n_features = int(scaler["n_features"])
-    if arr.shape[-1] != n_features:
-        raise ValueError(f"expected {n_features} features, got {arr.shape[-1]}")
+    if arr.ndim == 2:
+        validate_feature_sequence(arr)
+    elif arr.ndim == 3:
+        validate_feature_dataset(arr)
+    else:
+        raise ValueError(f"sequence must have shape (80, 64) or (N, 80, 64), got {arr.shape}")
 
     median = np.asarray(scaler["median"], dtype=float)
     mean = np.asarray(scaler["mean"], dtype=float)
@@ -103,7 +163,14 @@ def transform_feature_sequence(sequence: np.ndarray, scaler: Dict[str, Any]) -> 
 def inverse_transform_feature_sequence(sequence: np.ndarray, scaler: Dict[str, Any]) -> np.ndarray:
     """mean/std scaling을 되돌립니다. 원래 NaN 위치까지 복원하지는 않습니다."""
 
+    scaler = validate_scaler(scaler)
     arr = np.asarray(sequence, dtype=float)
+    if arr.ndim == 2:
+        validate_feature_sequence(arr, name="scaled feature sequence")
+    elif arr.ndim == 3:
+        validate_feature_dataset(arr, name="scaled feature dataset")
+    else:
+        raise ValueError(f"sequence must have shape (80, 64) or (N, 80, 64), got {arr.shape}")
     mean = np.asarray(scaler["mean"], dtype=float)
     std = np.asarray(scaler["std"], dtype=float)
     return arr * std + mean
@@ -111,6 +178,7 @@ def inverse_transform_feature_sequence(sequence: np.ndarray, scaler: Dict[str, A
 
 def save_scaler(scaler: Dict[str, Any], path: str | Path) -> None:
     """scaler 정보를 JSON으로 저장합니다."""
+    validate_scaler(scaler)
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
@@ -127,4 +195,4 @@ def load_scaler(path: str | Path) -> Dict[str, Any]:
     for key in ("median", "mean", "std", "feature_weights"):
         if key in scaler and scaler[key] is not None:
             scaler[key] = np.asarray(scaler[key], dtype=float)
-    return scaler
+    return validate_scaler(scaler)
