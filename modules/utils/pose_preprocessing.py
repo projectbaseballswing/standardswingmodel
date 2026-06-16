@@ -8,7 +8,6 @@ import pandas as pd
 from scipy.signal import savgol_filter
 
 from modules.utils.pose_utils import (
-    BAT_JOINT_ORDER,
     CORE_JOINTS,
     POSE_JOINTS,
     MOTION_JUMP_RATIO_THRESHOLDS,
@@ -369,21 +368,15 @@ def pack_output_arrays(
     """
     all_landmarks: List[np.ndarray] = []
     visibility: List[np.ndarray] = []
-    bat_landmarks: List[np.ndarray] = []
 
     for i in range(len(df)):
         core_arr = _pack_joint_array(df, i, OUTPUT_JOINT_ORDER)
         restored_core = restore_landmarks_to_original_frame(core_arr, roi_infos[i])
 
-        bat_arr = _pack_joint_array(df, i, BAT_JOINT_ORDER)
-        restored_bat = restore_landmarks_to_original_frame(bat_arr, roi_infos[i])
-
         all_landmarks.append(restored_core)
         visibility.append(_pack_visibility_array(df, i, OUTPUT_JOINT_ORDER))
-        bat_landmarks.append(restored_bat)
 
     return (
         np.asarray(all_landmarks, dtype=float),
         np.asarray(visibility, dtype=float),
-        np.asarray(bat_landmarks, dtype=float),
     )

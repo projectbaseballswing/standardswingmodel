@@ -127,14 +127,6 @@ OUTPUT_JOINT_ORDER: List[str] = [
 ]
 
 
-# bat_landmarks 출력 순서: shape (T, 6, 3)
-# 각 손에 대해 wrist -> pinky -> index 순서로 둡니다.
-BAT_JOINT_ORDER: List[str] = [
-    "left_wrist", "left_pinky", "left_index",
-    "right_wrist", "right_pinky", "right_index",
-]
-
-
 # left/right swap index pairs for each output array.
 OUTPUT_LEFT_RIGHT_PAIRS: List[Tuple[int, int]] = [
     (0, 1),    # shoulder
