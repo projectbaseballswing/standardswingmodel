@@ -1,153 +1,75 @@
 # DTW Reference Template Module
 
-This folder contains the final-submission DTW reference template module.
+이 폴더는 이미 생성된 개별 `.npy` 스윙 feature 파일에서 시작합니다. 영상을 읽지 않고, YOLO/MediaPipe/OpenCV 비디오 처리를 실행하지 않습니다.
 
-It builds player-balanced DTW reference templates from saved pose-only feature
-datasets and aligns individual feature files to a saved reference template.
-The module uses generated feature artifacts only. It does not run video
-processing, pose extraction, or template extraction from raw videos.
+입력 feature의 shape은 반드시 `(80, 64)`입니다. shape이 다르면 템플릿 생성 또는 정렬 대상에서 제외됩니다.
 
-The LSTM model is handled by the teammate's module. That module consumes the
-aligned feature files produced here.
+## 역할
 
-## Final Feature Format
+`build_template_from_npy_features.py`는 개별 `.npy` feature 파일을 모아 `reference_templates.npz`를 생성합니다.
 
-The final individual feature matrix is:
+`reference_templates.npz`는 self-contained artifact입니다. 내부에는 global template, 선수별 template, scaler median/mean/std, feature weights, feature names, metadata가 함께 저장됩니다.
 
-```text
-(80, 64)
-```
+`align_individual_features_to_template.py`는 개별 `.npy` feature를 저장된 DTW reference template timeline에 정렬합니다.
 
-The final dataset shape is:
+정렬된 feature는 팀원의 LSTM 모듈 입력으로 전달됩니다.
 
-```text
-(N, 80, 64)
-```
+## GitHub artifact 기준
 
-Feature groups:
+최종 template artifact로는 `reference_templates.npz`만 커밋합니다.
 
-| Range | Meaning |
-|---|---|
-| 0:48 | landmark x, y, z, visibility |
-| 48:57 | relative position features |
-| 57:64 | angle / rotation features |
+원본 개별 `.npy` feature 파일과 DTW 정렬 결과 `.npy` 파일은 생성 산출물이므로 커밋하지 않습니다.
 
-All public scripts validate this shape strictly. If input features, reference
-templates, scaler vectors, feature names, or feature weights do not match the
-64D final format, the scripts raise `ValueError`.
+`__pycache__/`와 `*.pyc` 파일도 커밋하지 않습니다.
 
-## Generated Artifacts
-
-Individual `.npy` feature files are generated artifacts and are not committed.
-Reference template outputs are generated into:
+## 주요 파일
 
 ```text
-reference_templates_900_loo_mincount8
+README_DTW.md
+build_template_from_npy_features.py
+align_individual_features_to_template.py
+modules/utils/dtw_utils.py
+modules/utils/feature_scaling.py
+modules/utils/reference_template_builder.py
 ```
 
-Main template outputs:
+## Template 생성
+
+```powershell
+python build_template_from_npy_features.py `
+  --feature-dir "C:\Users\DO\project\dorami\reference_swing\feature" `
+  --out-template ".\reference_templates.npz" `
+  --min-label-count 8 `
+  --sakoe-chiba-ratio 0.15 `
+  --overwrite
+```
+
+생성되는 기본 artifact:
 
 ```text
 reference_templates.npz
-template_scaler.json
-template_summary.csv
-template_quality_report.md
-template_classification_eval.csv
-template_comparison_summary.json
-selected_reference_videos.csv
 ```
 
-The default reference template key is:
-
-```text
-global_mean_template
-```
-
-## Create Or Validate The Final Dataset
-
-Use `prepare_64d_feature_dataset.py` only when an existing dataset has three
-extra trailing source-only columns that must be removed for the final format.
-The script updates compatible metadata and `feature_names`, then validates the
-result as `(N, 80, 64)`.
-
-```powershell
-python prepare_64d_feature_dataset.py `
-  --input-npz "C:\path\to\pose_only_dtw_features_source.npz" `
-  --output-npz "C:\path\to\pose_only_dtw_features_64d.npz" `
-  --overwrite
-
-python prepare_64d_feature_dataset.py `
-  --input-npz "C:\path\to\pose_only_dtw_features_source.npz" `
-  --validate-only
-```
-
-## Build Reference Templates
-
-Final defaults:
-
-```text
-out dir: reference_templates_900_loo_mincount8
-eval mode: loo
-min label count: 8
-sakoe_chiba_ratio: 0.15
-```
-
-Run from this folder:
-
-```powershell
-python dtw_reference_template_builder.py `
-  --features-npz "C:\path\to\pose_only_dtw_features_64d.npz" `
-  --per-video-csv "C:\path\to\per_video_summary.csv" `
-  --out-dir "reference_templates_900_loo_mincount8" `
-  --min-label-count 8 `
-  --eval-mode loo `
-  --sakoe-chiba-ratio 0.15
-```
-
-Optional filters:
-
-| Option | Purpose |
-|---|---|
-| `--metadata-csv` | optional video selection metadata |
-| `--view-group` | keep one metadata view group |
-| `--use-template-only` | keep rows marked for template use |
-| `--max-nan-ratio` | maximum allowed per-video NaN ratio |
-| `--no-quality-weighting` | disable quality weighting inside player template construction |
-
-## Compare One User Feature
-
-```powershell
-python compare_user_swing.py `
-  --user-feature-npy "C:\path\to\user_feature.npy" `
-  --reference-templates "reference_templates_900_loo_mincount8\reference_templates.npz" `
-  --template-scaler "reference_templates_900_loo_mincount8\template_scaler.json" `
-  --out-json "C:\path\to\comparison_result.json"
-```
-
-## Align Individual Features
-
-`align_individual_features_to_template.py` aligns existing final-format `.npy`
-files to the saved DTW template timeline. It loads the saved scaler, transforms
-each input feature, aligns it to `global_mean_template`, saves aligned `.npy`
-files, and writes a CSV summary.
+## 개별 feature 정렬
 
 ```powershell
 python align_individual_features_to_template.py `
-  --input-dir "C:\path\to\individual_features_64d" `
-  --reference-templates "reference_templates_900_loo_mincount8\reference_templates.npz" `
-  --template-scaler "reference_templates_900_loo_mincount8\template_scaler.json" `
-  --out-dir "C:\path\to\aligned_individual_features" `
-  --summary-csv "C:\path\to\aligned_individual_features_summary.csv" `
-  --sakoe-chiba-ratio 0.15
+  --feature-dir "C:\Users\DO\project\dorami\reference_swing\feature" `
+  --reference-template ".\reference_templates.npz" `
+  --template-name global_mean_template `
+  --out-dir ".\aligned_individual_features_900_loo_mincount8" `
+  --out-summary ".\aligned_individual_features_900_loo_mincount8\alignment_summary.csv" `
+  --save-space raw
 ```
 
-For one file:
+기본 raw 출력 파일명은 다음 형식입니다.
 
-```powershell
-python align_individual_features_to_template.py `
-  --input-npy "C:\path\to\one_feature.npy" `
-  --reference-templates "reference_templates_900_loo_mincount8\reference_templates.npz" `
-  --template-scaler "reference_templates_900_loo_mincount8\template_scaler.json" `
-  --out-dir "C:\path\to\aligned_individual_features" `
-  --summary-csv "C:\path\to\aligned_one_summary.csv"
+```text
+*_DTW_aligned.npy
+```
+
+`--save-space scaled` 또는 `--save-space both`를 사용하면 scaled 정렬 결과도 저장할 수 있습니다.
+
+```text
+*_DTW_aligned_scaled.npy
 ```
