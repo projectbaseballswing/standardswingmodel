@@ -1,0 +1,17 @@
+# 영상 처리 파이프라인
+numpy
+pandas
+scipy
+opencv-python
+mediapipe<1  # 1.0.x 는 pose_landmarker.task 로드 시 크래시
+ultralytics
+lap  # ultralytics 추적기(model.track)가 사용
+
+# 피드백 API
+fastapi
+uvicorn[standard]
+python-multipart
+
+# 테스트
+httpx
+pytest
