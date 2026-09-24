@@ -7,10 +7,15 @@ mediapipe<1  # 1.0.x 는 pose_landmarker.task 로드 시 크래시
 ultralytics
 lap  # ultralytics 추적기(model.track)가 사용
 
-# 피드백 API
+# API 서버
 fastapi
 uvicorn[standard]
 python-multipart
+email-validator  # pydantic EmailStr 에 필요
+
+# 회원 기능 (backend/)
+sqlalchemy
+bcrypt
 
 # 테스트
 httpx

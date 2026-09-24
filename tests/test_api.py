@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
+from server import app
 
 
 @pytest.fixture(scope="module")
@@ -37,7 +37,7 @@ def _template_like_features(noise: float = 0.0, extra_velocity: bool = False) ->
 
 def _upload(client, features: np.ndarray, **form):
     return client.post(
-        "/analyses/features",
+        "/api/analyses/features",
         files={"features": ("swing.npy", _npy_bytes(features), "application/octet-stream")},
         data=form,
     )
@@ -50,20 +50,20 @@ def test_feature_analysis_and_sub_endpoints(client):
     assert analysis["status"] == "done"
     analysis_id = analysis["analysis_id"]
 
-    overall = client.get(f"/analyses/{analysis_id}/overall").json()
+    overall = client.get(f"/api/analyses/{analysis_id}/overall").json()
     assert 0 <= overall["score"] <= 100
     assert len(overall["frame_distances"]) == 80
     assert "similar_players" not in overall
 
-    joints = client.get(f"/analyses/{analysis_id}/joints").json()["joints"]
+    joints = client.get(f"/api/analyses/{analysis_id}/joints").json()["joints"]
     assert len(joints) == 7
     assert all(joint["series"] is None for joint in joints)
     assert [p["phase"] for p in joints[0]["phases"]] == ["stance", "load", "swing", "follow_through"]
 
-    joints_with_series = client.get(f"/analyses/{analysis_id}/joints?include_series=true").json()["joints"]
+    joints_with_series = client.get(f"/api/analyses/{analysis_id}/joints?include_series=true").json()["joints"]
     assert len(joints_with_series[0]["series"]["user"]) == 80
 
-    phases = client.get(f"/analyses/{analysis_id}/phases").json()
+    phases = client.get(f"/api/analyses/{analysis_id}/phases").json()
     assert [p["key"] for p in phases["phases"]] == ["stance", "load", "swing", "follow_through"]
     assert phases["phases"][-1]["reference_frames"][1] == 80
 
@@ -94,5 +94,5 @@ def test_bad_shape_rejected(client):
 
 
 def test_unknown_analysis(client):
-    assert client.get("/analyses/nope").status_code == 404
-    assert client.get("/analyses/nope/overall").status_code == 404
+    assert client.get("/api/analyses/nope").status_code == 404
+    assert client.get("/api/analyses/nope/overall").status_code == 404
