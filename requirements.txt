@@ -13,7 +13,7 @@ uvicorn[standard]
 python-multipart
 email-validator  # pydantic EmailStr 에 필요
 
-# 회원 기능 (backend/)
+# 회원 기능 (api/database.py, api/security.py)
 sqlalchemy
 bcrypt
 

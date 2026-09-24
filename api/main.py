@@ -1,7 +1,7 @@
 """서버 진입점. 회원 API와 스윙 피드백 API를 한 앱으로 묶는다.
 
 실행 (프로젝트 루트에서):
-    .venv/bin/uvicorn server:app --reload
+    .venv/bin/uvicorn api.main:app --reload
 
 문서: http://127.0.0.1:8000/docs
 모든 경로는 /api 로 시작한다.
@@ -13,9 +13,9 @@ import logging
 
 from fastapi import FastAPI
 
-from api.routes import lifespan
-from api.routes import router as feedback_router
-from backend import login, me, register
+from api import login, me, register
+from api.analyses import lifespan
+from api.analyses import router as analyses_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -29,10 +29,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 회원 (/api/register, /api/login, /api/me)
+# 회원 (/api/register, /api/login, /api/me, /api/check-email)
 app.include_router(register.router)
 app.include_router(login.router)
 app.include_router(me.router)
 
 # 스윙 피드백 (/api/analyses, /api/health)
-app.include_router(feedback_router)
+app.include_router(analyses_router)

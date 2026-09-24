@@ -10,8 +10,8 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.database import User, get_db
-from backend.security import hash_password
+from api.database import User, get_db
+from api.security import hash_password
 
 router = APIRouter()
 

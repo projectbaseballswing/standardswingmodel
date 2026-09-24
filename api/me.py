@@ -13,7 +13,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.database import User, get_db
+from api.database import User, get_db
 
 router = APIRouter()
 

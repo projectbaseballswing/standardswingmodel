@@ -8,7 +8,7 @@
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/uvicorn server:app --reload   # 문서: http://127.0.0.1:8000/docs
+.venv/bin/uvicorn api.main:app --reload   # 문서: http://127.0.0.1:8000/docs
 .venv/bin/python -m pytest tests
 ```
 
@@ -21,6 +21,6 @@ python3.12 -m venv .venv
 | GET | `/api/analyses/{id}/joints` | 관절별 피드백: 각도 7개의 구간별/임팩트/움직임 폭 비교 |
 | GET | `/api/analyses/{id}/phases` | 구간별 피드백: 준비/로딩/스윙/팔로우스루 템포와 유사도 |
 
-회원 API(`backend/`)와 같은 앱으로 묶여 있습니다. 진입점은 `server.py` 하나이고, 모든 경로가 `/api` 로 시작합니다.
+회원 API(`/api/register`, `/api/login`, `/api/me`)와 같은 앱으로 묶여 있습니다. 진입점은 `api/main.py` 하나이고, 모든 경로가 `/api` 로 시작합니다.
 
-코드 구조: `feedback/` (피처 정의, 템플릿 로딩, 비교 계산, 영상 파이프라인), `api/` (라우터, 작업 큐, 스키마), `server.py` (앱 조립)
+코드 구조: `feedback/` (피처 정의, 템플릿 로딩, 비교 계산, 영상 파이프라인), `api/` (앱 조립, 회원·피드백 라우터, 작업 큐, 스키마, DB)

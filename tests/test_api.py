@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from server import app
+from api.main import app
 
 
 @pytest.fixture(scope="module")
