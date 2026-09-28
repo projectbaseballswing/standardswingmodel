@@ -110,6 +110,10 @@ def compute_motion_missing(
     """
     프레임 간 이동이 너무 큰 점을 motion missing으로 처리
     jump_ratio = 이동거리 / 어깨너비 중앙값
+
+    비교 기준점(prev_valid_pt)은 missing으로 판정한 프레임에서도 갱신한다.
+    갱신하지 않으면 스윙처럼 빠른 동작이 한 번 시작된 뒤의 모든 프레임이
+    '동작 전 위치'와 비교되어 영상 끝까지 연쇄적으로 missing 처리된다.
     """
     out = pd.DataFrame(False, index=df.index, columns=POSE_JOINTS.keys(), dtype=bool)
 
@@ -133,7 +137,6 @@ def compute_motion_missing(
 
                 if np.isfinite(jump_ratio) and jump_ratio > th:
                     out.at[i, joint] = True
-                    continue
 
             prev_valid_pt = cur_pt
 

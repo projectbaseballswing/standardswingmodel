@@ -36,6 +36,18 @@ class PipelineError(Exception):
 
 
 @dataclass
+class SkeletonResult:
+    """80프레임으로 자르기 전, 영상의 실제 프레임별 관절 데이터."""
+
+    landmarks: np.ndarray  # (T, 12, 3) 몸 기준 좌표계로 정규화
+    landmarks_pixel: np.ndarray  # (T, 12, 3) 원본 프레임 좌표
+    visibility: np.ndarray  # (T, 12)
+    fps: float
+    frame_size: tuple  # (width, height)
+    max_missing_gap: int
+
+
+@dataclass
 class PipelineResult:
     features: np.ndarray  # (80, 67)
     fps: float
@@ -72,17 +84,20 @@ class SwingPipeline:
         self.pose_model = str(pose_model)
         self.target_fps = target_fps
 
-    def run(
+    def extract_skeleton(
         self,
         video_path: str,
         is_left: bool,
         on_stage: Optional[Callable[[str], None]] = None,
-    ) -> PipelineResult:
+    ) -> SkeletonResult:
+        """영상 → 프레임별 관절 좌표. 80프레임으로 자르기 전 단계까지만 한다.
+
+        이벤트 기반 기준 모델을 만들려면 자르기 전의 실제 프레임과 fps 가 필요하다.
+        """
         import cv2
 
         from modules.extract_pose_with_roi import extract_pose_with_roi
         from modules.preprocessing import preprocess_player
-        from modules.utils.features_add import _find_impact_frame, make_features_single_video
         from modules.utils.video_roi_left import normalize_landmarks_sequence, process_roi, read_video
         from modules.yolo_obb_tracker import track_target_player
 
@@ -127,10 +142,37 @@ class SwingPipeline:
             pose_result = extract_pose_with_roi(roi_frames, roi_infos, fps, model_path=self.pose_model)
             if pose_result is None:
                 raise PipelineError("POSE_NOT_DETECTED", "관절을 검출하지 못했습니다.")
-            all_landmarks, visibility = pose_result
-            all_landmarks = np.asarray(normalize_landmarks_sequence(all_landmarks, visibility))
+            raw_landmarks, visibility = pose_result
+            normalized = np.asarray(normalize_landmarks_sequence(raw_landmarks, visibility))
 
-            stage("building_features")
+        logger.debug(buffer.getvalue())
+
+        return SkeletonResult(
+            landmarks=normalized,
+            landmarks_pixel=np.asarray(raw_landmarks, dtype=float),
+            visibility=np.asarray(visibility, dtype=float),
+            fps=float(fps),
+            frame_size=(int(width), int(height)),
+            max_missing_gap=int(max_missing_gap),
+        )
+
+    def run(
+        self,
+        video_path: str,
+        is_left: bool,
+        on_stage: Optional[Callable[[str], None]] = None,
+    ) -> PipelineResult:
+        from modules.utils.features_add import _find_impact_frame, make_features_single_video
+
+        skeleton = self.extract_skeleton(video_path, is_left, on_stage)
+        all_landmarks, visibility, fps = skeleton.landmarks, skeleton.visibility, skeleton.fps
+        max_missing_gap = skeleton.max_missing_gap
+
+        if on_stage:
+            on_stage("building_features")
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
             # 기준 템플릿과 같은 fps 로 맞춰야 80프레임이 같은 시간 길이를 담는다
             feature_fps = float(fps)
             if self.target_fps and abs(fps - self.target_fps) / self.target_fps > 0.05:

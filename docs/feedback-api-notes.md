@@ -26,7 +26,7 @@ GET  /analyses/{id}/phases     구간별 피드백
 | `feedback/reference.py` | `reference_templates.npz` 로딩, 구간 경계 검출, 점수 환산 기준 |
 | `feedback/compare.py` | DTW 비교 후 종합/관절별/구간별 수치 계산 |
 | `feedback/features.py` | 64개 피처의 인덱스와 이름 정의 |
-| `api/` | FastAPI 라우트, 작업 큐(워커 1개), 응답 스키마 |
+| `api/` | 앱 조립(main.py), 회원 라우터, 피드백 라우터, 작업 큐(워커 1개), 응답 스키마 |
 | `tests/test_api.py` | `.npy` 업로드 경로로 API 전체 흐름 검증 |
 
 비교 단계는 기존 DTW 모듈을 그대로 사용합니다.
