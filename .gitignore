@@ -207,3 +207,9 @@ marimo/_lsp/
 __marimo__/
 
 .vscode/
+
+# macOS
+.DS_Store
+
+# 로컬 DB
+users.db
