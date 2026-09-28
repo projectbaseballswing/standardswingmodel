@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>스윙 이벤트 라벨링</title>
+<style>
+  :root { --bg:#14161a; --panel:#1d2026; --line:#2c3038; --text:#e8eaed; --dim:#9aa0a6; --accent:#5aa9ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system, "Apple SD Gothic Neo", sans-serif; }
+  header { display:flex; gap:16px; align-items:center; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  .grow { flex:1; }
+  main { display:grid; grid-template-columns: 1fr 320px; gap:16px; padding:16px; align-items:start; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  /* 세로로 긴 영상도 한 화면에 들어오도록 높이를 기준으로 제한한다 */
+  img#frame { max-height:58vh; max-width:100%; width:auto; margin:0 auto; background:#000; border-radius:6px; display:block; }
+  .frameBox { display:flex; justify-content:center; background:#000; border-radius:6px; }
+  #chart { width:100%; height:110px; display:block; cursor:crosshair; }
+  .row { display:flex; gap:8px; align-items:center; }
+  button { background:#2a2f39; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 10px; cursor:pointer; font-size:13px; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#0b1220; border-color:var(--accent); font-weight:600; }
+  select, input { background:#0f1114; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:5px 4px; border-bottom:1px solid var(--line); }
+  td.key { color:var(--dim); white-space:nowrap; }
+  td.val { text-align:right; font-variant-numeric:tabular-nums; }
+  .hint { color:var(--dim); font-size:12px; }
+  .warn { color:#ffb86b; font-size:12px; margin-top:8px; }
+  .badge { font-size:12px; color:var(--dim); }
+  input[type=range] { width:100%; }
+</style>
+</head>
+<body>
+<header>
+  <h1>스윙 이벤트 라벨링</h1>
+  <select id="videoSelect"></select>
+  <span class="badge" id="progress"></span>
+  <span class="grow"></span>
+  <input id="labeler" placeholder="라벨러 이름" size="10" />
+  <button id="prevVideo">◀ 이전</button>
+  <button id="nextVideo">다음 ▶</button>
+  <button class="primary" id="save">저장 (S)</button>
+  <a href="/api/labels/download"><button>CSV 받기</button></a>
+</header>
+
+<main>
+  <div class="card">
+    <div class="frameBox"><img id="frame" alt="frame" /></div>
+    <div class="row" style="margin-top:10px">
+      <button id="back5">◀◀ 5</button>
+      <button id="back1">◀ 1</button>
+      <span id="frameInfo" style="min-width:150px; text-align:center"></span>
+      <button id="fwd1">1 ▶</button>
+      <button id="fwd5">5 ▶▶</button>
+      <span class="grow"></span>
+      <span class="hint">← → 이동 · Shift 5프레임 · 1~6 이벤트 · 0,7 사용 구간 · 9 현재 프레임 이벤트 지우기</span>
+    </div>
+    <input type="range" id="slider" min="0" value="0" />
+    <canvas id="chart"></canvas>
+    <div class="hint">그래프: 파랑=손 속도, 초록=앞발목 높이, 주황=손 앞뒤 위치, 보라=스윙 후보 · 어두운 부분은 사용하지 않는 구간 · 클릭하면 그 프레임으로 이동</div>
+  </div>
+
+  <div class="card">
+    <table id="events"></table>
+    <div class="row" style="margin-top:10px">
+      <input id="note" placeholder="메모 (예: 스윙 아님)" style="flex:1" />
+    </div>
+    <div id="warnings" class="warn"></div>
+    <div class="hint" style="margin-top:10px">
+      값은 검출기 결과가 초기값입니다. 틀린 것만 고치세요.<br />
+      해당 이벤트가 영상에 없으면 ✕ 로 비워두세요 (9는 현재 프레임에 찍힌 이벤트만 지웁니다).<br />
+      앵글이 바뀌거나 다른 장면이 섞였으면 0·7로 쓸 구간만 남기세요.
+    </div>
+  </div>
+</main>
+
+<script>
+const EVENTS = [
+  { key: "load_start",  name: "로딩 시작",   hot: "1" },
+  { key: "foot_lift",   name: "앞발 들기",   hot: "2" },
+  { key: "foot_plant",  name: "앞발 착지",   hot: "3" },
+  { key: "swing_start", name: "스윙 시작",   hot: "4" },
+  { key: "impact",      name: "임팩트",      hot: "5" },
+  { key: "follow_end",  name: "팔로우 종료", hot: "6" },
+];
+// 사용할 구간. 이 범위 밖(앵글 전환, 다른 장면 등)은 분석에서 제외한다.
+const RANGES = [
+  { key: "clip_start", name: "구간 시작", hot: "0" },
+  { key: "clip_end",   name: "구간 끝",   hot: "7" },
+];
+const ALL = [RANGES[0], ...EVENTS, RANGES[1]];  // 0 시작 · 1~6 이벤트 · 7 끝
+
+let videos = [], vIndex = 0, data = null, frame = 0, values = {};
+
+const $ = (id) => document.getElementById(id);
+
+async function loadList() {
+  const res = await fetch("/api/videos").then((r) => r.json());
+  videos = res.videos;
+  $("videoSelect").innerHTML = videos
+    .map((v, i) => `<option value="${i}">${v.labeled ? "✓ " : ""}${v.priority ? "★ " : ""}${v.video_id}</option>`)
+    .join("");
+  $("progress").textContent = res.priority_total
+    ? `우선 목록 ${res.priority_labeled} / ${res.priority_total} 완료 (전체 ${res.labeled} / ${res.total})`
+    : `${res.labeled} / ${res.total} 라벨링 완료`;
+}
+
+async function loadVideo(i) {
+  vIndex = Math.max(0, Math.min(i, videos.length - 1));
+  $("videoSelect").value = vIndex;
+  data = await fetch(`/api/videos/${encodeURIComponent(videos[vIndex].video_id)}`).then((r) => r.json());
+  values = { ...(data.saved || data.detected) };
+  if (values.clip_start == null) values.clip_start = 0;
+  if (values.clip_end == null) values.clip_end = data.n_frames - 1;
+  $("note").value = data.saved_note || "";
+  $("warnings").textContent = (data.warnings || []).join("\n");
+  $("slider").max = data.n_frames - 1;
+  setFrame(values.impact ?? 0);
+  renderEvents();
+  drawChart();
+}
+
+function setFrame(n) {
+  frame = Math.max(0, Math.min(n, data.n_frames - 1));
+  $("slider").value = frame;
+  $("frame").src = `/api/videos/${encodeURIComponent(data.video_id)}/frames/${frame}`;
+  const ms = (frame / data.fps * 1000).toFixed(0);
+  $("frameInfo").textContent = `${frame} / ${data.n_frames - 1} (${ms}ms)`;
+  renderEvents();
+  drawChart();
+}
+
+function renderEvents() {
+  $("events").innerHTML = ALL.map((e) => {
+    const v = values[e.key];
+    const here = v === frame ? ' style="color:var(--accent)"' : "";
+    const ms = v == null ? "" : ` · ${(v / data.fps * 1000).toFixed(0)}ms`;
+    const dim = RANGES.includes(e) ? ' class="key" style="color:#6ee7a8"' : ' class="key"';
+    const canClear = !RANGES.includes(e) && v != null;
+    return `<tr${here}><td${dim}>${e.hot}. ${e.name}</td>
+      <td class="val">${v == null ? "—" : v + ms}</td>
+      <td class="val">
+        <button data-set="${e.key}">현재</button>
+        ${canClear ? `<button data-clear="${e.key}" title="이 이벤트 지우기">✕</button>` : ""}
+      </td></tr>`;
+  }).join("");
+  $("events").querySelectorAll("button[data-set]").forEach((b) => {
+    b.onclick = () => { values[b.dataset.set] = frame; renderEvents(); drawChart(); };
+  });
+  $("events").querySelectorAll("button[data-clear]").forEach((b) => {
+    b.onclick = () => { values[b.dataset.clear] = null; renderEvents(); drawChart(); };
+  });
+}
+
+function drawChart() {
+  const c = $("chart"), ctx = c.getContext("2d");
+  const w = (c.width = c.clientWidth * devicePixelRatio);
+  const h = (c.height = 110 * devicePixelRatio);
+  ctx.clearRect(0, 0, w, h);
+  const n = data.n_frames, pad = 8 * devicePixelRatio;
+  const x = (i) => (i / Math.max(n - 1, 1)) * (w - 2 * pad) + pad;
+
+  // 사용하지 않을 구간을 어둡게
+  ctx.fillStyle = "#00000077";
+  if (values.clip_start > 0) ctx.fillRect(0, 0, x(values.clip_start), h);
+  if (values.clip_end < n - 1) ctx.fillRect(x(values.clip_end), 0, w - x(values.clip_end), h);
+
+  // 스윙 후보(손 속도 봉우리)
+  for (const p of data.peaks || []) {
+    ctx.beginPath(); ctx.moveTo(x(p), h - 10 * devicePixelRatio); ctx.lineTo(x(p), h);
+    ctx.strokeStyle = "#c792ea"; ctx.lineWidth = 3 * devicePixelRatio; ctx.stroke();
+  }
+
+  const series = [
+    ["hand_speed", "#5aa9ff"],
+    ["lead_ankle_y", "#6ee7a8"],
+    ["hand_x", "#ffb86b"],
+  ];
+  for (const [key, color] of series) {
+    const arr = data.signals[key];
+    const lo = Math.min(...arr), hi = Math.max(...arr), span = hi - lo || 1;
+    ctx.beginPath();
+    arr.forEach((v, i) => {
+      const y = h - pad - ((v - lo) / span) * (h - 2 * pad);
+      i ? ctx.lineTo(x(i), y) : ctx.moveTo(x(i), y);
+    });
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5 * devicePixelRatio; ctx.stroke();
+  }
+  for (const e of ALL) {
+    const v = values[e.key];
+    if (v == null) continue;
+    ctx.beginPath(); ctx.moveTo(x(v), 0); ctx.lineTo(x(v), h);
+    ctx.strokeStyle = RANGES.includes(e) ? "#6ee7a8aa" : "#ffffff55"; ctx.lineWidth = devicePixelRatio; ctx.stroke();
+    ctx.fillStyle = "#ffffffaa"; ctx.font = `${11 * devicePixelRatio}px sans-serif`;
+    ctx.fillText(e.hot, x(v) + 3 * devicePixelRatio, 12 * devicePixelRatio);
+  }
+  ctx.beginPath(); ctx.moveTo(x(frame), 0); ctx.lineTo(x(frame), h);
+  ctx.strokeStyle = "#ff5f7e"; ctx.lineWidth = 1.5 * devicePixelRatio; ctx.stroke();
+}
+
+async function save() {
+  const body = {
+    video_id: data.video_id,
+    labeler: $("labeler").value,
+    note: $("note").value,
+    events: values,
+  };
+  await fetch("/api/labels", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  localStorage.setItem("labeler", $("labeler").value);
+  await loadList();
+  $("videoSelect").value = vIndex;
+  if (vIndex < videos.length - 1) loadVideo(vIndex + 1);
+}
+
+$("slider").oninput = (e) => setFrame(+e.target.value);
+$("back1").onclick = () => setFrame(frame - 1);
+$("fwd1").onclick = () => setFrame(frame + 1);
+$("back5").onclick = () => setFrame(frame - 5);
+$("fwd5").onclick = () => setFrame(frame + 5);
+$("prevVideo").onclick = () => loadVideo(vIndex - 1);
+$("nextVideo").onclick = () => loadVideo(vIndex + 1);
+$("save").onclick = save;
+$("videoSelect").onchange = (e) => loadVideo(+e.target.value);
+$("chart").onclick = (e) => {
+  const rect = e.target.getBoundingClientRect();
+  setFrame(Math.round(((e.clientX - rect.left) / rect.width) * (data.n_frames - 1)));
+};
+
+document.onkeydown = (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  const step = e.shiftKey ? 5 : 1;
+  if (e.key === "ArrowLeft") { setFrame(frame - step); e.preventDefault(); }
+  else if (e.key === "ArrowRight") { setFrame(frame + step); e.preventDefault(); }
+  else if (e.key.toLowerCase() === "s") save();
+  else if (e.key === "9") { EVENTS.forEach((ev) => { if (values[ev.key] === frame) values[ev.key] = null; }); renderEvents(); drawChart(); }
+  else {
+    const ev = ALL.find((x) => x.hot === e.key);
+    if (ev) { values[ev.key] = frame; renderEvents(); drawChart(); }
+  }
+};
+
+(async () => {
+  $("labeler").value = localStorage.getItem("labeler") || "";
+  await loadList();
+  if (videos.length) await loadVideo(0);
+})();
+</script>
+</body>
+</html>
