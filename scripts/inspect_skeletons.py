@@ -7,7 +7,7 @@
     - 손목 속도 / 앞발목 높이 신호가 이벤트를 찾을 만큼 뚜렷한지
 
 사용법:
-    .venv/bin/python scripts/inspect_skeletons.py --skeleton-dir data/skeletons
+    python scripts/inspect_skeletons.py --skeleton-dir data/skeletons
 """
 
 from __future__ import annotations

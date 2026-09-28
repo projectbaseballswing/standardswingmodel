@@ -19,6 +19,8 @@ class Settings:
     reference_fps: float = float(os.getenv("SWING_REFERENCE_FPS", "30"))
     max_upload_mb: int = int(os.getenv("SWING_MAX_UPLOAD_MB", "200"))
     max_jobs: int = int(os.getenv("SWING_MAX_JOBS", "200"))
+    # SWING_MOCK=1 이면 모델을 불러오지 않고 고정된 샘플 응답을 돌려준다 (프론트/백엔드 개발용)
+    mock: bool = os.getenv("SWING_MOCK", "") == "1"
 
 
 settings = Settings()

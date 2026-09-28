@@ -22,6 +22,11 @@ from feedback.features import (
 )
 from feedback.reference import MIN_SPREAD, ReferenceStore, dtw_utils
 
+# 비교 방식이 바뀌면 올린다. 프론트는 이 값으로 응답 해석 방식을 구분할 수 있다.
+#   0.1 = 임팩트 정렬 + DTW + 고정 프레임 구간 (현재)
+#   0.2 = 이벤트 기반 구간 정규화 (예정)
+MODEL_VERSION = "0.1"
+
 # 프로 선수 스윙 1개가 기준과 보통 떨어진 거리(typical_distance)를 80점으로 둔다.
 SCORE_AT_TYPICAL = 0.8
 WORST_SEGMENT_LEN = 5
@@ -64,6 +69,23 @@ def _r(value: float, digits: int = 2) -> float:
     return round(float(value), digits)
 
 
+def reliability_from_quality(quality: Dict[str, Any]) -> str:
+    """영상 품질로 결과의 신뢰도를 정한다.
+
+    복사 프레임이 많거나 관절 검출이 나쁘면 수치를 그대로 믿기 어렵다.
+    """
+    padded = int(quality.get("pad_left_frames", 0) or 0) + int(quality.get("pad_right_frames", 0) or 0)
+    nan_ratio = float(quality.get("nan_ratio", 0) or 0)
+    visibility = quality.get("joint_visibility") or {}
+    worst_visibility = min(visibility.values()) if visibility else 1.0
+
+    if padded >= 20 or nan_ratio >= 0.2 or worst_visibility < 0.4:
+        return "low"
+    if padded >= 5 or nan_ratio >= 0.05 or worst_visibility < 0.6:
+        return "medium"
+    return "high"
+
+
 class SwingComparison:
     """사용자 피처 1개와 기준 템플릿의 비교 결과를 계산하고 들고 있는다."""
 
@@ -99,6 +121,7 @@ class SwingComparison:
         self.diff_scaled = self.aligned_scaled - self.template.mean
         self.spread = np.maximum(self.template.std, MIN_SPREAD)
         self.frame_distances = _weighted_rms(self.diff_scaled, store.feature_weights, axis=1)
+        self.reliability = reliability_from_quality(self.quality)
 
     # ------------------------------------------------------------------
     # 종합
@@ -120,6 +143,9 @@ class SwingComparison:
         worst_center = worst_start + WORST_SEGMENT_LEN // 2
 
         result: Dict[str, Any] = {
+            "model_version": MODEL_VERSION,
+            "available": True,
+            "reliability": self.reliability,
             "score": distance_to_score(self.distance, store.typical_distance),
             "distance": _r(self.distance, 3),
             "typical_pro_distance": _r(store.typical_distance, 3),
@@ -196,6 +222,8 @@ class SwingComparison:
                 "body_part": spec.body_part,
                 "description": spec.description,
                 "unit": "deg",
+                "available": True,
+                "reliability": self.reliability,
                 "level": worst["level"],
                 "worst_phase": worst["phase"],
                 "impact": {
@@ -263,6 +291,11 @@ class SwingComparison:
             results.append({
                 "key": phase.key,
                 "name": phase.name,
+                # 현재 모델은 고정 프레임 구간이라 항상 분석 가능하다.
+                # 이벤트 기반으로 바뀌면 영상에 없는 구간은 available=false 가 된다.
+                "available": True,
+                "reliability": self.reliability,
+                "unavailable_reason": None,
                 "reference_frames": [phase.start, phase.end],
                 "user_frames": [user_start, user_end],
                 "reference_duration_ms": _r(ref_ms, 0),
@@ -283,6 +316,7 @@ class SwingComparison:
             "reference": _r(load["reference_duration_ms"] / max(swing["reference_duration_ms"], 1e-6)),
         }
         return {
+            "model_version": MODEL_VERSION,
             "impact_frame": IMPACT_FRAME,
             "user_fps": _r(self.user_fps, 2),
             "reference_fps": _r(self.reference_fps, 2),
@@ -291,12 +325,29 @@ class SwingComparison:
         }
 
     # ------------------------------------------------------------------
+    def speed(self) -> Dict[str, Any]:
+        """속도 지표. 다음 모델 버전에서 값이 채워진다 (지금은 자리만 잡아둔다)."""
+        metrics = [
+            {"key": "swing_time", "name": "스윙 시간", "unit": "ms"},
+            {"key": "peak_hand_speed", "name": "최대 손 속도", "unit": "body/s"},
+            {"key": "hip_rotation_speed", "name": "골반 회전 속도", "unit": "deg/s"},
+            {"key": "shoulder_rotation_speed", "name": "어깨 회전 속도", "unit": "deg/s"},
+            {"key": "kinematic_sequence", "name": "꼬임 순서", "unit": "ms"},
+        ]
+        return {
+            "model_version": MODEL_VERSION,
+            "available": False,
+            "metrics": [{**m, "available": False, "reliability": "low"} for m in metrics],
+        }
+
     def report(self, include_series: bool = False) -> Dict[str, Any]:
         joints = self.joints(include_series=include_series)
         return {
+            "model_version": MODEL_VERSION,
             "overall": self.overall(joints=joints),
             "joints": joints,
             "phases": self.phases(joints=joints),
+            "speed": self.speed(),
         }
 
     def _phase_of_frame(self, frame: int) -> str:

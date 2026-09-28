@@ -3,8 +3,8 @@
 라벨이 늘어날 때마다 다시 돌려서 정확도가 개선됐는지 확인한다.
 
 사용법:
-    .venv/bin/python scripts/eval_events.py
-    .venv/bin/python scripts/eval_events.py --since 2026-09-30   # 이 날짜 이후 라벨만 (검증용)
+    python scripts/eval_events.py
+    python scripts/eval_events.py --since 2026-09-30   # 이 날짜 이후 라벨만 (검증용)
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@
 그 표본이 한쪽에 몰리면 안 된다. 선수/영상 길이/fps/앞발 움직임 폭이 골고루 섞이도록 뽑는다.
 
 사용법:
-    .venv/bin/python scripts/make_label_queue.py --count 40
+    python scripts/make_label_queue.py --count 40
     → data/label_priority.txt (라벨링 도구가 이 순서대로 먼저 보여준다)
 """
 

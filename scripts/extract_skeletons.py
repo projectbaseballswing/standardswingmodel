@@ -5,7 +5,7 @@
 실제 프레임 데이터를 남긴다.
 
 사용법:
-    .venv/bin/python scripts/extract_skeletons.py --video-dir data/videos --out-dir data/skeletons
+    python scripts/extract_skeletons.py --video-dir data/videos --out-dir data/skeletons
 
 저장 형식: data/skeletons/<영상이름>.npz
     landmarks        (T, 12, 3)  몸 기준 좌표계로 정규화된 관절 좌표

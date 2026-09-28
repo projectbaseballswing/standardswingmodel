@@ -40,10 +40,9 @@ GET  /analyses/{id}/phases     구간별 피드백
 실행
 
 ```bash
-python3.12 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/uvicorn api.main:app --reload   # 문서: http://127.0.0.1:8000/docs
-.venv/bin/python -m pytest tests
+pip install -r requirements.txt
+uvicorn api.main:app --reload   # 문서: http://127.0.0.1:8000/docs
+python -m pytest tests
 ```
 
 `mediapipe` 는 1.0.x 에서 `pose_landmarker.task` 로드 시 크래시가 나서 `<1` 로 고정했습니다.
@@ -159,7 +158,7 @@ python3.12 -m venv .venv
 
 ## 6. 라벨링 규칙 (2026-09-29 확정)
 
-웹 도구: `.venv/bin/python scripts/label_server.py` → http://127.0.0.1:8100
+웹 도구: `python scripts/label_server.py` → http://127.0.0.1:8100
 결과: `data/labels.csv`
 
 ### 이벤트 정의

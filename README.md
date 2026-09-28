@@ -6,11 +6,12 @@
 종합 / 관절별 / 구간별 수치를 돌려줍니다.
 
 ```bash
-python3.12 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/uvicorn api.main:app --reload   # 문서: http://127.0.0.1:8000/docs
-.venv/bin/python -m pytest tests
+pip install -r requirements.txt
+uvicorn api.main:app --reload   # 문서: http://127.0.0.1:8000/docs
+python -m pytest tests
 ```
+
+(가상환경을 쓴다면 먼저 `python3.12 -m venv .venv && source .venv/bin/activate`)
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|

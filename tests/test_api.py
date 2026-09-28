@@ -1,6 +1,6 @@
 """피처(.npy) 업로드 경로로 API 전체 흐름을 확인한다. 영상/YOLO 없이 돌아간다.
 
-    .venv/bin/python -m pytest tests
+    python -m pytest tests
 """
 
 import io
@@ -96,3 +96,38 @@ def test_bad_shape_rejected(client):
 def test_unknown_analysis(client):
     assert client.get("/api/analyses/nope").status_code == 404
     assert client.get("/api/analyses/nope/overall").status_code == 404
+
+
+def test_mock_mode(monkeypatch, tmp_path):
+    """SWING_MOCK=1 이면 모델 없이 고정 샘플을 돌려준다 (프론트 개발용)."""
+    import importlib
+    import os
+
+    monkeypatch.setenv("SWING_MOCK", "1")
+    monkeypatch.chdir(tmp_path)  # users.db 가 임시 폴더에 생기도록
+    import api.settings
+    import api.analyses
+    import api.main
+    for module in (api.settings, api.analyses, api.main):
+        importlib.reload(module)
+
+    with TestClient(api.main.app) as mock_client:
+        assert mock_client.get("/api/health").json()["mock"] is True
+        created = mock_client.post(
+            "/api/analyses",
+            files={"video": ("swing.mp4", b"fake", "video/mp4")},
+            data={"handedness": "right"},
+        )
+        assert created.status_code == 202
+        analysis_id = created.json()["analysis_id"]
+
+        analysis = mock_client.get(f"/api/analyses/{analysis_id}").json()
+        assert analysis["status"] == "done"
+        assert analysis["result"]["model_version"]
+        assert mock_client.get(f"/api/analyses/{analysis_id}/overall").json()["available"] is True
+        assert mock_client.get(f"/api/analyses/{analysis_id}/speed").json()["available"] is False
+        assert mock_client.get("/api/analyses/없는id/overall").status_code == 404
+
+    monkeypatch.delenv("SWING_MOCK")
+    for module in (api.settings, api.analyses, api.main):
+        importlib.reload(module)

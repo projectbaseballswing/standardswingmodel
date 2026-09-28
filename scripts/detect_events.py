@@ -1,7 +1,7 @@
 """추출된 스켈레톤(.npz) 전체에 이벤트 검출을 돌려 결과와 분포를 본다.
 
 사용법:
-    .venv/bin/python scripts/detect_events.py --skeleton-dir data/skeletons --out data/events.csv
+    python scripts/detect_events.py --skeleton-dir data/skeletons --out data/events.csv
 """
 
 from __future__ import annotations

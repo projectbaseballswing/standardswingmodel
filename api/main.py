@@ -1,7 +1,7 @@
-"""서버 진입점. 회원 API와 스윙 피드백 API를 한 앱으로 묶는다.
+"""서버 진입점
 
 실행 (프로젝트 루트에서):
-    .venv/bin/uvicorn api.main:app --reload
+    uvicorn api.main:app --reload
 
 문서: http://127.0.0.1:8000/docs
 모든 경로는 /api 로 시작한다.

@@ -4,7 +4,7 @@
 검출기(feedback/events.py)의 결과가 초기값으로 채워지므로, 틀린 것만 고치면 된다.
 
 실행:
-    .venv/bin/python scripts/label_server.py
+    python scripts/label_server.py
     → http://127.0.0.1:8100
 
 저장 위치: data/labels.csv (한 줄 = 한 스윙)
