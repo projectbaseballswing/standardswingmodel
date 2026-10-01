@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from api import login, me, register
 from api.analyses import lifespan
@@ -27,6 +28,20 @@ app = FastAPI(
     ),
     version="0.1.0",
     lifespan=lifespan,
+)
+
+# 개발용 CORS 설정.
+# Flutter 웹(flutter run -d chrome)은 서버와 다른 origin(포트)에서 돌기 때문에
+# 이 설정이 없으면 브라우저가 API 요청을 차단한다.
+# 배포 시에는 allow_origins 를 실제 프론트 도메인으로 제한할 것.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    # 와일드카드(*) origin 과 credentials 는 브라우저가 함께 허용하지 않는다.
+    # 현재 프론트는 쿠키/인증 헤더를 보내지 않으므로 False 로 둔다.
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 회원 (/api/register, /api/login, /api/me, /api/check-email)

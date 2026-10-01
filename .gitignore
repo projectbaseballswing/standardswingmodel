@@ -15,6 +15,9 @@ downloads/
 eggs/
 .eggs/
 lib/
+# 위 lib/ 는 Python 빌드 산출물용이지만 Flutter 앱 소스(frontend/lib)까지
+# 무시해버리므로 예외 처리한다.
+!frontend/lib/
 lib64/
 parts/
 sdist/
