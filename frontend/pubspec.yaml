@@ -37,6 +37,16 @@ dependencies:
   go_router: ^18.0.2
   http: ^1.2.2
 
+  # 스윙 촬영 (카메라 프리뷰 + 영상 녹화)
+  camera: ^0.11.0+2
+  # 갤러리에서 기존 영상 불러오기 (하단 썸네일 버튼)
+  image_picker: ^1.1.2
+  # 녹화 영상 미리보기 재생
+  video_player: ^2.9.2
+  # 녹화 파일 저장 경로
+  path_provider: ^2.1.4
+  path: ^1.9.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

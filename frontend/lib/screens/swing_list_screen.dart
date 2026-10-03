@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../data/swing_repository.dart';
 import '../models/swing.dart';
@@ -137,9 +138,7 @@ class _SwingListScreenState extends State<SwingListScreen> {
               ),
               IconButton(
                 icon: const Icon(Icons.add),
-                onPressed: () {
-                  // TODO(next): 스윙 촬영/업로드 화면으로 이동.
-                },
+                onPressed: _openCamera,
               ),
             ],
           ),
@@ -311,14 +310,18 @@ class _SwingListScreenState extends State<SwingListScreen> {
     );
   }
 
+  // 스윙 촬영 화면으로 이동.
+  void _openCamera() => context.push('/swings/camera');
+
   Widget _bottomNav() {
     return BottomNavigationBar(
       currentIndex: 0,
       selectedItemColor: AppColors.primary,
       unselectedItemColor: AppColors.hint,
       type: BottomNavigationBarType.fixed,
-      onTap: (_) {
-        // TODO(next): 스윙 촬영 / 스윙 추이 / 프로필 화면 연결.
+      onTap: (index) {
+        // 0: 스윙 촬영. 1·2 는 다음 작업에서 연결.
+        if (index == 0) _openCamera();
       },
       items: const [
         BottomNavigationBarItem(
