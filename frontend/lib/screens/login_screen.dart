@@ -44,12 +44,10 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final result = await _authApi.login(email: email, password: password);
+      await _authApi.login(email: email, password: password);
       if (!mounted) return;
-      // TODO(next): 로그인 성공 후 홈/분석 화면으로 이동 (예: context.go('/home')).
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${result.userId} 님, 로그인되었습니다.')),
-      );
+      // 로그인 성공 → 스윙 목록 화면으로 이동 (뒤로가기로 로그인에 못 돌아오게 go 사용).
+      context.go('/swings');
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _errorMessage = e.message);
