@@ -1,16 +1,15 @@
 """2. 로그인.
 
 [POST] /api/login
-요청: e-mail, password  (목업 기준 이메일 로그인)
+요청: id, password
 응답: success, user(user_id)
 
 순서
-이메일로 사용자 검색 → 비밀번호 검증 → 사용자 ID 반환
+ID로 사용자 검색 → 비밀번호 검증 → 사용자 ID 반환
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import select
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.database import User, get_db
@@ -20,10 +19,11 @@ router = APIRouter()
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr = Field(alias="e-mail")
+    id: str = Field(description="회원가입 시 정한 사용자 ID")
     password: str
 
-    model_config = {"populate_by_name": True, "coerce_numbers_to_str": True}
+    model_config = {"extra": "forbid", "coerce_numbers_to_str": True,
+                    "json_schema_extra": {"examples": [{"id": "demo-user", "password": "example-password"}]}}
 
 
 class LoginResponse(BaseModel):
@@ -33,7 +33,7 @@ class LoginResponse(BaseModel):
 
 @router.post("/api/login", response_model=LoginResponse)
 def login(req: LoginRequest, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.email == req.email))
+    user = db.get(User, req.id)
     if user is None or not verify_password(req.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 일치하지 않습니다.")
+        raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 일치하지 않습니다.")
     return LoginResponse(success=True, user=user.user_id)

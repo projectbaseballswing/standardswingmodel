@@ -13,6 +13,8 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from api import login, me, register
 from api.analyses import lifespan
@@ -51,3 +53,10 @@ app.include_router(me.router)
 
 # 스윙 피드백 (/api/analyses, /api/health)
 app.include_router(analyses_router)
+
+
+@app.exception_handler(SQLAlchemyError)
+async def database_error_handler(request, exc):
+    # SQL 파라미터에는 회원/비밀번호 해시가 포함될 수 있어 응답·로그에 출력하지 않는다.
+    logging.getLogger(__name__).error("Database operation failed: %s", type(exc).__name__)
+    return JSONResponse(status_code=503, content={"detail": "DB 요청에 실패했습니다. 연결과 migration 상태를 확인하세요."})

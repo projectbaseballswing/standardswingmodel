@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import io
 import os
-import shutil
 import tempfile
-import uuid
+import logging
 from datetime import datetime, timezone
 import json
 from contextlib import asynccontextmanager
@@ -18,12 +17,16 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.orm import Session
 
 from api import schemas
 from api.jobs import Job, JobManager
+from api.database import User, get_db
 from api.settings import settings
+from api.storage import StorageError, StorageObjectNotFound, create_storage
+from api.video_validation import video_type, validate_video_header
 from feedback.compare import MODEL_VERSION
 from feedback.features import to_template_features
 from feedback.pipeline import SwingPipeline
@@ -31,7 +34,7 @@ from feedback.reference import ReferenceStore
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "analysis_sample.json"
 
-VIDEO_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".m4v"}
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
@@ -44,26 +47,25 @@ def _mock_report() -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """기준 템플릿과 작업 큐를 서버 시작 시 한 번 준비한다."""
-    if settings.mock:
-        # 목업 모드에서는 무거운 모델과 템플릿을 불러오지 않는다
-        app.state.store = None
-        app.state.jobs = None
-        app.state.mock_jobs = {}
-        yield
-        return
-
-    store = ReferenceStore(settings.template_path)
+    store = None if settings.mock else ReferenceStore(settings.template_path)
     app.state.store = store
-    app.state.jobs = JobManager(
+    app.state.storage = None
+    jobs = JobManager(
         store,
         pipeline_factory=lambda: SwingPipeline(
             settings.yolo_weights, settings.pose_model, target_fps=settings.reference_fps
         ),
         reference_fps=settings.reference_fps,
-        max_jobs=settings.max_jobs,
+        worker_id=settings.worker_id,
     )
-    yield
-    app.state.jobs.shutdown()
+    app.state.jobs = jobs
+    try:
+        await run_in_threadpool(jobs.recover_interrupted)
+        yield
+    finally:
+        await run_in_threadpool(jobs.shutdown)
+        if app.state.storage is not None:
+            app.state.storage.close()
 
 
 def _jobs(request: Request) -> JobManager:
@@ -72,6 +74,15 @@ def _jobs(request: Request) -> JobManager:
 
 def _store(request: Request) -> ReferenceStore:
     return request.app.state.store
+
+
+def _storage(request: Request):
+    if request.app.state.storage is None:
+        try:
+            request.app.state.storage = create_storage()
+        except StorageError as exc:
+            raise HTTPException(503, str(exc)) from None
+    return request.app.state.storage
 
 
 def _to_analysis(job: Job) -> schemas.Analysis:
@@ -84,14 +95,12 @@ def _to_analysis(job: Job) -> schemas.Analysis:
         input=job.input,
         error=job.error,
         result=job.result,
+        user_id=job.user_id,
+        recorded_at=job.recorded_at,
     )
 
 
 def _finished_result(request: Request, analysis_id: str) -> dict:
-    if settings.mock:
-        if analysis_id not in request.app.state.mock_jobs:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "분석 결과를 찾을 수 없습니다.")
-        return _mock_report()
     job = _jobs(request).get(analysis_id)
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "분석 결과를 찾을 수 없습니다.")
@@ -136,35 +145,63 @@ async def create_analysis(
     request: Request,
     video: UploadFile = File(..., description="스윙 영상 (mp4, mov 등)"),
     handedness: Literal["right", "left"] = Form(..., description="우타(right) / 좌타(left)"),
+    user_id: str | None = Form(None, description="로그인 응답의 user. 생략하면 사용자 미연결"),
+    recorded_at: datetime | None = Form(None, description="촬영 시각 ISO 8601, 시간대 포함. 생략하면 업로드 시각"),
+    db: Session = Depends(get_db),
 ):
     """영상을 업로드하면 분석 작업을 등록합니다. 결과는 GET /api/analyses/{analysis_id} 로 조회합니다."""
-    suffix = Path(video.filename or "").suffix.lower()
-    if settings.mock:
-        if suffix not in VIDEO_SUFFIXES:
-            raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, f"지원하지 않는 영상 형식입니다: {suffix}")
-        analysis_id = uuid.uuid4().hex
-        request.app.state.mock_jobs[analysis_id] = {
-            "filename": video.filename, "handedness": handedness, "created_at": datetime.now(timezone.utc),
-        }
-        return schemas.AnalysisCreated(analysis_id=analysis_id, status="queued")
-
-    if suffix not in VIDEO_SUFFIXES:
-        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, f"지원하지 않는 영상 형식입니다: {suffix}")
-
+    suffix, content_type = video_type(video.filename or "", video.content_type)
+    if user_id is not None and db.get(User, user_id) is None:
+        raise HTTPException(404, "사용자를 찾을 수 없습니다.")
+    if recorded_at is not None and recorded_at.tzinfo is None:
+        raise HTTPException(422, "recorded_at에 시간대(Z 또는 +09:00 등)를 포함하세요.")
+    storage = _storage(request)
     fd, video_path = tempfile.mkstemp(suffix=suffix, prefix="swing_")
-    with os.fdopen(fd, "wb") as out:
-        await run_in_threadpool(shutil.copyfileobj, video.file, out)
-    size_mb = os.path.getsize(video_path) / (1024 * 1024)
-    if size_mb > settings.max_upload_mb:
-        os.remove(video_path)
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"영상은 {settings.max_upload_mb}MB 이하여야 합니다.")
-
-    job = _jobs(request).submit_video(
-        video_path,
-        is_left=(handedness == "left"),
-        input_info={"type": "video", "filename": video.filename, "handedness": handedness},
-    )
-    return schemas.AnalysisCreated(analysis_id=job.analysis_id, status=job.status)
+    job, handed_to_worker = None, False
+    try:
+        size = 0
+        with os.fdopen(fd, "wb") as out:
+            while chunk := await video.read(1024 * 1024):
+                size += len(chunk)
+                if size > settings.max_upload_mb * 1024 * 1024:
+                    raise HTTPException(413, f"영상은 {settings.max_upload_mb}MB 이하여야 합니다.")
+                await run_in_threadpool(out.write, chunk)
+        if size == 0:
+            raise HTTPException(422, "빈 영상 파일은 업로드할 수 없습니다.")
+        await run_in_threadpool(validate_video_header, video_path, suffix)
+        info = {"type": "video", "filename": video.filename, "handedness": handedness, "suffix": suffix}
+        if settings.mock:
+            info["mock"] = True
+        job = await run_in_threadpool(
+            _jobs(request).create_video_job, info, user_id=user_id,
+            recorded_at=(recorded_at or datetime.now(timezone.utc)).astimezone(timezone.utc),
+            storage_bucket=storage.bucket, video_size_bytes=size, content_type=content_type,
+        )
+        # 업로드 전에 경로를 DB에 기록한다. 전송 중 연결이 끊겨도 대상 파일을 추적할 수 있다.
+        await run_in_threadpool(storage.upload, job.video_storage_path, video_path, job.content_type)
+        if settings.mock:
+            await run_in_threadpool(_jobs(request).complete_mock, job, _mock_report())
+        else:
+            await run_in_threadpool(_jobs(request).submit_video, job, video_path, handedness == "left")
+            handed_to_worker = True
+        return schemas.AnalysisCreated(analysis_id=job.analysis_id, status="queued")
+    except StorageError as exc:
+        await run_in_threadpool(_jobs(request).fail, job, "STORAGE_UPLOAD_FAILED", str(exc))
+        raise HTTPException(502, {"analysis_id": job.analysis_id, "code": "STORAGE_UPLOAD_FAILED",
+                                  "message": str(exc)}) from None
+    except HTTPException:
+        raise
+    except Exception:
+        if job is not None:
+            try:
+                await run_in_threadpool(_jobs(request).fail, job, "INTERNAL_ERROR", "업로드 작업을 완료하지 못했습니다.")
+            except Exception:
+                logger.error("analysis %s state could not be saved; recover on restart", job.analysis_id)
+        raise
+    finally:
+        await video.close()
+        if not handed_to_worker:
+            Path(video_path).unlink(missing_ok=True)
 
 
 @router.post("/analyses/features", response_model=schemas.Analysis, tags=["analyses"])
@@ -185,6 +222,7 @@ async def create_analysis_from_features(
         array,
         fps,
         {"type": "features", "filename": features.filename, "fps": fps},
+        _mock_report() if settings.mock else None,
     )
     return _to_analysis(job)
 
@@ -199,20 +237,6 @@ def get_analysis(
     include_series: bool = Query(False, description="관절 각도 80프레임 시계열 포함"),
 ):
     """작업 상태와 전체 결과(종합 + 관절별 + 구간별 + 속도)."""
-    if settings.mock:
-        info = request.app.state.mock_jobs.get(analysis_id)
-        if info is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "분석 결과를 찾을 수 없습니다.")
-        report = _mock_report()
-        if not include_series:
-            for joint in report["joints"]:
-                joint["series"] = None
-        return schemas.Analysis(
-            analysis_id=analysis_id, status="done", stage=None,
-            created_at=info["created_at"], finished_at=info["created_at"],
-            input={"type": "video", "filename": info["filename"], "handedness": info["handedness"], "mock": True},
-            error=None, result=report,
-        )
     job = _jobs(request).get(analysis_id)
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "분석 결과를 찾을 수 없습니다.")
@@ -221,6 +245,24 @@ def get_analysis(
         for joint in analysis.result.joints:
             joint.series = None
     return analysis
+
+
+@router.get("/analyses/{analysis_id}/video", response_model=schemas.VideoURL, tags=["analyses"])
+def get_video(request: Request, analysis_id: str):
+    """저장된 원본 영상의 임시 URL. 만료되면 이 API를 다시 호출한다."""
+    job = _jobs(request).get(analysis_id)
+    if job is None or job.video_storage_path is None:
+        raise HTTPException(404, "저장된 영상 정보를 찾을 수 없습니다.")
+    if job.stage == "uploading":
+        raise HTTPException(409, "영상 업로드 중입니다.")
+    storage = _storage(request)
+    try:
+        url = storage.signed_url(job.storage_bucket, job.video_storage_path)
+    except StorageObjectNotFound as exc:
+        raise HTTPException(404, str(exc)) from None
+    except StorageError as exc:
+        raise HTTPException(502, str(exc)) from None
+    return schemas.VideoURL(analysis_id=analysis_id, url=url, expires_in=storage.expires_in)
 
 
 @router.get("/analyses/{analysis_id}/overall", response_model=schemas.OverallFeedback, tags=["feedback"])
