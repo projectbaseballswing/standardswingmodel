@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 분석 서버 통신 (release 빌드는 INTERNET 권한을 명시해야 한다) -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- 스윙 영상 촬영/녹화 -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -7,7 +9,8 @@
     <application
         android:label="swing_analysis"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true"><!-- 개발용: 로컬 HTTP 서버 연결 허용. 배포 시 HTTPS 로 바꾸고 제거할 것. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

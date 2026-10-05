@@ -50,6 +50,51 @@ class AnalysisApi {
     );
   }
 
+  /// 분석 결과 1건을 조회한다.
+  ///
+  /// [GET] /api/analyses/{id}
+  ///   → {analysis_id, status, stage, created_at, finished_at, input, error, result}
+  /// status 는 queued / running / done / failed. result 는 done 일 때만 채워진다.
+  Future<Map<String, dynamic>> getAnalysis(String analysisId) async {
+    final res = await _get(_uri('/api/analyses/$analysisId'));
+    return _decode(res);
+  }
+
+  /// 분석이 끝날 때까지(또는 실패/시간초과까지) 주기적으로 조회한다.
+  ///
+  /// 분석에는 수 초~십수 초가 걸리므로, status 가 done 이 될 때까지
+  /// [interval] 간격으로 다시 조회한다. [timeout] 을 넘기면 예외를 던진다.
+  Future<Map<String, dynamic>> waitForReport(
+    String analysisId, {
+    Duration interval = const Duration(seconds: 2),
+    Duration timeout = const Duration(minutes: 2),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (true) {
+      final body = await getAnalysis(analysisId);
+      final status = body['status'] as String?;
+      if (status == 'done' && body['result'] != null) {
+        return body;
+      }
+      if (status == 'failed') {
+        final err = body['error'];
+        throw ApiException(err is String ? err : '분석에 실패했어요.');
+      }
+      if (DateTime.now().isAfter(deadline)) {
+        throw ApiException('분석이 예상보다 오래 걸려요. 잠시 후 다시 시도해주세요.');
+      }
+      await Future<void>.delayed(interval);
+    }
+  }
+
+  Future<http.Response> _get(Uri uri) async {
+    try {
+      return await _client.get(uri, headers: {'Accept': 'application/json'});
+    } catch (_) {
+      throw ApiException('서버에 연결할 수 없습니다. 네트워크를 확인해주세요.');
+    }
+  }
+
   /// 정상(2xx) 응답이면 JSON 을 반환하고, 아니면 서버 메시지로 예외를 던진다.
   Map<String, dynamic> _decode(http.Response res) {
     Map<String, dynamic> body;
