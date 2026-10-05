@@ -3,6 +3,7 @@ import 'dart:math' show pi;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 
@@ -355,13 +356,18 @@ class _ReviewScreenState extends State<_ReviewScreen> {
         isLeft: _isLeft,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('분석 요청 완료 (작업 ID: ${created.analysisId})')),
+      // 리뷰(중첩 MaterialPageRoute)만 닫고, 촬영 화면은 GoRouter 로 피드백으로
+      // 교체한다. GoRoute 페이지를 Navigator.pop 으로 직접 닫으면 GoRouter 상태와
+      // 어긋나 push 가 무시되므로, 교체는 반드시 router 로 한다.
+      // 갓 촬영한 스윙이므로 비교 대상이 없는 첫 피드백(first=1)으로 연다.
+      // TODO(backend): 실제로는 이 유저의 이전 기록 유무로 first 여부를 정한다.
+      final router = GoRouter.of(context);
+      Navigator.of(context).pop(); // review 닫기
+      // 방금 촬영한 영상 경로를 함께 넘겨 "내 스윙 영상" 에 실제 영상을 보여준다.
+      router.pushReplacement(
+        '/analyses/${created.analysisId}?first=1',
+        extra: widget.videoPath,
       );
-      // 촬영 화면까지 닫고 목록으로 돌아간다.
-      Navigator.of(context)
-        ..pop() // review
-        ..maybePop(); // camera
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _uploading = false);

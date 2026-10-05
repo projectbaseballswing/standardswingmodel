@@ -60,10 +60,8 @@ class _SwingListScreenState extends State<SwingListScreen> {
         ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
 
   void _openFeedback(Swing swing) {
-    // TODO(next): 피드백 화면으로 이동 (예: context.push('/analyses/${swing.analysisId}')).
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${swing.timeLabel} 스윙 피드백 (준비 중)')),
-    );
+    // 목록에서 연 스윙은 이전 스윙과 비교하는 반복 피드백으로 본다.
+    context.push('/analyses/${swing.analysisId}');
   }
 
   @override
@@ -292,16 +290,20 @@ class _SwingListScreenState extends State<SwingListScreen> {
       onTap: () => _openFeedback(swing),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 120,
-            height: 150,
-            decoration: BoxDecoration(
-              color: AppColors.fieldFill,
-              borderRadius: BorderRadius.circular(8),
+          // 남는 높이에 맞춰 썸네일이 줄어들도록 Expanded 로 감싼다.
+          // (가로 리스트 높이가 가변이라 고정 높이면 몇 px 넘칠 수 있다.)
+          Expanded(
+            child: Container(
+              width: 120,
+              decoration: BoxDecoration(
+                color: AppColors.fieldFill,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.play_circle_outline,
+                  color: AppColors.hint, size: 32),
             ),
-            child: const Icon(Icons.play_circle_outline,
-                color: AppColors.hint, size: 32),
           ),
           const SizedBox(height: 6),
           Text(swing.timeLabel, style: const TextStyle(fontSize: 13)),
