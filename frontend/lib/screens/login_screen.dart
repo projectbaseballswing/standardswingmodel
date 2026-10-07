@@ -13,7 +13,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController();
+  final _idController = TextEditingController();
   final _passwordController = TextEditingController();
   final _authApi = AuthApi();
 
@@ -23,18 +23,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _idController.dispose();
     _passwordController.dispose();
     _authApi.dispose();
     super.dispose();
   }
 
   Future<void> _onLoginPressed() async {
-    final email = _emailController.text.trim();
+    final id = _idController.text.trim();
     final password = _passwordController.text;
 
-    if (email.isEmpty || password.isEmpty) {
-      setState(() => _errorMessage = '이메일과 비밀번호를 입력해주세요.');
+    if (id.isEmpty || password.isEmpty) {
+      setState(() => _errorMessage = '아이디와 비밀번호를 입력해주세요.');
       return;
     }
 
@@ -44,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      await _authApi.login(email: email, password: password);
+      await _authApi.login(id: id, password: password);
       if (!mounted) return;
       // 로그인 성공 → 스윙 목록 화면으로 이동 (뒤로가기로 로그인에 못 돌아오게 go 사용).
       context.go('/swings');
@@ -84,9 +84,8 @@ class _LoginScreenState extends State<LoginScreen> {
               const Spacer(flex: 8),
               // 입력창
               AppTextField(
-                hint: '이메일',
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
+                hint: '아이디',
+                controller: _idController,
               ),
               const SizedBox(height: 12),
               AppTextField(
