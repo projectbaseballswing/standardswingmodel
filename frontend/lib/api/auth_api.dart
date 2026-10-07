@@ -65,7 +65,7 @@ class AuthApi {
     final res = await _post('/api/register', {
       'id': id,
       'password': password,
-      'e-mail': email,
+      'email': email,
       'nickname': nickname,
     });
     final body = _decode(res);
@@ -78,14 +78,14 @@ class AuthApi {
 
   /// 로그인.
   ///
-  /// [POST] /api/login  {e-mail, password}  → {success, user}
+  /// [POST] /api/login  {id, password}  → {success, user}
   /// 실패 시 서버가 401 을 주며, ApiException 으로 변환한다.
   Future<LoginResult> login({
-    required String email,
+    required String id,
     required String password,
   }) async {
     final res = await _post('/api/login', {
-      'e-mail': email,
+      'id': id,
       'password': password,
     });
     final body = _decode(res);
