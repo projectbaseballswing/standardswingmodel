@@ -7,8 +7,16 @@ import bcrypt
 
 
 def hash_password(raw: str) -> str:
-    return bcrypt.hashpw(raw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    encoded = raw.encode("utf-8")
+    if not 1 <= len(encoded) <= 72:
+        raise ValueError("Invalid password length")
+    return bcrypt.hashpw(encoded, bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(raw: str, hashed: str) -> bool:
-    return bcrypt.checkpw(raw.encode("utf-8"), hashed.encode("utf-8"))
+    if len(raw.encode("utf-8")) > 72:
+        return False
+    try:
+        return bcrypt.checkpw(raw.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:
+        return False

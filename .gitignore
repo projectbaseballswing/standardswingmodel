@@ -139,6 +139,8 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -216,3 +218,6 @@ __marimo__/
 
 # 로컬 DB
 users.db
+*.db-journal
+*.db-wal
+*.db-shm

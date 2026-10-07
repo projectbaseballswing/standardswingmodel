@@ -1,13 +1,14 @@
 """1. 회원가입.
 
 [POST] /api/register
-요청: id, password, e-mail, nickname
+요청: id, password, email, nickname
 응답: id-uniqueness, nickname-uniqueness, registered
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.database import User, get_db
@@ -19,12 +20,11 @@ router = APIRouter()
 class RegisterRequest(BaseModel):
     id: str
     password: str  # 숫자로 와도 문자열로 처리
-    email: EmailStr = Field(alias="e-mail")  # 스펙의 "e-mail" 키를 그대로 받는다
+    email: EmailStr
     nickname: str
 
-    # populate_by_name: alias(e-mail)와 필드명(email) 둘 다 허용
     # coerce_numbers_to_str: 스펙 예시처럼 password가 숫자로 와도 문자열로 변환
-    model_config = {"populate_by_name": True, "coerce_numbers_to_str": True}
+    model_config = {"extra": "forbid", "coerce_numbers_to_str": True}
 
 
 class RegisterResponse(BaseModel):
@@ -52,15 +52,30 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
             registered=False,
         )
 
+    try:
+        password_hash = hash_password(req.password)
+    except ValueError:
+        raise HTTPException(422, "비밀번호는 UTF-8 기준 1~72바이트여야 합니다.") from None
     db.add(
         User(
             user_id=req.id,
             email=req.email,
             nickname=req.nickname,
-            password_hash=hash_password(req.password),
+            password_hash=password_hash,
         )
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # 동시에 같은 회원을 등록해도 500 대신 기존 중복 응답을 유지한다.
+        db.rollback()
+        id_taken = db.get(User, req.id) is not None
+        nickname_taken = db.scalar(select(User).where(User.nickname == req.nickname)) is not None
+        email_taken = db.scalar(select(User).where(User.email == req.email)) is not None
+        if not (id_taken or nickname_taken or email_taken):
+            raise
+        return RegisterResponse(id_uniqueness=int(not id_taken),
+                                nickname_uniqueness=int(not nickname_taken), registered=False)
 
     return RegisterResponse(id_uniqueness=1, nickname_uniqueness=1, registered=True)
 

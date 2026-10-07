@@ -221,6 +221,8 @@ class AnalysisCreated(BaseModel):
 
 class Analysis(BaseModel):
     analysis_id: str
+    user_id: Optional[str] = None
+    recorded_at: Optional[datetime] = None
     status: JobStatus
     stage: Optional[str] = Field(None, description="처리 중인 단계")
     created_at: datetime
@@ -228,6 +230,12 @@ class Analysis(BaseModel):
     input: Dict[str, object] = Field(default_factory=dict)
     error: Optional[AnalysisError] = None
     result: Optional[AnalysisReport] = None
+
+
+class VideoURL(BaseModel):
+    analysis_id: str
+    url: str
+    expires_in: int = Field(description="발급 시점 기준 유효기간(초). 만료 시 다시 조회")
 
 
 class Health(BaseModel):
