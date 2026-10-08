@@ -34,8 +34,11 @@ class Quality(BaseModel):
 # 종합 피드백
 # ----------------------------------------------------------------------
 class GroupScore(BaseModel):
-    key: str
-    name: str
+    key: str = Field(description="lead_arm / rear_arm / torso / lead_leg / rear_leg")
+    name: str = Field(description="화면 표시용 이름. 좌우타에 맞춰 좌/우로 변환됨")
+    available: bool = True
+    reliability: Reliability = Field("medium", description="피처가 하나뿐이거나 검출이 불안정한 부위는 낮다")
+    feature_count: int = Field(0, description="이 부위를 이루는 피처 수")
     distance: Optional[float] = None
     score: Optional[float] = None
 
@@ -72,7 +75,8 @@ class OverallFeedback(BaseModel):
     worst_segment: Optional[WorstSegment] = None
     frame_distances: List[Optional[float]] = Field(
         description="기준 시간축 지점별 거리. 0.1 은 80프레임, 0.2 는 구간 4개 × 20등분")
-    top_issues: List[Issue]
+    top_issues: List[Issue] = Field(default_factory=list, description="기준과 가장 많이 벌어진 항목")
+    top_strengths: List[Issue] = Field(default_factory=list, description="기준에 가장 가까운 항목")
     quality: Quality
 
 

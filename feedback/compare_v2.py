@@ -57,6 +57,22 @@ BODY_PART_NAMES = {
 }
 BODY_PART_ORDER = ["lead_arm", "rear_arm", "torso", "lead_leg", "rear_leg"]
 
+# 피처별 신뢰도. 영상 200개 분포와 관절 검출 신뢰도로 정했다.
+#   low    뒷팔 팔꿈치: 20도 미만의 불가능한 각도가 17% (가려진 뒤쪽 팔을 잘 못 잡는다)
+#   medium 손목에 의존하는 값들 (손목 검출 신뢰도 0.84), 앞팔 팔꿈치(불가능한 각도 3%)
+#   high   무릎·골반·어깨 기반 (검출 신뢰도 0.99 이상, 비현실값 0%)
+FEATURE_RELIABILITY = {
+    "rear_elbow_angle": "low",
+    "lead_elbow_angle": "medium",
+    "hand_x_from_shoulder": "medium",
+    "hand_y_from_shoulder": "medium",
+}
+RELIABILITY_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+
+def _worse(a: str, b: str) -> str:
+    return a if RELIABILITY_ORDER[a] <= RELIABILITY_ORDER[b] else b
+
 FEATURE_DESCRIPTIONS = {
     "lead_elbow_angle": "앞 어깨-팔꿈치-손목 각도. 클수록 팔이 펴져 있다.",
     "rear_elbow_angle": "뒤 어깨-팔꿈치-손목 각도. 작을수록 팔이 접혀 있다.",
@@ -174,15 +190,28 @@ class SwingComparisonV2:
         names = BODY_PART_NAMES[self.handedness]
         group_scores = []
         for part in BODY_PART_ORDER:
+            members = [n for n in self.model.feature_names if BODY_PARTS.get(n) == part]
+            # 부위 신뢰도는 그 부위에서 가장 못 믿는 피처를 따른다.
+            # 피처가 하나뿐인 부위(뒷팔·뒷다리)는 그 하나가 흔들리면 점수 전체가 흔들린다.
+            part_reliability = self.reliability
+            for member in members:
+                part_reliability = _worse(part_reliability, FEATURE_RELIABILITY.get(member, "high"))
+            if len(members) < 2:
+                part_reliability = _worse(part_reliability, "medium")
+
             values = groups.get(part)
             if not values:
-                group_scores.append({"key": part, "name": names.get(part, part),
+                group_scores.append({"key": part, "name": names.get(part, part), "available": False,
+                                     "reliability": "low", "feature_count": len(members),
                                      "distance": None, "score": None})
                 continue
             distance_value = float(np.sqrt(np.mean(np.square(values))))
             group_scores.append({
                 "key": part,
                 "name": names.get(part, part),
+                "available": True,
+                "reliability": part_reliability,
+                "feature_count": len(members),
                 "distance": _r(distance_value, 3),
                 "score": distance_to_score(distance_value, self.model.typical_distance),
             })
@@ -222,16 +251,20 @@ class SwingComparisonV2:
             },
             "frame_distances": [_r(v, 3) for v in frame_distances],
             "top_issues": self._top_issues(joints),
+            "top_strengths": self._top_strengths(joints),
             "quality": quality,
         }
 
-    def _top_issues(self, joints: List[Dict[str, Any]], top_k: int = 3) -> List[Dict[str, Any]]:
-        issues = []
+    def _candidates(self, joints: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """종합 화면에 올릴 후보. 신뢰도가 낮은 피처는 뺀다(뒷팔 팔꿈치 등)."""
+        rows = []
         for joint in joints:
+            if joint["reliability"] == "low":
+                continue
             for phase in joint["phases"]:
-                if phase["level"] == "good" or phase["z_score"] is None:
+                if phase["z_score"] is None:
                     continue
-                issues.append({
+                rows.append({
                     "type": "joint_angle",
                     "joint": joint["key"],
                     "joint_name": joint["name"],
@@ -244,8 +277,32 @@ class SwingComparisonV2:
                     "direction": phase["direction"],
                     "level": phase["level"],
                 })
-        issues.sort(key=lambda item: abs(item["z_score"]), reverse=True)
-        return issues[:top_k]
+        return rows
+
+    @staticmethod
+    def _pick_distinct(rows: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
+        """같은 항목이 구간만 바꿔 여러 번 올라오지 않도록 항목당 하나만 고른다."""
+        seen, picked = set(), []
+        for row in rows:
+            if row["joint"] in seen:
+                continue
+            seen.add(row["joint"])
+            picked.append(row)
+            if len(picked) >= top_k:
+                break
+        return picked
+
+    def _top_strengths(self, joints: List[Dict[str, Any]], top_k: int = 2) -> List[Dict[str, Any]]:
+        """기준에 가장 가까운 항목. 디자인의 '잘하고 있는 부분'에 쓴다."""
+        rows = [r for r in self._candidates(joints) if r["level"] == "good"]
+        rows.sort(key=lambda item: abs(item["z_score"]))
+        return self._pick_distinct(rows, top_k)
+
+    def _top_issues(self, joints: List[Dict[str, Any]], top_k: int = 3) -> List[Dict[str, Any]]:
+        """기준과 가장 많이 벌어진 항목."""
+        rows = [r for r in self._candidates(joints) if r["level"] != "good"]
+        rows.sort(key=lambda item: abs(item["z_score"]), reverse=True)
+        return self._pick_distinct(rows, top_k)
 
     # ------------------------------------------------------------------
     # 관절별
@@ -311,7 +368,7 @@ class SwingComparisonV2:
                 "description": FEATURE_DESCRIPTIONS.get(name, ""),
                 "unit": FEATURE_UNITS.get(name, "deg"),
                 "available": bool(measured),
-                "reliability": self.reliability,
+                "reliability": _worse(self.reliability, FEATURE_RELIABILITY.get(name, "high")),
                 "level": worst["level"] if worst else "good",
                 "worst_phase": worst["phase"] if worst else None,
                 "impact": impact,
