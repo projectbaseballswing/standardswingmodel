@@ -41,6 +41,17 @@ PHASES = [
 PHASE_POINTS = 20  # 구간마다 0~100% 를 몇 등분해서 저장할지
 MAX_NAN_RATIO = 0.3
 
+# 구간 길이가 이 범위를 벗어나면 그 구간만 제외한다 (검출 실패로 본다).
+# 라벨 78개 분포의 바깥쪽을 넉넉히 잡았다.
+PHASE_LIMITS_MS = {
+    "stride": (150, 2500),
+    "transition": (0, 1200),
+    "swing": (50, 500),
+    "follow": (50, 1200),
+}
+# 임팩트 기준 각 이벤트 시점(ms)도 함께 저장한다. 구간 길이보다 덜 흔들린다.
+TIMING_KEYS = ["load_start", "foot_lift", "foot_plant", "swing_start", "follow_end"]
+
 
 def num(value) -> int | None:
     return int(value) if value not in (None, "") else None
@@ -76,8 +87,9 @@ def main() -> None:
 
     phase_curves: dict[str, list] = {key: [] for key, *_ in PHASES}
     phase_durations: dict[str, list] = {key: [] for key, *_ in PHASES}
+    timings: dict[str, list] = {key: [] for key in TIMING_KEYS}
     speed_rows, summary_rows = [], []
-    used, skipped = 0, {}
+    used, skipped, dropped_phases = 0, {}, {}
 
     for path in files:
         data = np.load(path, allow_pickle=True)
@@ -122,6 +134,11 @@ def main() -> None:
             start, end = events[start_key], events[end_key]
             if start is None or end is None:
                 continue
+            duration_ms = (end - start) / fps * 1000
+            low, high = PHASE_LIMITS_MS[key]
+            if not low <= duration_ms <= high:
+                dropped_phases[key] = dropped_phases.get(key, 0) + 1
+                continue
             curve = resample_phase(features, start, end)
             if curve is None:
                 continue
@@ -129,8 +146,12 @@ def main() -> None:
             phase_durations[key].append((end - start) / fps * 1000)
             row[f"{key}_ms"] = round((end - start) / fps * 1000)
 
-        speed = hand_speed(pixel, fps)
         impact = events["impact"]
+        for key in TIMING_KEYS:
+            if events.get(key) is not None:
+                timings[key].append((events[key] - impact) / fps * 1000)
+
+        speed = hand_speed(pixel, fps)
         window = speed[max(0, impact - 5):min(len(speed), impact + 3)]
         speed_rows.append({
             "swing_time_ms": (impact - events["swing_start"]) / fps * 1000,
@@ -157,15 +178,53 @@ def main() -> None:
         print(f"  {name:12s} 스윙 {len(curves):3d}개 | 길이 {np.mean(durations):6.0f} ± {np.std(durations):5.0f} ms "
               f"(중앙 {np.median(durations):.0f})")
 
+    print("\n[임팩트 기준 이벤트 시점 (ms, -는 임팩트 이전)]")
+    for key in TIMING_KEYS:
+        values = np.asarray(timings[key], dtype=float)
+        values = values[np.isfinite(values)]
+        if not len(values):
+            continue
+        # 분포 양 끝 5%는 검출 실패로 보고 제외한 뒤 평균/편차를 낸다
+        low, high = np.percentile(values, [5, 95])
+        trimmed = values[(values >= low) & (values <= high)]
+        payload[f"timing_{key}_mean"] = np.asarray(float(trimmed.mean()))
+        payload[f"timing_{key}_std"] = np.asarray(float(trimmed.std()))
+        payload[f"timing_{key}_count"] = np.asarray(len(trimmed))
+        print(f"  {key:12s} n={len(trimmed):3d}  {trimmed.mean():+7.0f} ± {trimmed.std():5.0f}")
+
     print("\n[속도 지표]")
     for key in ("swing_time_ms", "peak_hand_speed", "plant_to_impact_ms"):
         values = np.asarray([r[key] for r in speed_rows], dtype=float)
         values = values[np.isfinite(values)]
+        low, high = np.percentile(values, [5, 95])  # 추적 실패로 튄 값 제외
+        values = values[(values >= low) & (values <= high)]
         payload[f"speed_{key}_mean"] = np.asarray(float(values.mean()))
         payload[f"speed_{key}_std"] = np.asarray(float(values.std()))
         payload[f"speed_{key}_count"] = np.asarray(len(values))
         print(f"  {key:20s} n={len(values):3d}  {values.mean():7.1f} ± {values.std():5.1f}  "
               f"(10% {np.percentile(values,10):.1f} / 90% {np.percentile(values,90):.1f})")
+
+    # 점수 환산 기준: 기준 스윙 하나하나가 평균 곡선에서 얼마나 떨어져 있는지
+    # (사용자 점수를 "프로 스윙은 보통 이 정도 거리"와 견주기 위해 저장한다)
+    distances = []
+    for index in range(max((len(phase_curves[key]) for key, *_ in PHASES), default=0)):
+        diffs = []
+        for key, *_ in PHASES:
+            curves = phase_curves[key]
+            if index >= len(curves):
+                continue
+            spread = np.maximum(payload[f"{key}_std"], 1e-6)
+            diffs.append(np.abs(curves[index] - payload[f"{key}_mean"]) / spread)
+        if diffs:
+            distances.append(float(np.sqrt(np.mean(np.concatenate(diffs) ** 2))))
+    distances = np.asarray(distances, dtype=float)
+    if len(distances):
+        low, high = np.percentile(distances, [5, 95])
+        trimmed = distances[(distances >= low) & (distances <= high)]
+        payload["typical_distance"] = np.asarray(float(np.median(trimmed)))
+        payload["typical_distance_std"] = np.asarray(float(trimmed.std()))
+        print("\n[점수 환산 기준] 기준 스윙이 평균에서 떨어진 거리: 중앙 %.2f (10%% %.2f / 90%% %.2f)"
+              % (np.median(trimmed), np.percentile(distances, 10), np.percentile(distances, 90)))
 
     payload["feature_names"] = np.asarray(FEATURE_NAMES, dtype=object)
     payload["phase_keys"] = np.asarray([key for key, *_ in PHASES], dtype=object)
@@ -179,6 +238,8 @@ def main() -> None:
         "labels_used": sum(1 for r in summary_rows if r.get("labeled")),
         "phase_points": PHASE_POINTS,
         "max_nan_ratio": MAX_NAN_RATIO,
+        "phase_limits_ms": PHASE_LIMITS_MS,
+        "dropped_phases": dropped_phases,
     }, ensure_ascii=False)
 
     np.savez_compressed(args.out, **payload)
@@ -190,6 +251,8 @@ def main() -> None:
         writer.writerows(summary_rows)
 
     print(f"\n사용 {used} / 전체 {len(files)}")
+    for key, count in sorted(dropped_phases.items(), key=lambda kv: -kv[1]):
+        print(f"  구간 제외 {count:3d}개: {key} (길이가 {PHASE_LIMITS_MS[key][0]}~{PHASE_LIMITS_MS[key][1]}ms 밖)")
     for reason, count in sorted(skipped.items(), key=lambda kv: -kv[1]):
         print(f"  제외 {count:3d}개: {reason}")
     print(f"저장: {args.out} / {args.summary}")

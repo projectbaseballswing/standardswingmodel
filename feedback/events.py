@@ -42,7 +42,8 @@ DEFAULT_POSE_TEMPLATE_PATH = Path(__file__).resolve().parent / "pose_templates.n
 # 라벨 27개로 맞춘 임계값 (모두 어깨 너비 대비 프레임당 이동량)
 SWING_START_RATIO = 0.3  # 스윙 시작: 최대 손 속도의 이 비율 미만인 마지막 프레임
 FOOT_PLANT_SPEED = 0.04  # 앞발 착지: 발목이 내려오는 속도가 이 값을 넘는 마지막 프레임
-FOOT_LIFT_SPEED = 0.03  # 앞발 들기: 발목이 올라가는 속도가 이 값을 넘는 첫 프레임
+FOOT_LIFT_SPEED = 0.03  # 앞발 들기: 발목이 올라가는 속도 기준
+FOOT_LIFT_GAP = 20  # 앞발 들기: 착지에서 거꾸로 올라오는 동작을 이을 때 허용하는 끊김(프레임)
 LOAD_SPEED_RATIO = 0.15  # 로딩 시작: 손이 투수 반대쪽으로 이 비율 이상 움직이는 첫 프레임
 FOLLOW_END_RATIO = 0.15  # 팔로우 종료: 임팩트 후 손 속도가 이 비율 미만으로 떨어지는 첫 프레임
 
@@ -263,13 +264,26 @@ def detect_events(
     _, ankle_y = _track(arr, (LEAD_ANKLE,), scale)
     ankle_v = np.diff(ankle_y)[start:impact]  # +면 내려가는 중, -면 올라가는 중
     if len(ankle_v):
-        rising = np.nonzero(ankle_v < -FOOT_LIFT_SPEED)[0]
-        events.foot_lift = int(rising[0]) + start if len(rising) else None
         falling = np.nonzero(ankle_v > FOOT_PLANT_SPEED)[0]
         events.foot_plant = int(falling[-1]) + start + 1 if len(falling) else None
         if pose_templates and "foot_plant" in pose_templates:
             events.foot_plant = _refine_with_pose(
                 events.foot_plant, poses, pose_templates["foot_plant"], POSE_WINDOW["foot_plant"])
+
+        # 들기는 착지에서 거꾸로 찾는다. 앞에서부터 찾으면 영상 초반의 작은 움직임에 걸려
+        # 스트라이드가 몇 초씩 길게 잡히는 경우가 생긴다(라벨 59개 기준 최악 -4.3초).
+        limit = (events.foot_plant - start) if events.foot_plant is not None else len(ankle_v)
+        rising = np.nonzero(ankle_v[:max(0, limit)] < -FOOT_LIFT_SPEED)[0]
+        if len(rising):
+            lift = int(rising[-1])
+            for index in rising[::-1]:
+                if lift - int(index) <= FOOT_LIFT_GAP:
+                    lift = int(index)
+                else:
+                    break
+            events.foot_lift = lift + start
+        else:
+            events.foot_lift = None
     if events.foot_plant is None:
         events.warnings.append("앞발 착지를 찾지 못했습니다. 스트라이드가 영상에 담기지 않았을 수 있습니다.")
 

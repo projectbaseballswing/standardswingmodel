@@ -36,8 +36,8 @@ class Quality(BaseModel):
 class GroupScore(BaseModel):
     key: str
     name: str
-    distance: float
-    score: float
+    distance: Optional[float] = None
+    score: Optional[float] = None
 
 
 class WorstSegment(BaseModel):
@@ -53,10 +53,10 @@ class Issue(BaseModel):
     joint_name: str
     phase: str
     phase_name: str
-    user: float
-    reference: float
-    diff: float
-    z_score: float
+    user: Optional[float] = None
+    reference: Optional[float] = None
+    diff: Optional[float] = None
+    z_score: Optional[float] = None
     direction: Direction
     level: Level
 
@@ -70,7 +70,8 @@ class OverallFeedback(BaseModel):
     typical_pro_distance: Optional[float] = Field(None, description="80점에 해당하는 거리")
     group_scores: List[GroupScore]
     worst_segment: Optional[WorstSegment] = None
-    frame_distances: List[float] = Field(description="템플릿 시간축 80프레임별 거리")
+    frame_distances: List[Optional[float]] = Field(
+        description="기준 시간축 지점별 거리. 0.1 은 80프레임, 0.2 는 구간 4개 × 20등분")
     top_issues: List[Issue]
     quality: Quality
 
@@ -81,33 +82,34 @@ class OverallFeedback(BaseModel):
 class JointPhaseStat(BaseModel):
     phase: str
     phase_name: str
-    user_mean: float
-    reference_mean: float
-    reference_std: float
-    diff: float = Field(description="user_mean - reference_mean (deg)")
-    z_score: float = Field(description="기준 템플릿 편차 대비 차이")
+    available: bool = Field(True, description="이 구간이 영상에 담겨 비교할 수 있었는지")
+    user_mean: Optional[float] = None
+    reference_mean: Optional[float] = None
+    reference_std: Optional[float] = None
+    diff: Optional[float] = Field(None, description="user_mean - reference_mean")
+    z_score: Optional[float] = Field(None, description="기준 스윙들의 편차 대비 차이")
     direction: Direction
     level: Level
 
 
 class JointImpact(BaseModel):
-    user: float
-    reference: float
-    diff: float
-    z_score: float
+    user: Optional[float] = None
+    reference: Optional[float] = None
+    diff: Optional[float] = None
+    z_score: Optional[float] = None
     level: Level
 
 
 class RangeOfMotion(BaseModel):
-    user: float
-    reference: float
-    diff: float
+    user: Optional[float] = None
+    reference: Optional[float] = None
+    diff: Optional[float] = None
 
 
 class JointSeries(BaseModel):
-    user: List[float]
-    reference: List[float]
-    reference_std: List[float]
+    user: List[Optional[float]]
+    reference: List[Optional[float]]
+    reference_std: List[Optional[float]]
 
 
 class JointFeedback(BaseModel):
@@ -115,7 +117,7 @@ class JointFeedback(BaseModel):
     name: str
     body_part: str
     description: str
-    unit: Literal["deg"]
+    unit: str = Field(description="deg(각도) 또는 body(몸 크기 대비 길이)")
     available: bool = Field(True, description="이 관절을 비교할 수 있었는지")
     reliability: Reliability = "medium"
     level: Level
@@ -136,8 +138,8 @@ class JointsFeedback(BaseModel):
 class PhaseDeviation(BaseModel):
     joint: str
     joint_name: str
-    diff: float
-    z_score: float
+    diff: Optional[float] = None
+    z_score: Optional[float] = None
     direction: Direction
     level: Level
 
@@ -173,6 +175,10 @@ class PhasesFeedback(BaseModel):
     reference_fps: float
     rhythm: Rhythm
     phases: List[PhaseFeedback]
+    events: Dict[str, object] = Field(
+        default_factory=dict,
+        description="이벤트별 프레임과 임팩트 기준 시점(ms). 0.2 부터 제공",
+    )
 
 
 # ----------------------------------------------------------------------
