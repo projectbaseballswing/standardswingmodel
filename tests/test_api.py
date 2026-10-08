@@ -113,5 +113,5 @@ def test_mock_mode(mock_client):
     assert analysis["status"] == "done"
     assert analysis["result"]["model_version"]
     assert mock_client.get(f"/api/analyses/{analysis_id}/overall").json()["available"] is True
-    assert mock_client.get(f"/api/analyses/{analysis_id}/speed").json()["available"] is False
+    assert mock_client.get(f"/api/analyses/{analysis_id}/speed").json()["available"] is True
     assert mock_client.get("/api/analyses/없는id/overall").status_code == 404

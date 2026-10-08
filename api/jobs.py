@@ -21,7 +21,7 @@ from sqlalchemy import select, update
 
 from api import database
 from api.database import Swing
-from feedback.compare import SwingComparison
+from feedback.compare import MODEL_VERSION, SwingComparison
 from feedback.compare_v2 import SwingComparisonV2
 from feedback.pipeline import PipelineError, SwingPipeline
 from feedback.reference import ReferenceStore
@@ -95,6 +95,23 @@ class JobManager:
     @property
     def pipeline_loaded(self) -> bool:
         return self._pipeline is not None
+
+    @staticmethod
+    def _supports_v2(pipeline) -> bool:
+        """0.2 는 80프레임으로 자르기 전 스켈레톤이 필요하다."""
+        return hasattr(pipeline, "extract_skeleton")
+
+    @property
+    def model_version(self) -> str:
+        """실제 분석에 쓰이는 기준 모델 버전. /health 가 이 값을 알린다.
+
+        파이프라인은 첫 요청 때 만들어지므로, 그 전에는 기준 모델 파일 유무만으로 답한다.
+        """
+        if self.model_v2 is None:
+            return MODEL_VERSION
+        if self._pipeline is not None and not self._supports_v2(self._pipeline):
+            return MODEL_VERSION
+        return self.model_v2.model_version
 
     def get(self, analysis_id: str) -> Optional[Job]:
         with database.SessionLocal() as db:
@@ -193,7 +210,7 @@ class JobManager:
                 on_stage("loading_models")
                 self._pipeline = self._pipeline_factory()
             # 0.2 는 자르기 전 스켈레톤이 필요하다. 그 기능이 없는 파이프라인이면 0.1 로 돈다.
-            use_v2 = self.model_v2 is not None and hasattr(self._pipeline, "extract_skeleton")
+            use_v2 = self.model_v2 is not None and self._supports_v2(self._pipeline)
             if use_v2:
                 # 0.2: 이벤트 기반. 80프레임으로 자르기 전 스켈레톤을 그대로 쓴다.
                 skeleton = self._pipeline.extract_skeleton(video_path, is_left=is_left, on_stage=on_stage)

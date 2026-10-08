@@ -121,11 +121,13 @@ def _strip_series(joints: list) -> list:
 @router.get("/health", response_model=schemas.Health, tags=["common"])
 def health(request: Request):
     if settings.mock:
-        return schemas.Health(status="ok", model_version=MODEL_VERSION, mock=True,
-                              template_path="(mock)", video_pipeline_loaded=False)
+        # 목업은 고정 응답을 돌려주므로, 그 응답에 적힌 버전을 그대로 알린다.
+        return schemas.Health(status="ok", model_version=_mock_report().get("model_version", MODEL_VERSION),
+                              mock=True, template_path="(mock)", video_pipeline_loaded=False)
     return schemas.Health(
         status="ok",
-        model_version=MODEL_VERSION,
+        # 기준 모델 파일이 있으면 0.2, 없으면 0.1 로 돈다. 실제로 쓰이는 쪽을 알린다.
+        model_version=_jobs(request).model_version,
         mock=False,
         template_path=str(_store(request).path),
         video_pipeline_loaded=_jobs(request).pipeline_loaded,
