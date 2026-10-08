@@ -71,11 +71,18 @@ class FeedbackRepository {
     );
   }
 
+  /// 서버의 body_part 를 화면 부위로 바꾼다.
+  /// lead/rear 는 타석에서 투수 쪽/포수 쪽을 뜻하며, 좌우 구분이 필요해지면
+  /// 서버가 함께 내려주는 body_part_name("왼쪽 팔" 등)을 쓰면 된다.
   BodyPart _partOf(String? bodyPart) {
     switch (bodyPart) {
       case 'leg':
+      case 'lead_leg':
+      case 'rear_leg':
         return BodyPart.leg;
       case 'arm':
+      case 'lead_arm':
+      case 'rear_arm':
         return BodyPart.arm;
       default:
         return BodyPart.torso;
