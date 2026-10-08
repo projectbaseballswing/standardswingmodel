@@ -30,7 +30,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--skeleton-dir", default="data/skeletons")
     parser.add_argument("--out", default="data/events.csv")
+    parser.add_argument("--labels", default="data/labels.csv",
+                        help="라벨에 지정된 사용 구간(clip_start/clip_end)을 반영한다")
     args = parser.parse_args()
+
+    clips: dict = {}
+    labels_path = Path(args.labels)
+    if labels_path.exists():
+        with labels_path.open(encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                start = int(row["clip_start"]) if row.get("clip_start") else 0
+                end = int(row["clip_end"]) if row.get("clip_end") else None
+                clips[row["video_id"]] = (start, end)
+        print(f"라벨에서 사용 구간 {len(clips)}개 반영")
 
     files = sorted(Path(args.skeleton_dir).glob("*.npz"))
     print(f"스켈레톤 {len(files)}개")
@@ -39,8 +51,9 @@ def main() -> None:
     for path in files:
         data = np.load(path, allow_pickle=True)
         meta = json.loads(str(data["meta_json"]))
-        landmarks = data["landmarks"].astype(float)
-        events = detect_events(landmarks, meta["fps"], data["visibility"].astype(float))
+        landmarks = data["landmarks_pixel"].astype(float)
+        clip_start, clip_end = clips.get(meta["video_id"], (0, None))
+        events = detect_events(landmarks, meta["fps"], clip_start=clip_start, clip_end=clip_end)
         durations = events.phase_durations_ms()
         rows.append({
             "video_id": meta["video_id"],
@@ -51,7 +64,7 @@ def main() -> None:
             "stride_ms": durations["stride"],
             "swing_ms": durations["swing"],
             "follow_through_ms": durations["follow_through"],
-            "nan_ratio": round(float((~np.isfinite(landmarks).all(axis=(1, 2))).mean()), 3),
+            "nan_ratio": round(float((~np.isfinite(data["landmarks"].astype(float)).all(axis=(1, 2))).mean()), 3),
             "warnings": " | ".join(events.warnings),
         })
 
