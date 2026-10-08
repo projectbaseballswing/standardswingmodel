@@ -35,15 +35,27 @@ TEMPO_CAUTION, TEMPO_WARNING = 1.0, 2.0
 TEMPO_MIN_FRAMES = 5  # 기준 길이가 이보다 짧으면 판정 보류
 TEMPO_MAX_SPREAD = 0.6  # 기준 분포(IQR/중앙값)가 이보다 넓으면 판정 보류
 
-# 피처를 어느 부위로 묶어 보여줄지
+# 피처를 어느 부위로 묶어 보여줄지. 앞(lead)/뒤(rear)는 타석에서 투수 쪽/포수 쪽을 뜻한다.
 BODY_PARTS = {
-    "lead_elbow_angle": "arm", "rear_elbow_angle": "arm",
-    "lead_knee_angle": "leg", "rear_knee_angle": "leg",
+    "lead_elbow_angle": "lead_arm",
+    "hand_x_from_shoulder": "lead_arm", "hand_y_from_shoulder": "lead_arm",
+    "rear_elbow_angle": "rear_arm",
+    "lead_knee_angle": "lead_leg",
+    "lead_ankle_x_from_hip": "lead_leg", "lead_ankle_y_from_hip": "lead_leg",
+    "rear_knee_angle": "rear_leg",
     "torso_lean": "torso", "shoulder_tilt": "torso", "hip_tilt": "torso",
-    "hand_x_from_shoulder": "arm", "hand_y_from_shoulder": "arm",
-    "lead_ankle_x_from_hip": "leg", "lead_ankle_y_from_hip": "leg",
     "shoulder_x_from_hip": "torso", "shoulder_y_from_hip": "torso",
 }
+
+# 화면에 보여줄 부위 이름. 좌타 영상은 좌우반전해서 분석하므로 앞/뒤가 좌우로 바뀐다.
+# 우타자: 앞 = 왼쪽, 좌타자: 앞 = 오른쪽
+BODY_PART_NAMES = {
+    "right": {"lead_arm": "왼쪽 팔", "rear_arm": "오른쪽 팔", "lead_leg": "왼쪽 다리",
+              "rear_leg": "오른쪽 다리", "torso": "몸통"},
+    "left": {"lead_arm": "오른쪽 팔", "rear_arm": "왼쪽 팔", "lead_leg": "오른쪽 다리",
+             "rear_leg": "왼쪽 다리", "torso": "몸통"},
+}
+BODY_PART_ORDER = ["lead_arm", "rear_arm", "torso", "lead_leg", "rear_leg"]
 
 FEATURE_DESCRIPTIONS = {
     "lead_elbow_angle": "앞 어깨-팔꿈치-손목 각도. 클수록 팔이 펴져 있다.",
@@ -103,8 +115,10 @@ class SwingComparisonV2:
         quality: Optional[Dict[str, Any]] = None,
         clip_start: int = 0,
         clip_end: Optional[int] = None,
+        handedness: str = "right",
     ):
         self.model = model
+        self.handedness = handedness if handedness in BODY_PART_NAMES else "right"
         self.landmarks = np.asarray(pixel_landmarks, dtype=float)
         self.fps = float(fps)
         self.quality = dict(quality or {})
@@ -157,16 +171,21 @@ class SwingComparisonV2:
         for key, z in self.diff_z.items():
             for index, name in enumerate(self.model.feature_names):
                 groups.setdefault(BODY_PARTS.get(name, "other"), []).extend(np.abs(z[:, index]).tolist())
-        group_names = {"arm": "팔", "leg": "다리", "torso": "몸통", "other": "기타"}
-        group_scores = [
-            {
+        names = BODY_PART_NAMES[self.handedness]
+        group_scores = []
+        for part in BODY_PART_ORDER:
+            values = groups.get(part)
+            if not values:
+                group_scores.append({"key": part, "name": names.get(part, part),
+                                     "distance": None, "score": None})
+                continue
+            distance_value = float(np.sqrt(np.mean(np.square(values))))
+            group_scores.append({
                 "key": part,
-                "name": group_names.get(part, part),
-                "distance": _r(float(np.sqrt(np.mean(np.square(values)))), 3),
-                "score": distance_to_score(float(np.sqrt(np.mean(np.square(values)))), self.model.typical_distance),
-            }
-            for part, values in sorted(groups.items())
-        ]
+                "name": names.get(part, part),
+                "distance": _r(distance_value, 3),
+                "score": distance_to_score(distance_value, self.model.typical_distance),
+            })
 
         # 구간을 순서대로 이어붙인 시간축에서 지점별 차이 (구간 4개 × 20등분)
         frame_distances, worst = [], None
@@ -288,6 +307,7 @@ class SwingComparisonV2:
                 "key": name,
                 "name": FEATURE_NAMES_KO.get(name, name),
                 "body_part": BODY_PARTS.get(name, "other"),
+                "body_part_name": BODY_PART_NAMES[self.handedness].get(BODY_PARTS.get(name, "other"), ""),
                 "description": FEATURE_DESCRIPTIONS.get(name, ""),
                 "unit": FEATURE_UNITS.get(name, "deg"),
                 "available": bool(measured),

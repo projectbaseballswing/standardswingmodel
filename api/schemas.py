@@ -115,7 +115,8 @@ class JointSeries(BaseModel):
 class JointFeedback(BaseModel):
     key: str
     name: str
-    body_part: str
+    body_part: str = Field(description="lead_arm / rear_arm / torso / lead_leg / rear_leg")
+    body_part_name: str = Field("", description="화면 표시용 부위 이름. 좌우타에 맞춰 좌/우로 변환됨")
     description: str
     unit: str = Field(description="deg(각도) 또는 body(몸 크기 대비 길이)")
     available: bool = Field(True, description="이 관절을 비교할 수 있었는지")

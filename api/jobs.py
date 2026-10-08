@@ -203,6 +203,7 @@ class JobManager:
                     skeleton.landmarks_pixel,
                     skeleton.fps,
                     quality=_skeleton_quality(skeleton),
+                    handedness="left" if is_left else "right",
                 ).report(include_series=True)
             else:
                 # 0.1: 임팩트 기준 80프레임 + DTW (기준 모델 파일이 없을 때)
