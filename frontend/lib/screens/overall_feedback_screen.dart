@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
 
 import '../data/feedback_repository.dart';
@@ -112,7 +113,7 @@ class _FeedbackBody extends StatelessWidget {
             ],
           ),
         ),
-        _BottomBar(),
+        _BottomBar(feedback: feedback),
       ],
     );
   }
@@ -703,6 +704,10 @@ class _CoachCard extends StatelessWidget {
 // 하단 버튼 2개
 // ---------------------------------------------------------------------------
 class _BottomBar extends StatelessWidget {
+  const _BottomBar({required this.feedback});
+
+  final OverallFeedback feedback;
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -716,7 +721,8 @@ class _BottomBar extends StatelessWidget {
                 height: 50,
                 child: OutlinedButton(
                   onPressed: () {
-                    // TODO(next): 상세 피드백 화면으로 이동.
+                    // 관절별 분석(상세 피드백) 화면으로 이동.
+                    context.push('/joint-analysis', extra: feedback);
                   },
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.primary,
