@@ -58,6 +58,7 @@ class FeedbackRepository {
         currentScore: _scoreFromZ(z),
         level: (j['level'] as String?) ?? 'good',
         description: (j['description'] as String?) ?? '',
+        phaseScores: _phaseScoresFromServer(j['phases']),
       ));
     }
 
@@ -87,6 +88,22 @@ class FeedbackRepository {
   int _scoreFromZ(double z) {
     final score = (100 - z.abs() * 18).round();
     return score.clamp(0, 100);
+  }
+
+  /// 서버 `phases`(구간별 z_score)를 [SwingPhase] 순서의 0~100 점수로 환산한다.
+  /// 4구간(준비·로딩·스윙·팔로우스루)이 모두 있어야 쓰고, 하나라도 없으면 null.
+  List<int>? _phaseScoresFromServer(dynamic phasesRaw) {
+    if (phasesRaw is! List) return null;
+    final byKey = <String, double>{};
+    for (final p in phasesRaw.whereType<Map<String, dynamic>>()) {
+      final key = p['phase'] as String?;
+      final z = (p['z_score'] as num?)?.toDouble();
+      if (key != null && z != null) byKey[key] = z;
+    }
+    if (!SwingPhase.values.every((ph) => byKey.containsKey(ph.key))) {
+      return null;
+    }
+    return [for (final ph in SwingPhase.values) _scoreFromZ(byKey[ph.key]!)];
   }
 
   int _round(dynamic v) => v is num ? v.round() : 0;
@@ -130,6 +147,156 @@ class FeedbackRepository {
     if (items.isEmpty) return null;
     return items
         .reduce((a, b) => a.currentScore <= b.currentScore ? a : b);
+  }
+
+  // -------------------------------------------------------------------------
+  // 관절별 분석(상세 피드백)
+  // -------------------------------------------------------------------------
+
+  /// 종합 피드백을 관절별 상세 분석 목록으로 펼친다.
+  ///
+  /// ⚠️ 백엔드 연동 상태 ⚠️
+  ///  - 이름·현재/이전 점수·변화 상태는 종합 피드백(실제 값)에서 그대로 온다.
+  ///  - 단계별(스윙 4구간) 점수 그래프는 서버 phases(z_score)를 환산한 실제 값.
+  ///    코치 문장·포인트는 아직 규칙 기반 임시 문구라, 백엔드 LLM 문장이
+  ///    생기면 이 부분을 교체한다.
+  List<JointAnalysis> buildJointAnalyses(OverallFeedback feedback) {
+    final list = <JointAnalysis>[];
+    for (var i = 0; i < feedback.items.length; i++) {
+      final item = feedback.items[i];
+      final status = _statusOf(item, isFirst: feedback.isFirst);
+      final hasPrev = item.previousScore != null;
+      final needWork =
+          status == JointStatus.worsened || status == JointStatus.proBad;
+      list.add(JointAnalysis(
+        label: item.label,
+        part: item.part,
+        status: status,
+        currentScore: item.currentScore,
+        previousScore: item.previousScore,
+        // 서버 구간 점수가 있으면 실제 값을, 없으면(샘플 등) 임시로 채운다.
+        currentPhaseScores:
+            item.phaseScores ?? _phaseScores(item.currentScore, seed: i),
+        previousPhaseScores:
+            hasPrev ? _phaseScores(item.previousScore!, seed: i + 7) : null,
+        summary: _jointSummary(item, status),
+        coachComment: _jointCoach(item, status),
+        pointsTitle: needWork ? '개선 포인트' : '유지 포인트',
+        points: _jointPoints(item, status),
+      ));
+    }
+    return list;
+  }
+
+  /// 관절 상태를 정한다.
+  ///  - 첫 피드백([isFirst]): 비교 대상이 없으니 프로 기준(level) 대비로
+  ///    "잘함([proGood]) / 개선 필요([proBad])" 를 나눈다.
+  ///  - 반복 피드백: 이전 대비 증감으로 개선/개선 필요/변화 없음을 나눈다.
+  JointStatus _statusOf(FeedbackItem item, {required bool isFirst}) {
+    if (isFirst) {
+      return item.level == 'good' ? JointStatus.proGood : JointStatus.proBad;
+    }
+    final delta = item.delta;
+    if (delta == null) return JointStatus.limited;
+    const band = 2; // |증감| 이 이 값 이하면 "변화 없음".
+    if (delta > band) return JointStatus.improved;
+    if (delta < -band) return JointStatus.worsened;
+    return JointStatus.unchanged;
+  }
+
+  /// 기준 점수 주변으로 구간별 점수를 만든다. (임시: 그래프 모양만 자연스럽게)
+  /// 서버 구간 점수가 없는 경우(반복 피드백 샘플 등)에만 폴백으로 쓴다.
+  List<int> _phaseScores(int base, {required int seed}) {
+    // 구간마다 적용할 가감 패턴(준비·로딩·스윙·팔로우스루). 스윙 구간이 가장 높게.
+    const wiggle = [-5, -2, 6, -4];
+    return [
+      for (var p = 0; p < wiggle.length; p++)
+        (base + wiggle[p] + ((seed + p) % 3 - 1) * 2).clamp(0, 100),
+    ];
+  }
+
+  String _jointSummary(FeedbackItem item, JointStatus status) {
+    switch (status) {
+      case JointStatus.improved:
+        return '${item.label}의 움직임이 이전보다 안정적으로 개선되었습니다.\n'
+            '특히 스윙 중 각도가 기준 스윙에 더 가까워졌습니다.';
+      case JointStatus.worsened:
+        return '${item.label}의 움직임이 이전보다 다소 불안정해졌습니다.\n'
+            '특히 스윙 중 각도가 기준 스윙과 더 큰 차이를 보였습니다.';
+      case JointStatus.unchanged:
+        return '${item.label}의 움직임은 이전과 비슷하게 유지되고 있습니다.';
+      case JointStatus.limited:
+        return item.description.isNotEmpty
+            ? item.description
+            : '${item.label}은(는) 비교할 이전 스윙이 없어 이번 결과만 보여드려요.';
+      case JointStatus.proGood:
+        return '${item.label}의 움직임이 프로 선수 기준과 잘 맞는 편이에요.\n'
+            '스윙 중 각도가 기준 스윙과 가깝게 유지되고 있습니다.';
+      case JointStatus.proBad:
+        return '${item.label}의 움직임이 프로 선수 기준과 다소 차이가 있어요.\n'
+            '스윙 중 각도가 기준 스윙과 차이를 보이니 더 살펴보면 좋아요.';
+    }
+  }
+
+  String _jointCoach(FeedbackItem item, JointStatus status) {
+    switch (status) {
+      case JointStatus.improved:
+        return '이번 스윙에서 ${item.label}의 움직임이 이전보다 안정적으로 유지되었습니다.\n'
+            '스윙 구간에서 각도가 끝까지 유지되어, 기준 스윙과의 차이가 줄었습니다.';
+      case JointStatus.worsened:
+        return '이번 스윙에서 ${item.label}의 움직임이 이전보다 다소 불안정해졌습니다.\n'
+            '스윙 구간에서 각도가 일찍 무너지는 경향이 나타나며, 기준 스윙과의 차이가 커졌습니다.';
+      case JointStatus.unchanged:
+        return '이번 스윙에서 ${item.label}의 움직임은 이전과 큰 차이 없이 유지되었습니다.\n'
+            '안정적인 흐름이니 지금 리듬을 그대로 이어가 보세요.';
+      case JointStatus.limited:
+        return '${item.label}은(는) 비교할 이전 스윙이 아직 없어 변화는 보여드릴 수 없어요.\n'
+            '다음 스윙을 촬영하면 이번 결과와 비교해 변화를 알려드릴게요.';
+      case JointStatus.proGood:
+        return '${item.label}의 움직임이 프로 선수 기준과 잘 맞는 편이에요.\n'
+            '지금의 안정적인 각도를 그대로 유지해 보세요.';
+      case JointStatus.proBad:
+        return '${item.label}의 움직임이 프로 선수 기준과 다소 차이가 있어요.\n'
+            '스윙 구간에서 각도가 기준보다 일찍 무너지지 않도록 집중해 보세요.';
+    }
+  }
+
+  List<String> _jointPoints(FeedbackItem item, JointStatus status) {
+    switch (status) {
+      case JointStatus.worsened:
+        return [
+          '스윙 구간까지 각도를 유지해 보세요.',
+          '스윙 시 ${item.label}이(가) 몸에서 너무 일찍 떨어지지 않도록 주의하세요.',
+          '다음 스윙에서는 하체와 상체의 회전에 맞춰 자연스럽게 따라오도록 연습해 보세요.',
+        ];
+      case JointStatus.improved:
+        return [
+          '지금의 각도 유지 흐름을 그대로 이어가 보세요.',
+          '스윙 구간에서 ${item.label}과(와) 몸의 간격이 안정적으로 유지되고 있어요.',
+          '다음 스윙에서도 하체 회전과 타이밍을 같은 리듬으로 가져가 보세요.',
+        ];
+      case JointStatus.unchanged:
+        return [
+          '현재의 안정적인 움직임을 유지해 보세요.',
+          '무리하게 바꾸기보다 지금 리듬을 반복해 몸에 익혀 보세요.',
+        ];
+      case JointStatus.limited:
+        return [
+          '다음 스윙을 촬영하면 이번 결과와 비교해 변화를 확인할 수 있어요.',
+        ];
+      case JointStatus.proGood:
+        return [
+          '지금의 안정적인 각도 흐름을 그대로 유지해 보세요.',
+          '${item.label}과(와) 몸의 간격이 기준 스윙과 잘 맞고 있어요.',
+          '다음 스윙에서도 같은 리듬으로 가져가 보세요.',
+        ];
+      case JointStatus.proBad:
+        return [
+          '스윙 구간까지 ${item.label}의 각도를 유지해 보세요.',
+          '스윙 시 ${item.label}이(가) 몸에서 너무 일찍 떨어지지 않도록 주의하세요.',
+          '하체와 상체의 회전에 맞춰 자연스럽게 따라오도록 연습해 보세요.',
+        ];
+    }
   }
 
   /// 반복 피드백 샘플(디자인 시안과 동일한 값).
