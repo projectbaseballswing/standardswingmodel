@@ -204,13 +204,22 @@ async def create_analysis(
             Path(video_path).unlink(missing_ok=True)
 
 
-@router.post("/analyses/features", response_model=schemas.Analysis, tags=["analyses"])
+@router.post(
+    "/analyses/features",
+    response_model=schemas.Analysis,
+    tags=["dev"],
+    include_in_schema=False,  # 사용자용 경로가 아니라 개발/테스트 전용
+)
 async def create_analysis_from_features(
     request: Request,
     features: UploadFile = File(..., description="(80, 64) 또는 (80, 67) 스윙 피처 .npy"),
     fps: float = Form(30.0, gt=0, description="피처를 만든 영상의 fps"),
 ):
-    """이미 추출한 피처(.npy)로 바로 비교합니다. 영상 처리 없이 비교 로직만 확인할 때 씁니다."""
+    """[개발 전용] 이미 추출한 피처(.npy)로 바로 비교한다. 사용자는 영상만 올리므로 앱에서는 쓰지 않는다.
+
+    이 경로는 구버전(0.1) 비교를 쓴다. 입력이 이미 80프레임으로 잘린 피처라서
+    0.2 에 필요한 프레임별 관절 좌표를 복원할 수 없기 때문이다.
+    """
     try:
         array = np.load(io.BytesIO(await features.read()), allow_pickle=False)
         array = to_template_features(array)

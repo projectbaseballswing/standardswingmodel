@@ -175,8 +175,13 @@ def main() -> None:
         durations = np.asarray(phase_durations[key], dtype=float)
         payload[f"{key}_duration_mean"] = np.asarray(float(np.mean(durations)))
         payload[f"{key}_duration_std"] = np.asarray(float(np.std(durations)))
-        print(f"  {name:12s} 스윙 {len(curves):3d}개 | 길이 {np.mean(durations):6.0f} ± {np.std(durations):5.0f} ms "
-              f"(중앙 {np.median(durations):.0f})")
+        # 평균/표준편차는 검출이 틀린 스윙 몇 개에 크게 흔들린다.
+        # 템포 판정에는 중앙값과 사분위 범위를 쓴다.
+        q25, q50, q75 = np.percentile(durations, [25, 50, 75])
+        payload[f"{key}_duration_median"] = np.asarray(float(q50))
+        payload[f"{key}_duration_iqr"] = np.asarray(float(q75 - q25))
+        print(f"  {name:12s} 스윙 {len(curves):3d}개 | 중앙 {q50:5.0f} ms "
+              f"(사분위 {q25:.0f}~{q75:.0f}, 평균 {np.mean(durations):.0f} ± {np.std(durations):.0f})")
 
     print("\n[임팩트 기준 이벤트 시점 (ms, -는 임팩트 이전)]")
     for key in TIMING_KEYS:

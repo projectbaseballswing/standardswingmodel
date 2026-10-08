@@ -67,6 +67,8 @@ class Phase:
     count: int
     duration_mean: float
     duration_std: float
+    duration_median: float  # 템포 판정 기준 (평균보다 이상치에 덜 흔들린다)
+    duration_iqr: float  # 사분위 범위. 정규분포라면 표준편차의 약 1.35배
 
 
 class ReferenceModel:
@@ -89,6 +91,8 @@ class ReferenceModel:
                 count=int(data[f"{key}_count"]),
                 duration_mean=float(data[f"{key}_duration_mean"]),
                 duration_std=float(data[f"{key}_duration_std"]),
+                duration_median=float(data.get(f"{key}_duration_median", data[f"{key}_duration_mean"])),
+                duration_iqr=float(data.get(f"{key}_duration_iqr", data[f"{key}_duration_std"] * 1.35)),
             )
 
         self.timings = {

@@ -29,6 +29,11 @@ SCORE_AT_TYPICAL = 0.8
 LEVEL_CAUTION, LEVEL_WARNING = 1.0, 2.0
 # 구간 길이 판정 (단위: 기준 길이 편차)
 TEMPO_CAUTION, TEMPO_WARNING = 1.0, 2.0
+# 템포를 판정할 수 있는 조건.
+# 30fps 에서 스윙 구간은 중앙값이 4프레임(133ms)뿐이라 1프레임 차이가 25% 변동으로 보인다.
+# 이렇게 짧거나 기준 분포가 넓은 구간은 수치만 보여주고 판정은 하지 않는다.
+TEMPO_MIN_FRAMES = 5  # 기준 길이가 이보다 짧으면 판정 보류
+TEMPO_MAX_SPREAD = 0.6  # 기준 분포(IQR/중앙값)가 이보다 넓으면 판정 보류
 
 # 피처를 어느 부위로 묶어 보여줄지
 BODY_PARTS = {
@@ -330,7 +335,25 @@ class SwingComparisonV2:
                 continue
 
             user_ms = (end - start) / self.fps * 1000
-            tempo_z = (user_ms - phase.duration_mean) / max(phase.duration_std, 1e-6)
+            # 중앙값과 사분위 범위로 본다. 평균/표준편차는 검출이 틀린 소수 스윙에 끌려간다.
+            # IQR/1.35 는 정규분포에서 표준편차에 해당하는 값이다.
+            spread = max(phase.duration_iqr / 1.35, phase.duration_median * 0.1, 1e-6)
+            tempo_z = (user_ms - phase.duration_median) / spread
+
+            # 판정이 가능한 구간인지 확인한다
+            reference_frames = phase.duration_median * self.fps / 1000
+            relative_spread = phase.duration_iqr / max(phase.duration_median, 1e-6)
+            phase_warnings: List[str] = []
+            if reference_frames < TEMPO_MIN_FRAMES:
+                tempo_level = None
+                phase_warnings.append(
+                    f"구간이 짧아({reference_frames:.0f}프레임) 템포를 판정하지 않았습니다. "
+                    f"더 높은 fps 로 촬영하면 판정할 수 있습니다.")
+            elif relative_spread > TEMPO_MAX_SPREAD:
+                tempo_level = None
+                phase_warnings.append("선수마다 편차가 커서 템포를 판정하지 않았습니다. 수치만 참고하세요.")
+            else:
+                tempo_level = level_of(tempo_z, TEMPO_CAUTION, TEMPO_WARNING)
             distance = float(np.sqrt(np.mean(self.diff_z[key] ** 2)))
 
             deviations = []
@@ -349,14 +372,14 @@ class SwingComparisonV2:
                 "reliability": self.reliability, "unavailable_reason": None,
                 "reference_frames": [0, self.model.points],
                 "user_frames": [int(start), int(end)],
-                "reference_duration_ms": _r(phase.duration_mean, 0),
+                "reference_duration_ms": _r(phase.duration_median, 0),
                 "user_duration_ms": _r(user_ms, 0),
-                "tempo_ratio": _r(user_ms / phase.duration_mean if phase.duration_mean else None),
-                "tempo_level": level_of(tempo_z, TEMPO_CAUTION, TEMPO_WARNING),
+                "tempo_ratio": _r(user_ms / phase.duration_median if phase.duration_median else None),
+                "tempo_level": tempo_level,
                 "distance": _r(distance, 3),
                 "score": distance_to_score(distance, self.model.typical_distance),
                 "top_deviations": deviations[:3],
-                "warnings": [],
+                "warnings": phase_warnings,
             })
 
         # 리듬: 스트라이드와 스윙 길이의 비
@@ -371,7 +394,7 @@ class SwingComparisonV2:
             key: (getattr(self.events, PHASE_EVENTS[key][1]) - getattr(self.events, PHASE_EVENTS[key][0])) / self.fps * 1000
             for key in self.user_curves
         }
-        reference_durations = {key: phase.duration_mean for key, phase in self.model.phases.items()}
+        reference_durations = {key: phase.duration_median for key, phase in self.model.phases.items()}
 
         return {
             "model_version": self.model.model_version,
