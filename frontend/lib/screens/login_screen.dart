@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../api/auth_api.dart';
+import '../data/session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 
@@ -44,8 +45,10 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      await _authApi.login(id: id, password: password);
+      final result = await _authApi.login(id: id, password: password);
       if (!mounted) return;
+      // 로그인한 사용자를 세션에 저장(프로필·서버 호출에서 참조).
+      Session.instance.signIn(result.userId);
       // 로그인 성공 → 스윙 목록 화면으로 이동 (뒤로가기로 로그인에 못 돌아오게 go 사용).
       context.go('/swings');
     } on ApiException catch (e) {

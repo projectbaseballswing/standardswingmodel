@@ -4,6 +4,7 @@ import 'models/feedback.dart';
 import 'screens/joint_analysis_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/overall_feedback_screen.dart';
+import 'screens/profile_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/swing_camera_screen.dart';
 import 'screens/swing_list_screen.dart';
@@ -26,6 +27,10 @@ final router = GoRouter(
     GoRoute(
       path: '/swings/camera',
       builder: (context, state) => const SwingCameraScreen(),
+    ),
+    GoRoute(
+      path: '/profile',
+      builder: (context, state) => const ProfileScreen(),
     ),
     // 종합 피드백. 분석 id 로 결과를 조회한다.
     // 쿼리 first=1 이면 비교 대상이 없는 첫 피드백으로 보여준다.
