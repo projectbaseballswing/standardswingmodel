@@ -19,6 +19,16 @@ class LoginResult {
   final String userId;
 }
 
+/// 내 정보 조회 결과. (POST /api/me)
+class MyInfo {
+  const MyInfo({required this.id, required this.email, this.nickname});
+  final String id;
+  final String email;
+
+  /// TODO(backend): /api/me 응답에 nickname 이 추가되면 채워진다. 지금은 null.
+  final String? nickname;
+}
+
 /// 회원가입 결과. registered 가 false 면 어느 항목이 중복인지 알 수 있다.
 class RegisterResult {
   const RegisterResult({
@@ -90,6 +100,20 @@ class AuthApi {
     });
     final body = _decode(res);
     return LoginResult(userId: body['user'] as String);
+  }
+
+  /// 내 정보 조회.
+  ///
+  /// [POST] /api/me  {user}  → {id, email}
+  /// (백엔드가 nickname 을 추가하면 자동으로 함께 받는다.)
+  Future<MyInfo> fetchMyInfo(String userId) async {
+    final res = await _post('/api/me', {'user': userId});
+    final body = _decode(res);
+    return MyInfo(
+      id: body['id'] as String,
+      email: body['email'] as String,
+      nickname: body['nickname'] as String?,
+    );
   }
 
   Future<http.Response> _get(Uri uri) async {

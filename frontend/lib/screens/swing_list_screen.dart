@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../data/session.dart';
 import '../data/swing_repository.dart';
 import '../models/swing.dart';
 import '../theme/app_theme.dart';
@@ -25,6 +26,9 @@ class _SwingListScreenState extends State<SwingListScreen> {
   // 달력에 표시할 기준 달과, 현재 선택된 날짜.
   late DateTime _month;
   DateTime? _selectedDay;
+
+  // 우측 상단 프로필 아바타 hover 상태(웹/데스크톱에서 마우스 올렸을 때).
+  bool _avatarHovering = false;
 
   @override
   void initState() {
@@ -99,10 +103,58 @@ class _SwingListScreenState extends State<SwingListScreen> {
         children: [
           Align(
             alignment: Alignment.centerRight,
-            child: CircleAvatar(
-              radius: 20,
-              backgroundColor: AppColors.fieldFill,
-              child: const Icon(Icons.person, color: AppColors.hint),
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              onEnter: (_) => setState(() => _avatarHovering = true),
+              onExit: (_) => setState(() => _avatarHovering = false),
+              child: GestureDetector(
+                onTap: _openProfile,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    // hover 시 테두리 강조 + 은은한 그림자로 눌리는 느낌.
+                    border: Border.all(
+                      color: _avatarHovering
+                          ? AppColors.primary
+                          : Colors.transparent,
+                      width: 2,
+                    ),
+                    boxShadow: _avatarHovering
+                        ? [
+                            BoxShadow(
+                              color: AppColors.primary.withValues(alpha: 0.25),
+                              blurRadius: 8,
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Stack(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: AppColors.fieldFill,
+                        backgroundImage: Session.instance.profileImage != null
+                            ? MemoryImage(Session.instance.profileImage!)
+                            : null,
+                        child: Session.instance.profileImage == null
+                            ? const Icon(Icons.person, color: AppColors.hint)
+                            : null,
+                      ),
+                      // hover 시 살짝 어두운 오버레이로 클릭 가능함을 표시.
+                      if (_avatarHovering)
+                        Positioned.fill(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.black.withValues(alpha: 0.06),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -315,6 +367,13 @@ class _SwingListScreenState extends State<SwingListScreen> {
   // 스윙 촬영 화면으로 이동.
   void _openCamera() => context.push('/swings/camera');
 
+  // 프로필 화면으로 이동(우측 상단 아바타 / 하단 "프로필" 탭).
+  // 프로필에서 사진을 바꾸고 돌아오면 상단 아바타에 반영되도록 갱신한다.
+  Future<void> _openProfile() async {
+    await context.push('/profile');
+    if (mounted) setState(() {});
+  }
+
   Widget _bottomNav() {
     return BottomNavigationBar(
       currentIndex: 0,
@@ -322,8 +381,9 @@ class _SwingListScreenState extends State<SwingListScreen> {
       unselectedItemColor: AppColors.hint,
       type: BottomNavigationBarType.fixed,
       onTap: (index) {
-        // 0: 스윙 촬영. 1·2 는 다음 작업에서 연결.
+        // 0: 스윙 촬영, 2: 프로필. 1(스윙 추이)은 다음 작업에서 연결.
         if (index == 0) _openCamera();
+        if (index == 2) _openProfile();
       },
       items: const [
         BottomNavigationBarItem(
