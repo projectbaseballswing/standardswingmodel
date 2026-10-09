@@ -40,7 +40,7 @@ SWING_MOCK=1 uvicorn api.main:app --reload
 | GET | `/api/check-email` | 이메일 중복 확인 (`email` query) |
 | GET | `/api/health` | 서버 상태, 모델 버전, 목업 여부 |
 | POST | `/api/analyses` | 영상 업로드 → 분석 작업 등록 (202) |
-| POST | `/api/analyses/features` | `.npy` 피처 비교 → 결과 저장 |
+| ~~POST~~ | ~~`/api/analyses/features`~~ | 개발 전용(문서·Swagger 비공개). 사용자는 영상만 올립니다 |
 | GET | `/api/analyses/{id}` | 작업 상태 + 전체 결과 |
 | GET | `/api/analyses/{id}/video` | 원본 영상 signed URL (`analysis_id`, `url`, `expires_in`) |
 | GET | `/api/analyses/{id}/overall` | 종합 피드백 |

@@ -34,10 +34,13 @@ class Quality(BaseModel):
 # 종합 피드백
 # ----------------------------------------------------------------------
 class GroupScore(BaseModel):
-    key: str
-    name: str
-    distance: float
-    score: float
+    key: str = Field(description="lead_arm / rear_arm / torso / lead_leg / rear_leg")
+    name: str = Field(description="화면 표시용 이름. 좌우타에 맞춰 좌/우로 변환됨")
+    available: bool = True
+    reliability: Reliability = Field("medium", description="피처가 하나뿐이거나 검출이 불안정한 부위는 낮다")
+    feature_count: int = Field(0, description="이 부위를 이루는 피처 수")
+    distance: Optional[float] = None
+    score: Optional[float] = None
 
 
 class WorstSegment(BaseModel):
@@ -53,10 +56,10 @@ class Issue(BaseModel):
     joint_name: str
     phase: str
     phase_name: str
-    user: float
-    reference: float
-    diff: float
-    z_score: float
+    user: Optional[float] = None
+    reference: Optional[float] = None
+    diff: Optional[float] = None
+    z_score: Optional[float] = None
     direction: Direction
     level: Level
 
@@ -70,8 +73,10 @@ class OverallFeedback(BaseModel):
     typical_pro_distance: Optional[float] = Field(None, description="80점에 해당하는 거리")
     group_scores: List[GroupScore]
     worst_segment: Optional[WorstSegment] = None
-    frame_distances: List[float] = Field(description="템플릿 시간축 80프레임별 거리")
-    top_issues: List[Issue]
+    frame_distances: List[Optional[float]] = Field(
+        description="기준 시간축 지점별 거리. 0.1 은 80프레임, 0.2 는 구간 4개 × 20등분")
+    top_issues: List[Issue] = Field(default_factory=list, description="기준과 가장 많이 벌어진 항목")
+    top_strengths: List[Issue] = Field(default_factory=list, description="기준에 가장 가까운 항목")
     quality: Quality
 
 
@@ -81,41 +86,43 @@ class OverallFeedback(BaseModel):
 class JointPhaseStat(BaseModel):
     phase: str
     phase_name: str
-    user_mean: float
-    reference_mean: float
-    reference_std: float
-    diff: float = Field(description="user_mean - reference_mean (deg)")
-    z_score: float = Field(description="기준 템플릿 편차 대비 차이")
+    available: bool = Field(True, description="이 구간이 영상에 담겨 비교할 수 있었는지")
+    user_mean: Optional[float] = None
+    reference_mean: Optional[float] = None
+    reference_std: Optional[float] = None
+    diff: Optional[float] = Field(None, description="user_mean - reference_mean")
+    z_score: Optional[float] = Field(None, description="기준 스윙들의 편차 대비 차이")
     direction: Direction
     level: Level
 
 
 class JointImpact(BaseModel):
-    user: float
-    reference: float
-    diff: float
-    z_score: float
+    user: Optional[float] = None
+    reference: Optional[float] = None
+    diff: Optional[float] = None
+    z_score: Optional[float] = None
     level: Level
 
 
 class RangeOfMotion(BaseModel):
-    user: float
-    reference: float
-    diff: float
+    user: Optional[float] = None
+    reference: Optional[float] = None
+    diff: Optional[float] = None
 
 
 class JointSeries(BaseModel):
-    user: List[float]
-    reference: List[float]
-    reference_std: List[float]
+    user: List[Optional[float]]
+    reference: List[Optional[float]]
+    reference_std: List[Optional[float]]
 
 
 class JointFeedback(BaseModel):
     key: str
     name: str
-    body_part: str
+    body_part: str = Field(description="lead_arm / rear_arm / torso / lead_leg / rear_leg")
+    body_part_name: str = Field("", description="화면 표시용 부위 이름. 좌우타에 맞춰 좌/우로 변환됨")
     description: str
-    unit: Literal["deg"]
+    unit: str = Field(description="deg(각도) 또는 body(몸 크기 대비 길이)")
     available: bool = Field(True, description="이 관절을 비교할 수 있었는지")
     reliability: Reliability = "medium"
     level: Level
@@ -136,8 +143,8 @@ class JointsFeedback(BaseModel):
 class PhaseDeviation(BaseModel):
     joint: str
     joint_name: str
-    diff: float
-    z_score: float
+    diff: Optional[float] = None
+    z_score: Optional[float] = None
     direction: Direction
     level: Level
 
@@ -173,6 +180,10 @@ class PhasesFeedback(BaseModel):
     reference_fps: float
     rhythm: Rhythm
     phases: List[PhaseFeedback]
+    events: Dict[str, object] = Field(
+        default_factory=dict,
+        description="이벤트별 프레임과 임팩트 기준 시점(ms). 0.2 부터 제공",
+    )
 
 
 # ----------------------------------------------------------------------

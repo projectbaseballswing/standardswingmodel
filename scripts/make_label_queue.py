@@ -28,6 +28,8 @@ def main() -> None:
     parser.add_argument("--skeleton-dir", default="data/skeletons")
     parser.add_argument("--out", default="data/label_priority.txt")
     parser.add_argument("--count", type=int, default=40)
+    parser.add_argument("--exclude-labeled", default=None,
+                        help="이미 라벨링한 영상을 제외한다 (labels.csv 경로)")
     args = parser.parse_args()
 
     rows = []
@@ -55,8 +57,16 @@ def main() -> None:
             "nan_ratio": nan_ratio,
         })
 
+    done: set = set()
+    if args.exclude_labeled and Path(args.exclude_labeled).exists():
+        import csv
+        with open(args.exclude_labeled, encoding="utf-8-sig") as f:
+            done = {row["video_id"] for row in csv.DictReader(f)}
+        print(f"이미 라벨링한 {len(done)}개 제외")
+
     # 품질이 나쁜 영상은 뒤로 (라벨링해도 쓰기 어렵다)
-    usable = [r for r in rows if r["nan_ratio"] < 0.3 and np.isfinite(r["lift"])]
+    usable = [r for r in rows
+              if r["nan_ratio"] < 0.3 and np.isfinite(r["lift"]) and r["video_id"] not in done]
     print(f"전체 {len(rows)}개 중 라벨링 대상 {len(usable)}개 (NaN 30% 미만)")
 
     # 길이 x 앞발 움직임 폭 으로 칸을 나누고, 칸마다 다른 선수를 돌아가며 뽑는다

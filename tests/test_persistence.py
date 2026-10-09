@@ -43,8 +43,9 @@ def test_user_video_and_report_survive_new_process(mock_settings, fake_storage):
         assert report["user_id"] == user_id
         assert report["recorded_at"].startswith("2026-10-03T01:00:00")
         assert report["status"] == "done"
-        assert report["result"]["speed"]["available"] is False
-        assert all(item["user"] is None for item in report["result"]["speed"]["metrics"])
+        # 목업 샘플은 0.2 로 뽑은 실제 응답이므로 속도 지표까지 채워져 있다.
+        assert report["result"]["speed"]["available"] is True
+        assert all(item["user"] is not None for item in report["result"]["speed"]["metrics"])
         first = client.get(f"/api/analyses/{analysis_id}/video").json()
         second = client.get(f"/api/analyses/{analysis_id}/video").json()
         assert first["url"] != second["url"]

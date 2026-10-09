@@ -42,7 +42,6 @@ python -m uvicorn api.main:app --port 8000
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | POST | `/api/analyses` | 영상 업로드(`video`, `handedness`) → 작업 등록 (202) |
-| POST | `/api/analyses/features` | 추출된 피처 `.npy`로 바로 비교 (영상 처리 없이 테스트용) |
 | GET | `/api/analyses/{id}` | 상태 + 전체 결과 |
 | GET | `/api/analyses/{id}/video` | 원본 영상의 만료되는 signed URL 발급 |
 | GET | `/api/analyses/{id}/overall` | 종합 피드백: 유사도 점수, 그룹별 점수, 주요 문제점 |

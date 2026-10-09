@@ -21,11 +21,33 @@ from sqlalchemy import select, update
 
 from api import database
 from api.database import Swing
-from feedback.compare import SwingComparison
+from feedback.compare import MODEL_VERSION, SwingComparison
+from feedback.compare_v2 import SwingComparisonV2
 from feedback.pipeline import PipelineError, SwingPipeline
 from feedback.reference import ReferenceStore
+from feedback.reference_model import load_reference_model
 
 logger = logging.getLogger(__name__)
+
+
+def _skeleton_quality(skeleton) -> Dict[str, Any]:
+    """신뢰도 판정에 쓰는 품질 정보."""
+    import numpy as np
+
+    from feedback.features import JOINT_NAMES
+
+    visibility = np.asarray(skeleton.visibility, dtype=float)
+    return {
+        "source_fps": round(float(skeleton.fps), 2),
+        "n_frames": int(skeleton.landmarks.shape[0]),
+        "max_missing_gap": int(skeleton.max_missing_gap),
+        "nan_ratio": round(float(np.mean(~np.isfinite(skeleton.landmarks))), 4),
+        "joint_visibility": {
+            name: round(float(value), 3)
+            for name, value in zip(JOINT_NAMES, np.nanmean(visibility, axis=0))
+        },
+        "warnings": [],
+    }
 
 
 def _now() -> datetime:
@@ -64,11 +86,32 @@ class JobManager:
         self.worker_id = worker_id
         self._pipeline_factory = pipeline_factory
         self._pipeline: Optional[SwingPipeline] = None
+        # 이벤트 기반 기준 모델(0.2). 파일이 없으면 기존 0.1 비교를 쓴다.
+        self.model_v2 = load_reference_model()
+        if self.model_v2 is not None:
+            logger.info("기준 모델 %s 사용 (스윙 %d개)", self.model_v2.model_version, self.model_v2.swings_used)
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="swing-worker")
 
     @property
     def pipeline_loaded(self) -> bool:
         return self._pipeline is not None
+
+    @staticmethod
+    def _supports_v2(pipeline) -> bool:
+        """0.2 는 80프레임으로 자르기 전 스켈레톤이 필요하다."""
+        return hasattr(pipeline, "extract_skeleton")
+
+    @property
+    def model_version(self) -> str:
+        """실제 분석에 쓰이는 기준 모델 버전. /health 가 이 값을 알린다.
+
+        파이프라인은 첫 요청 때 만들어지므로, 그 전에는 기준 모델 파일 유무만으로 답한다.
+        """
+        if self.model_v2 is None:
+            return MODEL_VERSION
+        if self._pipeline is not None and not self._supports_v2(self._pipeline):
+            return MODEL_VERSION
+        return self.model_v2.model_version
 
     def get(self, analysis_id: str) -> Optional[Job]:
         with database.SessionLocal() as db:
@@ -166,16 +209,30 @@ class JobManager:
             if self._pipeline is None:
                 on_stage("loading_models")
                 self._pipeline = self._pipeline_factory()
-            result = self._pipeline.run(video_path, is_left=is_left, on_stage=on_stage)
-            on_stage("comparing")
-            comparison = SwingComparison(
-                self.store,
-                result.features,
-                user_fps=result.fps,
-                reference_fps=self.reference_fps,
-                quality=result.quality,
-            )
-            job.result = comparison.report(include_series=True)
+            # 0.2 는 자르기 전 스켈레톤이 필요하다. 그 기능이 없는 파이프라인이면 0.1 로 돈다.
+            use_v2 = self.model_v2 is not None and self._supports_v2(self._pipeline)
+            if use_v2:
+                # 0.2: 이벤트 기반. 80프레임으로 자르기 전 스켈레톤을 그대로 쓴다.
+                skeleton = self._pipeline.extract_skeleton(video_path, is_left=is_left, on_stage=on_stage)
+                on_stage("comparing")
+                job.result = SwingComparisonV2(
+                    self.model_v2,
+                    skeleton.landmarks_pixel,
+                    skeleton.fps,
+                    quality=_skeleton_quality(skeleton),
+                    handedness="left" if is_left else "right",
+                ).report(include_series=True)
+            else:
+                # 0.1: 임팩트 기준 80프레임 + DTW (기준 모델 파일이 없을 때)
+                result = self._pipeline.run(video_path, is_left=is_left, on_stage=on_stage)
+                on_stage("comparing")
+                job.result = SwingComparison(
+                    self.store,
+                    result.features,
+                    user_fps=result.fps,
+                    reference_fps=self.reference_fps,
+                    quality=result.quality,
+                ).report(include_series=True)
             job.status = "done"
         except PipelineError as exc:
             job.status, job.error = "failed", {"code": exc.code, "message": exc.message}

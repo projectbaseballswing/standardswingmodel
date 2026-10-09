@@ -221,3 +221,11 @@ users.db
 *.db-journal
 *.db-wal
 *.db-shm
+
+# 드라이브에서 받은 원본 데이터와 추출 결과 (라벨은 예외로 추적한다)
+data/*
+!data/labels.csv
+!data/reference_model.npz
+
+# 로컬 개발용 SQLite
+local.db
