@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import '../api/analysis_api.dart';
 import '../models/feedback.dart';
 
@@ -5,17 +7,22 @@ import '../models/feedback.dart';
 ///
 /// ⚠️ 백엔드 연동 상태 ⚠️
 ///  - 첫 피드백([firstTime] == true): 실제로 GET /api/analyses/{id} 결과를
-///    받아 매핑한다. 전체 점수·부위별 판정은 서버에서 온 진짜 값이다.
+///    받아 매핑한다. 전체 점수·부위별 점수·세부 항목은 서버에서 온 진짜 값이다.
 ///  - 반복 피드백([firstTime] == false): "이전 대비 비교" 는 서버에 기록
 ///    저장(DB)·조회 API 가 생긴 뒤에야 가능하다. 그 전까지는 샘플을 쓴다.
 ///
 /// 아직 백엔드가 주지 않아 프론트에서 임시로 채우는 값(교체 대상):
-///  - 부위별 0~100 점수: z-score 로 환산한 임시값. [_scoreFromZ] 참고.
-///  - summary / coachComment(AI 코치 문장): 규칙 기반 임시 문구.
+///  - summary / coachComment / 포인트(AI 코치 문장): 규칙 기반 임시 문구.
+///
+/// ★ 부위별 0~100 점수는 서버 overall.group_scores 의 실제 score 를 쓴다.
 class FeedbackRepository {
   FeedbackRepository({AnalysisApi? api}) : _api = api ?? AnalysisApi();
 
   final AnalysisApi _api;
+
+  /// 부위 점수가 이 값 이상이면 "잘함", 미만이면 "개선 필요" 로 본다.
+  /// distance_to_score 가 "프로 평균 거리 = 80점" 이라, 프로 평균 수준을 기준선으로 둔다.
+  static const int _goodScore = 80;
 
   /// 분석 결과를 가져온다.
   ///
@@ -26,7 +33,8 @@ class FeedbackRepository {
     bool firstTime = false,
   }) async {
     if (firstTime) {
-      final body = await _api.waitForReport(analysisId);
+      // 상세 그래프용 80점 시계열이 필요하므로 series 를 포함해 받는다.
+      final body = await _api.waitForReport(analysisId, includeSeries: true);
       return _mapReport(body);
     }
     // TODO(backend): 기록 저장(DB)·조회 API 가 생기면 이전 스윙과 비교해서 채운다.
@@ -39,26 +47,37 @@ class FeedbackRepository {
     final result = body['result'] as Map<String, dynamic>? ?? const {};
     final overall = result['overall'] as Map<String, dynamic>? ?? const {};
     final rawJoints = (result['joints'] as List?) ?? const [];
+    final rawGroups = (overall['group_scores'] as List?) ?? const [];
 
     final totalScore = _round(overall['score']);
 
-    // 분석에 쓸 수 있는 관절만 추린다.
-    final joints = rawJoints
-        .whereType<Map<String, dynamic>>()
-        .where((j) => j['available'] == true)
-        .toList();
+    // 부위별 세부 항목(피처)을 모은다.
+    // 신뢰도 낮음(뒷팔 팔꿈치 등)과 미측정 항목은 뺀다 — 서버도 종합/상세에서 제외한다.
+    final featuresByPart = <String, List<FeatureAnalysis>>{};
+    for (final j in rawJoints.whereType<Map<String, dynamic>>()) {
+      if (j['available'] != true || j['reliability'] == 'low') continue;
+      final part = (j['body_part'] as String?) ?? 'other';
+      (featuresByPart[part] ??= []).add(_mapFeature(j));
+    }
 
+    // 부위(그룹) 단위로 묶는다. 점수는 group_scores.score 실제값.
     final items = <FeedbackItem>[];
-    for (final j in joints) {
-      final impact = j['impact'] as Map<String, dynamic>? ?? const {};
-      final z = (impact['z_score'] as num?)?.toDouble() ?? 0;
+    for (final g in rawGroups.whereType<Map<String, dynamic>>()) {
+      if (g['available'] != true) continue;
+      final key = (g['key'] as String?) ?? '';
+      final features = featuresByPart[key] ?? const <FeatureAnalysis>[];
+      // 믿을 만한 세부 항목이 하나도 없는 부위(뒷팔 등)는 보여주지 않는다.
+      if (features.isEmpty) continue;
+      final score = _round(g['score']);
       items.add(FeedbackItem(
-        label: (j['name'] as String?) ?? '관절',
-        part: _partOf(j['body_part'] as String?),
-        currentScore: _scoreFromZ(z),
-        level: (j['level'] as String?) ?? 'good',
-        description: (j['description'] as String?) ?? '',
-        phaseScores: _phaseScoresFromServer(j['phases']),
+        key: key,
+        label: (g['name'] as String?) ?? '부위',
+        part: _partOf(key),
+        currentScore: score,
+        level: score >= _goodScore ? 'good' : 'caution',
+        description: _partDescription(features),
+        reliability: (g['reliability'] as String?) ?? 'high',
+        features: features,
       ));
     }
 
@@ -72,34 +91,25 @@ class FeedbackRepository {
     );
   }
 
-  /// 서버의 body_part 를 화면 부위로 바꾼다.
-  /// lead/rear 는 타석에서 투수 쪽/포수 쪽을 뜻하며, 좌우 구분이 필요해지면
-  /// 서버가 함께 내려주는 body_part_name("왼쪽 팔" 등)을 쓰면 된다.
-  BodyPart _partOf(String? bodyPart) {
-    switch (bodyPart) {
-      case 'leg':
-      case 'lead_leg':
-      case 'rear_leg':
-        return BodyPart.leg;
-      case 'arm':
-      case 'lead_arm':
-      case 'rear_arm':
-        return BodyPart.arm;
-      default:
-        return BodyPart.torso;
-    }
+  /// 서버 joints[] 한 건을 세부 항목으로 변환한다.
+  FeatureAnalysis _mapFeature(Map<String, dynamic> j) {
+    return FeatureAnalysis(
+      key: (j['key'] as String?) ?? '',
+      name: (j['name'] as String?) ?? '항목',
+      level: (j['level'] as String?) ?? 'good',
+      direction: _worstPhaseDirection(j),
+      unit: (j['unit'] as String?) ?? 'deg',
+      description: (j['description'] as String?) ?? '',
+      impact: _measure(j['impact']),
+      rangeOfMotion: _measure(j['range_of_motion']),
+      series: _series(j['series']),
+      phaseScores: _phaseScores(j['phases']),
+    );
   }
 
-  /// z-score → 0~100 임시 점수. 프로 기준에서 벗어날수록 낮아진다.
-  /// TODO(backend): 서버가 부위별 점수를 직접 주면 그 값으로 교체.
-  int _scoreFromZ(double z) {
-    final score = (100 - z.abs() * 18).round();
-    return score.clamp(0, 100);
-  }
-
-  /// 서버 `phases`(구간별 z_score)를 [SwingPhase] 순서의 0~100 점수로 환산한다.
-  /// 4구간(준비·로딩·스윙·팔로우스루)이 모두 있어야 쓰고, 하나라도 없으면 null.
-  List<int>? _phaseScoresFromServer(dynamic phasesRaw) {
+  /// 구간별 z_score → SwingPhase 순서의 0~100 점수. 4구간이 다 있어야 쓴다.
+  /// 서버가 구간별 피처 점수를 직접 주지 않아 환산한 임시값이다.
+  List<int>? _phaseScores(dynamic phasesRaw) {
     if (phasesRaw is! List) return null;
     final byKey = <String, double>{};
     for (final p in phasesRaw.whereType<Map<String, dynamic>>()) {
@@ -113,6 +123,64 @@ class FeedbackRepository {
     return [for (final ph in SwingPhase.values) _scoreFromZ(byKey[ph.key]!)];
   }
 
+  /// z-score(표준편차 단위) → 0~100 점수.
+  /// |z|=1(프로 변동 경계, level good 의 끝)을 80점(_goodScore)에 맞춘다: 100·0.8^|z|.
+  int _scoreFromZ(double z) => (100 * pow(0.8, z.abs())).round().clamp(0, 100);
+
+  /// 가장 많이 어긋난 구간(worst_phase)의 방향을 피처 대표 방향으로 쓴다.
+  String _worstPhaseDirection(Map<String, dynamic> j) {
+    final worst = j['worst_phase'] as String?;
+    final phases = (j['phases'] as List?) ?? const [];
+    for (final p in phases.whereType<Map<String, dynamic>>()) {
+      if (p['phase'] == worst) return (p['direction'] as String?) ?? 'similar';
+    }
+    return 'similar';
+  }
+
+  /// {user, reference, diff} → [Measure]. 없으면 null.
+  Measure? _measure(dynamic raw) {
+    if (raw is! Map) return null;
+    double? d(dynamic v) => (v as num?)?.toDouble();
+    return Measure(
+      user: d(raw['user']),
+      reference: d(raw['reference']),
+      diff: d(raw['diff']),
+    );
+  }
+
+  /// {user:[80], reference:[80], reference_std:[80]} → 시계열 목록. 없으면 null.
+  List<SeriesSample>? _series(dynamic raw) {
+    if (raw is! Map) return null;
+    final user = (raw['user'] as List?) ?? const [];
+    final ref = (raw['reference'] as List?) ?? const [];
+    final std = (raw['reference_std'] as List?) ?? const [];
+    final n = ref.length;
+    if (n == 0) return null;
+    double? at(List l, int i) => i < l.length ? (l[i] as num?)?.toDouble() : null;
+    return [
+      for (var i = 0; i < n; i++)
+        SeriesSample(
+          user: at(user, i),
+          reference: at(ref, i),
+          referenceStd: at(std, i),
+        ),
+    ];
+  }
+
+  /// 서버의 그룹 키를 화면 부위로 바꾼다.
+  BodyPart _partOf(String key) {
+    switch (key) {
+      case 'lead_leg':
+      case 'rear_leg':
+        return BodyPart.leg;
+      case 'lead_arm':
+      case 'rear_arm':
+        return BodyPart.arm;
+      default:
+        return BodyPart.torso;
+    }
+  }
+
   int _round(dynamic v) => v is num ? v.round() : 0;
 
   DateTime _parseTime(dynamic v) {
@@ -121,6 +189,31 @@ class FeedbackRepository {
       if (parsed != null) return parsed.toLocal();
     }
     return DateTime.now();
+  }
+
+  /// 부위 설명 한 줄. (임시: 가장 많이 어긋난 세부 항목 기준)
+  String _partDescription(List<FeatureAnalysis> features) {
+    final bad = features.where((f) => f.level != 'good').toList();
+    if (bad.isEmpty) {
+      return '세부 항목이 프로 기준과 잘 맞는 편이에요.';
+    }
+    final f = bad.first;
+    final dir = _directionWord(f.direction);
+    return dir == null
+        ? '${f.name}이(가) 프로 기준과 차이가 있어요.'
+        : '${f.name}이(가) 기준보다 $dir 편이에요.';
+  }
+
+  /// 방향 → 서술어. similar 는 null(차이 없음).
+  String? _directionWord(String direction) {
+    switch (direction) {
+      case 'higher':
+        return '높은';
+      case 'lower':
+        return '낮은';
+      default:
+        return null;
+    }
   }
 
   /// 점수 옆 분홍 박스 문구. (임시: 규칙 기반)
@@ -141,7 +234,7 @@ class FeedbackRepository {
     if (goods.isNotEmpty) {
       sb.write('${goods.first.label}은(는) 프로 기준과 잘 맞아요. ');
     }
-    if (worst != null) {
+    if (worst != null && worst.level != 'good') {
       sb.write('다음 스윙에서는 ${worst.label}에 더 집중해 보세요.');
     } else {
       sb.write('전반적으로 안정적인 스윙이에요.');
@@ -149,43 +242,37 @@ class FeedbackRepository {
     return sb.toString();
   }
 
-  /// 프로 기준에서 가장 많이 벗어난(점수가 가장 낮은) 항목.
+  /// 프로 기준에서 가장 많이 벗어난(점수가 가장 낮은) 부위.
   FeedbackItem? _worst(List<FeedbackItem> items) {
     if (items.isEmpty) return null;
-    return items
-        .reduce((a, b) => a.currentScore <= b.currentScore ? a : b);
+    return items.reduce((a, b) => a.currentScore <= b.currentScore ? a : b);
   }
 
   // -------------------------------------------------------------------------
   // 관절별 분석(상세 피드백)
   // -------------------------------------------------------------------------
 
-  /// 종합 피드백을 관절별 상세 분석 목록으로 펼친다.
+  /// 종합 피드백을 부위별 상세 분석 목록으로 펼친다.
   ///
   /// ⚠️ 백엔드 연동 상태 ⚠️
-  ///  - 이름·현재/이전 점수·변화 상태는 종합 피드백(실제 값)에서 그대로 온다.
-  ///  - 단계별(스윙 4구간) 점수 그래프는 서버 phases(z_score)를 환산한 실제 값.
-  ///    코치 문장·포인트는 아직 규칙 기반 임시 문구라, 백엔드 LLM 문장이
-  ///    생기면 이 부분을 교체한다.
-  List<JointAnalysis> buildJointAnalyses(OverallFeedback feedback) {
-    final list = <JointAnalysis>[];
-    for (var i = 0; i < feedback.items.length; i++) {
-      final item = feedback.items[i];
+  ///  - 이름·점수·세부 항목(각도 그래프/임팩트/움직임 폭)은 서버 실제 값.
+  ///  - 코치 문장·포인트는 아직 규칙 기반 임시 문구(백엔드 LLM 문장이 생기면 교체).
+  List<PartAnalysis> buildPartAnalyses(OverallFeedback feedback) {
+    final list = <PartAnalysis>[];
+    for (final item in feedback.items) {
       final status = _statusOf(item, isFirst: feedback.isFirst);
-      final hasPrev = item.previousScore != null;
       final needWork =
           status == JointStatus.worsened || status == JointStatus.proBad;
-      list.add(JointAnalysis(
+      list.add(PartAnalysis(
+        key: item.key,
         label: item.label,
         part: item.part,
+        isLeft: item.label.contains('왼'),
         status: status,
         currentScore: item.currentScore,
         previousScore: item.previousScore,
-        // 서버 구간 점수가 있으면 실제 값을, 없으면(샘플 등) 임시로 채운다.
-        currentPhaseScores:
-            item.phaseScores ?? _phaseScores(item.currentScore, seed: i),
-        previousPhaseScores:
-            hasPrev ? _phaseScores(item.previousScore!, seed: i + 7) : null,
+        reliability: item.reliability,
+        features: item.features,
         summary: _jointSummary(item, status),
         coachComment: _jointCoach(item, status),
         pointsTitle: needWork ? '개선 포인트' : '유지 포인트',
@@ -195,8 +282,8 @@ class FeedbackRepository {
     return list;
   }
 
-  /// 관절 상태를 정한다.
-  ///  - 첫 피드백([isFirst]): 비교 대상이 없으니 프로 기준(level) 대비로
+  /// 부위 상태를 정한다.
+  ///  - 첫 피드백([isFirst]): 비교 대상이 없으니 부위 점수(level) 대비로
   ///    "잘함([proGood]) / 개선 필요([proBad])" 를 나눈다.
   ///  - 반복 피드백: 이전 대비 증감으로 개선/개선 필요/변화 없음을 나눈다.
   JointStatus _statusOf(FeedbackItem item, {required bool isFirst}) {
@@ -209,17 +296,6 @@ class FeedbackRepository {
     if (delta > band) return JointStatus.improved;
     if (delta < -band) return JointStatus.worsened;
     return JointStatus.unchanged;
-  }
-
-  /// 기준 점수 주변으로 구간별 점수를 만든다. (임시: 그래프 모양만 자연스럽게)
-  /// 서버 구간 점수가 없는 경우(반복 피드백 샘플 등)에만 폴백으로 쓴다.
-  List<int> _phaseScores(int base, {required int seed}) {
-    // 구간마다 적용할 가감 패턴(준비·로딩·스윙·팔로우스루). 스윙 구간이 가장 높게.
-    const wiggle = [-5, -2, 6, -4];
-    return [
-      for (var p = 0; p < wiggle.length; p++)
-        (base + wiggle[p] + ((seed + p) % 3 - 1) * 2).clamp(0, 100),
-    ];
   }
 
   String _jointSummary(FeedbackItem item, JointStatus status) {
@@ -241,7 +317,7 @@ class FeedbackRepository {
             '스윙 중 각도가 기준 스윙과 가깝게 유지되고 있습니다.';
       case JointStatus.proBad:
         return '${item.label}의 움직임이 프로 선수 기준과 다소 차이가 있어요.\n'
-            '스윙 중 각도가 기준 스윙과 차이를 보이니 더 살펴보면 좋아요.';
+            '${item.description}';
     }
   }
 
@@ -264,22 +340,31 @@ class FeedbackRepository {
             '지금의 안정적인 각도를 그대로 유지해 보세요.';
       case JointStatus.proBad:
         return '${item.label}의 움직임이 프로 선수 기준과 다소 차이가 있어요.\n'
-            '스윙 구간에서 각도가 기준보다 일찍 무너지지 않도록 집중해 보세요.';
+            '아래 세부 항목에서 기준과 차이가 큰 부분을 집중해 보세요.';
     }
   }
 
   List<String> _jointPoints(FeedbackItem item, JointStatus status) {
+    // 기준과 차이가 큰 세부 항목을 포인트로 뽑는다(임시: 규칙 기반 문장).
+    final bad = item.features.where((f) => f.level != 'good').toList();
     switch (status) {
       case JointStatus.worsened:
+      case JointStatus.proBad:
+        if (bad.isNotEmpty) {
+          return [
+            for (final f in bad.take(3))
+              _directionWord(f.direction) == null
+                  ? '${f.name}이(가) 기준 스윙과 차이가 있어요.'
+                  : '${f.name}이(가) 기준보다 ${_directionWord(f.direction)} 편이에요.',
+          ];
+        }
         return [
-          '스윙 구간까지 각도를 유지해 보세요.',
-          '스윙 시 ${item.label}이(가) 몸에서 너무 일찍 떨어지지 않도록 주의하세요.',
-          '다음 스윙에서는 하체와 상체의 회전에 맞춰 자연스럽게 따라오도록 연습해 보세요.',
+          '스윙 구간까지 ${item.label}의 각도를 유지해 보세요.',
+          '하체와 상체의 회전에 맞춰 자연스럽게 따라오도록 연습해 보세요.',
         ];
       case JointStatus.improved:
         return [
           '지금의 각도 유지 흐름을 그대로 이어가 보세요.',
-          '스윙 구간에서 ${item.label}과(와) 몸의 간격이 안정적으로 유지되고 있어요.',
           '다음 스윙에서도 하체 회전과 타이밍을 같은 리듬으로 가져가 보세요.',
         ];
       case JointStatus.unchanged:
@@ -294,20 +379,16 @@ class FeedbackRepository {
       case JointStatus.proGood:
         return [
           '지금의 안정적인 각도 흐름을 그대로 유지해 보세요.',
-          '${item.label}과(와) 몸의 간격이 기준 스윙과 잘 맞고 있어요.',
           '다음 스윙에서도 같은 리듬으로 가져가 보세요.',
-        ];
-      case JointStatus.proBad:
-        return [
-          '스윙 구간까지 ${item.label}의 각도를 유지해 보세요.',
-          '스윙 시 ${item.label}이(가) 몸에서 너무 일찍 떨어지지 않도록 주의하세요.',
-          '하체와 상체의 회전에 맞춰 자연스럽게 따라오도록 연습해 보세요.',
         ];
     }
   }
 
   /// 반복 피드백 샘플(디자인 시안과 동일한 값).
   /// 이전 스윙과 비교해 증감(→, +8/-9)과 "개선 / 개선 필요 / 유지" 를 보여준다.
+  ///
+  /// TODO(backend): 기록 저장·조회 API 가 생기면 실제 이전 스윙으로 교체.
+  /// 세부 항목/시계열도 지금은 영상 없이 UI 를 확인하기 위한 합성 샘플이다.
   OverallFeedback _sampleRepeat() {
     return OverallFeedback(
       recordedAt: DateTime(2024, 8, 8, 17, 30),
@@ -318,36 +399,113 @@ class FeedbackRepository {
           '전체적으로 하체의 안정성은 향상되었지만, 오른쪽 팔의 움직임이 이전보다 불안정해져 '
           '스윙 시 팔의 각도가 일찍 떨어지는 경향이 나타납니다. 다음 스윙에서는 오른쪽 팔의 '
           '각도를 일정하게 유지하는 데 집중해 보세요.',
-      items: const [
+      items: [
         FeedbackItem(
+          key: 'lead_leg',
           label: '왼쪽 다리',
           part: BodyPart.leg,
           currentScore: 80,
           previousScore: 72,
           description: '하체의 균형이 좋아지고, 체중 이동이 더 안정적으로 이루어졌습니다.',
+          features: [
+            _sampleFeature('앞다리 무릎 각도',
+                base: 150, amp: -18, userShift: 4, std: 6, level: 'good',
+                direction: 'higher', phaseScores: [82, 88, 90, 85]),
+            _sampleFeature('앞발 앞뒤 위치',
+                base: 20, amp: 10, userShift: 2, std: 4, level: 'good',
+                direction: 'similar', phaseScores: [84, 86, 83, 80]),
+          ],
         ),
         FeedbackItem(
+          key: 'lead_arm',
           label: '왼쪽 팔',
           part: BodyPart.arm,
           currentScore: 74,
           previousScore: 65,
           description: '테이크백에서 임팩트까지 팔 궤도가 일정해져, 상체 회전과의 연결이 부드러워졌습니다.',
+          features: [
+            _sampleFeature('앞팔 팔꿈치 각도',
+                base: 120, amp: 25, userShift: 8, std: 9, level: 'caution',
+                direction: 'higher', phaseScores: [80, 76, 70, 74]),
+            _sampleFeature('손 높이',
+                base: -10, amp: 30, userShift: -6, std: 7, level: 'good',
+                direction: 'lower', phaseScores: [82, 85, 81, 78]),
+          ],
         ),
         FeedbackItem(
+          key: 'rear_arm',
           label: '오른쪽 팔',
           part: BodyPart.arm,
           currentScore: 61,
           previousScore: 70,
           description: '스윙 시 오른쪽 팔의 움직임이 이전보다 다소 불안정해졌습니다.',
+          features: [
+            _sampleFeature('뒷팔 팔꿈치 각도',
+                base: 95, amp: 35, userShift: -22, std: 10, level: 'warning',
+                direction: 'lower', phaseScores: [68, 60, 52, 58]),
+          ],
         ),
         FeedbackItem(
+          key: 'torso',
           label: '몸통',
           part: BodyPart.torso,
           currentScore: 76,
           previousScore: 75,
           description: '큰 변화 없이 안정적인 움직임을 유지하고 있습니다.',
+          features: [
+            _sampleFeature('상체 기울기',
+                base: 8, amp: 14, userShift: 3, std: 4, level: 'good',
+                direction: 'higher', phaseScores: [78, 80, 77, 75]),
+            _sampleFeature('어깨 라인 기울기',
+                base: 0, amp: 18, userShift: -4, std: 5, level: 'caution',
+                direction: 'lower', phaseScores: [76, 74, 72, 70]),
+          ],
         ),
       ],
+    );
+  }
+
+  /// 영상 없이 UI 를 확인하기 위한 합성 피처(그래프/수치 포함).
+  /// 기준 곡선은 부드러운 호(base + amp·sin)로, 내 스윙은 거기에 서서히 벌어지게 만든다.
+  FeatureAnalysis _sampleFeature(
+    String name, {
+    required double base,
+    required double amp,
+    required double userShift,
+    required double std,
+    required String level,
+    required String direction,
+    required List<int> phaseScores,
+  }) {
+    const n = 80; // 구간 4개 × 20등분
+    double r1(double v) => (v * 10).roundToDouble() / 10;
+    final series = <SeriesSample>[
+      for (var i = 0; i < n; i++)
+        () {
+          final t = i / (n - 1);
+          final ref = base + amp * sin(pi * t);
+          // 스윙 후반으로 갈수록 기준과 더 벌어지게.
+          final user = ref + userShift * (0.3 + 0.7 * t);
+          return SeriesSample(
+              user: r1(user), reference: r1(ref), referenceStd: std);
+        }(),
+    ];
+    return FeatureAnalysis(
+      key: name,
+      name: name,
+      level: level,
+      direction: direction,
+      unit: 'deg',
+      impact: Measure(
+          user: r1(base + amp + userShift),
+          reference: r1(base + amp),
+          diff: r1(userShift)),
+      rangeOfMotion: Measure(
+          user: r1(amp.abs() + userShift.abs()),
+          reference: r1(amp.abs()),
+          diff: r1(userShift.abs())),
+      series: series,
+      phaseScores: phaseScores,
     );
   }
 }

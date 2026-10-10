@@ -55,8 +55,14 @@ class AnalysisApi {
   /// [GET] /api/analyses/{id}
   ///   → {analysis_id, status, stage, created_at, finished_at, input, error, result}
   /// status 는 queued / running / done / failed. result 는 done 일 때만 채워진다.
-  Future<Map<String, dynamic>> getAnalysis(String analysisId) async {
-    final res = await _get(_uri('/api/analyses/$analysisId'));
+  ///
+  /// [includeSeries] 가 true 면 관절 각도 80프레임 시계열(그래프용)도 함께 받는다.
+  Future<Map<String, dynamic>> getAnalysis(
+    String analysisId, {
+    bool includeSeries = false,
+  }) async {
+    final query = includeSeries ? '?include_series=true' : '';
+    final res = await _get(_uri('/api/analyses/$analysisId$query'));
     return _decode(res);
   }
 
@@ -68,10 +74,11 @@ class AnalysisApi {
     String analysisId, {
     Duration interval = const Duration(seconds: 2),
     Duration timeout = const Duration(minutes: 2),
+    bool includeSeries = false,
   }) async {
     final deadline = DateTime.now().add(timeout);
     while (true) {
-      final body = await getAnalysis(analysisId);
+      final body = await getAnalysis(analysisId, includeSeries: includeSeries);
       final status = body['status'] as String?;
       if (status == 'done' && body['result'] != null) {
         return body;
