@@ -1,13 +1,11 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:video_player/video_player.dart';
 
 import '../api/auth_api.dart' show ApiException;
 import '../data/feedback_repository.dart';
 import '../models/feedback.dart';
 import '../theme/app_theme.dart';
+import '../widgets/swing_video.dart';
 
 /// 종합 피드백 화면.
 ///
@@ -49,6 +47,18 @@ class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
       widget.analysisId,
       firstTime: widget.firstTime,
     );
+  }
+
+  @override
+  void didUpdateWidget(OverallFeedbackScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.analysisId != widget.analysisId ||
+        oldWidget.firstTime != widget.firstTime) {
+      _future = _repo.fetchFeedback(
+        widget.analysisId,
+        firstTime: widget.firstTime,
+      );
+    }
   }
 
   @override
@@ -118,6 +128,7 @@ class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
           }
           return _FeedbackBody(
             feedback: snapshot.data!,
+            analysisId: widget.analysisId,
             videoPath: widget.videoPath,
           );
         },
@@ -128,9 +139,14 @@ class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
 
 /// 스크롤되는 본문 + 하단 고정 버튼.
 class _FeedbackBody extends StatelessWidget {
-  const _FeedbackBody({required this.feedback, this.videoPath});
+  const _FeedbackBody({
+    required this.feedback,
+    required this.analysisId,
+    this.videoPath,
+  });
 
   final OverallFeedback feedback;
+  final String analysisId;
   final String? videoPath;
 
   @override
@@ -143,7 +159,7 @@ class _FeedbackBody extends StatelessWidget {
             children: [
               _dateLabel(feedback.recordedAt),
               const SizedBox(height: 12),
-              _VideoRow(videoPath: videoPath),
+              _VideoRow(analysisId: analysisId, videoPath: videoPath),
               const SizedBox(height: 16),
               _ScoreCard(feedback: feedback),
               const SizedBox(height: 12),
@@ -235,7 +251,9 @@ class _FeedbackBody extends StatelessWidget {
 // 상단: 날짜 아래 영상 2개
 // ---------------------------------------------------------------------------
 class _VideoRow extends StatelessWidget {
-  const _VideoRow({this.videoPath});
+  const _VideoRow({required this.analysisId, this.videoPath});
+
+  final String analysisId;
 
   final String? videoPath;
 
@@ -247,9 +265,11 @@ class _VideoRow extends StatelessWidget {
         Expanded(
           child: _ThumbFrame(
             label: '내 스윙 영상',
-            child: videoPath != null
-                ? _MySwingVideo(videoPath: videoPath!)
-                : const _PlaceholderThumb(icon: Icons.sports_baseball),
+            child: SwingVideo(
+              key: ValueKey((analysisId, videoPath)),
+              analysisId: analysisId,
+              videoPath: videoPath,
+            ),
           ),
         ),
         const SizedBox(width: 12),
@@ -305,134 +325,6 @@ class _PlaceholderThumb extends StatelessWidget {
       color: const Color(0xFFE6E6E6),
       alignment: Alignment.center,
       child: Icon(icon, size: 40, color: Colors.grey.shade400),
-    );
-  }
-}
-
-/// 실제 촬영한 스윙 영상. 탭하면 재생/일시정지한다.
-class _MySwingVideo extends StatefulWidget {
-  const _MySwingVideo({required this.videoPath});
-
-  final String videoPath;
-
-  @override
-  State<_MySwingVideo> createState() => _MySwingVideoState();
-}
-
-class _MySwingVideoState extends State<_MySwingVideo> {
-  VideoPlayerController? _controller;
-  bool _ready = false;
-
-  @override
-  void initState() {
-    super.initState();
-    final controller = VideoPlayerController.file(File(widget.videoPath));
-    _controller = controller;
-    controller
-        .initialize()
-        .then((_) {
-          if (!mounted) return;
-          controller.setLooping(true);
-          setState(() => _ready = true);
-        })
-        .catchError((_) {
-          // 초기화 실패 시 자리표시자로 둔다.
-        });
-    controller.addListener(_onTick);
-  }
-
-  void _onTick() {
-    if (mounted) setState(() {});
-  }
-
-  @override
-  void dispose() {
-    _controller?.removeListener(_onTick);
-    _controller?.dispose();
-    super.dispose();
-  }
-
-  void _toggle() {
-    final c = _controller;
-    if (c == null || !_ready) return;
-    setState(() => c.value.isPlaying ? c.pause() : c.play());
-  }
-
-  String _fmt(Duration d) {
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = _controller;
-    if (c == null || !_ready) {
-      return const _PlaceholderThumb(icon: Icons.sports_baseball);
-    }
-    final playing = c.value.isPlaying;
-    return GestureDetector(
-      onTap: _toggle,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          FittedBox(
-            fit: BoxFit.cover,
-            clipBehavior: Clip.hardEdge,
-            child: SizedBox(
-              width: c.value.size.width,
-              height: c.value.size.height,
-              child: VideoPlayer(c),
-            ),
-          ),
-          if (!playing)
-            Container(
-              width: 44,
-              height: 44,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.35),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.play_arrow,
-                color: Colors.white,
-                size: 28,
-              ),
-            ),
-          Positioned(
-            left: 8,
-            right: 8,
-            bottom: 8,
-            child: Row(
-              children: [
-                Text(
-                  _fmt(c.value.position),
-                  style: const TextStyle(color: Colors.white, fontSize: 10),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: VideoProgressIndicator(
-                    c,
-                    allowScrubbing: true,
-                    padding: EdgeInsets.zero,
-                    colors: const VideoProgressColors(
-                      playedColor: Colors.white,
-                      bufferedColor: Colors.white30,
-                      backgroundColor: Colors.white24,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  _fmt(c.value.duration),
-                  style: const TextStyle(color: Colors.white, fontSize: 10),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

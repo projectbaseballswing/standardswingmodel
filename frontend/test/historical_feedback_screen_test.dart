@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -15,6 +16,7 @@ import 'package:swing_analysis/route_observer.dart';
 import 'package:swing_analysis/screens/joint_analysis_screen.dart';
 import 'package:swing_analysis/screens/overall_feedback_screen.dart';
 import 'package:swing_analysis/screens/swing_list_screen.dart';
+import 'package:swing_analysis/widgets/swing_video.dart';
 
 import 'feedback_fixture.dart';
 
@@ -33,6 +35,50 @@ void setView(WidgetTester tester) {
 
 void main() {
   tearDown(Session.instance.clear);
+
+  testWidgets(
+    'changing analysis ID reloads feedback and replaces the video source',
+    (tester) async {
+      setView(tester);
+      final pending = Completer<http.Response>();
+      final requests = <Uri>[];
+      final repository = FeedbackRepository(
+        api: AnalysisApi(
+          client: MockClient((request) async {
+            requests.add(request.url);
+            return request.url.path.endsWith('/new')
+                ? pending.future
+                : jsonResponse(storedAnalysis());
+          }),
+        ),
+      );
+      addTearDown(repository.dispose);
+      Future<void> show(String id) => tester.pumpWidget(
+        MaterialApp(
+          home: OverallFeedbackScreen(analysisId: id, repository: repository),
+        ),
+      );
+      await show('old');
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<SwingVideo>(find.byType(SwingVideo)).analysisId,
+        'old',
+      );
+      await show('new');
+      await tester.pump();
+      expect(find.byType(SwingVideo), findsNothing);
+      pending.complete(jsonResponse(storedAnalysis()));
+      await tester.pumpAndSettle();
+      final video = tester.widget<SwingVideo>(find.byType(SwingVideo));
+      expect(video.analysisId, 'new');
+      expect(video.videoPath, isNull);
+      expect(find.text('탭하여 재생'), findsOneWidget);
+      expect(requests.map((uri) => uri.path), [
+        '/api/analyses/old',
+        '/api/analyses/new',
+      ]);
+    },
+  );
 
   testWidgets(
     'completed list entry opens actual saved feedback and joint series without video requests',

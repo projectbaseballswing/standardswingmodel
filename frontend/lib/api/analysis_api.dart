@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -12,11 +13,15 @@ class AnalysisCreated {
   final String status; // queued / running 등
 }
 
-/// 스윙 영상 분석 관련 API.
-///
-/// 백엔드는 이미 아래 엔드포인트를 제공한다(백엔드 수정 불필요):
-///   POST /api/analyses        (multipart: video, handedness, user_id, recorded_at) → {analysis_id, status}
-///   GET  /api/analyses/{id}   → 분석 결과(피드백)
+/// 메모리에서만 사용하는 영상 접근 URL. 사용자 소유권 인증을 의미하지 않는다.
+class AnalysisVideoUrl {
+  const AnalysisVideoUrl({required this.url, required this.expiresIn});
+
+  final Uri url;
+  final int expiresIn;
+}
+
+/// 스윙 업로드, 분석 결과 및 저장된 원본 영상 URL 조회 API.
 class AnalysisApi {
   AnalysisApi({http.Client? client}) : _client = client ?? http.Client();
 
@@ -69,6 +74,50 @@ class AnalysisApi {
     final query = includeSeries ? '?include_series=true' : '';
     final res = await _get(_uri('/api/analyses/$analysisId$query'));
     return _decode(res);
+  }
+
+  /// 저장된 원본 영상의 임시 URL. 오류에 서버 본문이나 토큰을 노출하지 않는다.
+  Future<AnalysisVideoUrl> getVideoUrl(String analysisId) async {
+    http.Response res;
+    try {
+      res = await _get(
+        _uri('/api/analyses/${Uri.encodeComponent(analysisId)}/video'),
+      ).timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      throw ApiException('영상 요청 시간이 초과됐습니다. 네트워크를 확인하고 다시 시도해주세요.');
+    }
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw ApiException(switch (res.statusCode) {
+        404 => '저장된 영상이 없습니다.',
+        409 => '영상 업로드 중입니다. 잠시 후 다시 시도해주세요.',
+        502 => '영상 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.',
+        503 => '영상 저장소 설정 문제로 재생할 수 없습니다.',
+        _ => '영상 정보를 불러오지 못했습니다. 다시 시도해주세요.',
+      });
+    }
+    try {
+      final body = jsonDecode(utf8.decode(res.bodyBytes));
+      if (body is! Map<String, dynamic> ||
+          body['analysis_id'] != analysisId ||
+          body['url'] is! String ||
+          body['expires_in'] is! int) {
+        throw const FormatException();
+      }
+      final url = Uri.tryParse(body['url'] as String);
+      final expiresIn = body['expires_in'] as int;
+      if (url == null ||
+          url.scheme != 'https' ||
+          url.host.isEmpty ||
+          url.userInfo.isNotEmpty ||
+          url.hasFragment ||
+          expiresIn < 1 ||
+          expiresIn > 604800) {
+        throw const FormatException();
+      }
+      return AnalysisVideoUrl(url: url, expiresIn: expiresIn);
+    } catch (_) {
+      throw ApiException('영상 URL 응답이 올바르지 않습니다. 다시 시도해주세요.');
+    }
   }
 
   /// 분석이 끝날 때까지(또는 실패/시간초과까지) 주기적으로 조회한다.
