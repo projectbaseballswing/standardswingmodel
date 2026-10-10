@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
-from api import login, me, register
+from api import login, me, register, swings
 from api.analyses import lifespan
 from api.analyses import router as analyses_router
 
@@ -53,6 +53,9 @@ app.include_router(me.router)
 
 # 스윙 피드백 (/api/analyses, /api/health)
 app.include_router(analyses_router)
+
+# 회원별 스윙 기록 목록 (달력/목록 화면용)
+app.include_router(swings.router)
 
 
 @app.exception_handler(SQLAlchemyError)

@@ -243,6 +243,21 @@ class Analysis(BaseModel):
     result: Optional[AnalysisReport] = None
 
 
+class SwingListItem(BaseModel):
+    analysis_id: str
+    recorded_at: datetime = Field(description="표시 시각. 촬영 시각이 없으면 서버에 등록된 시각을 사용")
+    status: JobStatus
+    score: Optional[float] = Field(None, description="분석이 done인 경우의 종합 점수. 미완료/실패/미제공이면 null")
+    thumbnail_url: Optional[str] = Field(None, description="썸네일 미구현: 현재 null")
+
+
+class SwingListResponse(BaseModel):
+    user_id: str
+    year_month: Optional[str] = Field(None, description="요청한 YYYY-MM. 전체 조회 시 null")
+    count: int
+    items: List[SwingListItem]
+
+
 class VideoURL(BaseModel):
     analysis_id: str
     url: str
