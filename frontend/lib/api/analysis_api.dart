@@ -15,7 +15,7 @@ class AnalysisCreated {
 /// 스윙 영상 분석 관련 API.
 ///
 /// 백엔드는 이미 아래 엔드포인트를 제공한다(백엔드 수정 불필요):
-///   POST /api/analyses        (multipart: video, handedness) → {analysis_id, status}
+///   POST /api/analyses        (multipart: video, handedness, user_id, recorded_at) → {analysis_id, status}
 ///   GET  /api/analyses/{id}   → 분석 결과(피드백)
 class AnalysisApi {
   AnalysisApi({http.Client? client}) : _client = client ?? http.Client();
@@ -27,12 +27,17 @@ class AnalysisApi {
   /// 녹화한 스윙 영상을 업로드해 분석 작업을 등록한다.
   ///
   /// [videoPath] 로컬 영상 파일 경로, [isLeft] 좌타 여부.
+  /// [userId] 로그인한 계정 ID, [recordedAt] 등록 시각(현재는 업로드 시각).
   Future<AnalysisCreated> uploadSwingVideo({
     required String videoPath,
     required bool isLeft,
+    required String userId,
+    required DateTime recordedAt,
   }) async {
     final request = http.MultipartRequest('POST', _uri('/api/analyses'))
       ..fields['handedness'] = isLeft ? 'left' : 'right'
+      ..fields['user_id'] = userId
+      ..fields['recorded_at'] = recordedAt.toUtc().toIso8601String()
       ..files.add(await http.MultipartFile.fromPath('video', videoPath));
 
     http.Response res;

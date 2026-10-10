@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 
 import '../api/analysis_api.dart';
 import '../api/auth_api.dart' show ApiException;
+import '../data/session.dart';
 import '../theme/app_theme.dart';
 
 /// 스윙 영상 촬영 화면.
@@ -349,11 +350,22 @@ class _ReviewScreenState extends State<_ReviewScreen> {
   }
 
   Future<void> _upload() async {
+    final userId = Session.instance.userId;
+    if (userId == null || userId.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('로그인한 뒤 영상을 업로드해주세요.')),
+      );
+      return;
+    }
+
     setState(() => _uploading = true);
     try {
       final created = await _api.uploadSwingVideo(
         videoPath: widget.videoPath,
         isLeft: _isLeft,
+        userId: userId,
+        // 현재는 업로드 시각 사용. 실제 촬영 시각은 미디어 메타데이터 연결이 필요하다.
+        recordedAt: DateTime.now(),
       );
       if (!mounted) return;
       // 리뷰(중첩 MaterialPageRoute)만 닫고, 촬영 화면은 GoRouter 로 피드백으로
