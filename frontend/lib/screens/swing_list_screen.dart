@@ -11,7 +11,7 @@ import '../theme/app_theme.dart';
 /// 스윙 목록 화면 (로그인 후 첫 화면).
 ///
 /// 달력에서 촬영한 날짜에 썸네일을 보여주고, 날짜를 선택하면 아래에 그날의
-/// 스윙 영상들이 나온다. 과거 피드백 화면 연결은 다음 작업이다.
+/// 스윙 영상들이 나온다. 완료된 기록은 저장된 피드백을 조회한다.
 class SwingListScreen extends StatefulWidget {
   const SwingListScreen({super.key, this.repository});
 
@@ -125,10 +125,14 @@ class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
         ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
 
   void _openFeedback(Swing swing) {
+    if (swing.status == 'done') {
+      context.push('/analyses/${Uri.encodeComponent(swing.analysisId)}');
+      return;
+    }
     final message = switch (swing.status) {
       'queued' || 'processing' => '분석이 진행 중입니다. 잠시 후 다시 확인해주세요.',
       'failed' => '분석에 실패한 기록입니다. 영상을 다시 업로드해주세요.',
-      _ => '과거 스윙의 분석 결과 조회는 준비 중입니다.',
+      _ => '분석 상태를 확인할 수 없습니다.',
     };
     ScaffoldMessenger.of(
       context,

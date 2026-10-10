@@ -85,12 +85,18 @@ class AnalysisApi {
     while (true) {
       final body = await getAnalysis(analysisId, includeSeries: includeSeries);
       final status = body['status'] as String?;
-      if (status == 'done' && body['result'] != null) {
+      if (status == 'done') {
+        if (body['result'] == null) {
+          throw ApiException('저장된 분석 결과가 없습니다.');
+        }
         return body;
       }
       if (status == 'failed') {
         final err = body['error'];
-        throw ApiException(err is String ? err : '분석에 실패했어요.');
+        final message = err is Map ? err['message'] : err;
+        throw ApiException(
+          message is String ? '분석에 실패했습니다. $message' : '분석에 실패했어요.',
+        );
       }
       if (DateTime.now().isAfter(deadline)) {
         throw ApiException('분석이 예상보다 오래 걸려요. 잠시 후 다시 시도해주세요.');
@@ -120,7 +126,8 @@ class AnalysisApi {
     }
     final detail = body['detail'];
     throw ApiException(
-        detail is String ? detail : '영상을 업로드하지 못했습니다. (${res.statusCode})');
+      detail is String ? detail : '영상을 업로드하지 못했습니다. (${res.statusCode})',
+    );
   }
 
   void dispose() => _client.close();

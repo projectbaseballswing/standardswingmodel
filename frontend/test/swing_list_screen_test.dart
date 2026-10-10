@@ -46,12 +46,32 @@ Future<void> showList(
   Size size = const Size(430, 900),
 }) async {
   configureView(tester, size: size);
-  await tester.pumpWidget(
-    MaterialApp(
-      navigatorObservers: [swingRouteObserver],
-      home: SwingListScreen(repository: repository),
-    ),
+  final router = GoRouter(
+    initialLocation: '/swings',
+    observers: [swingRouteObserver],
+    routes: [
+      GoRoute(
+        path: '/swings',
+        builder: (_, _) => SwingListScreen(repository: repository),
+      ),
+      GoRoute(
+        path: '/analyses/:id',
+        builder: (context, state) => Scaffold(
+          body: Column(
+            children: [
+              const Text('stored feedback'),
+              TextButton(
+                onPressed: () => context.pop(),
+                child: const Text('back to calendar'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ],
   );
+  addTearDown(router.dispose);
+  await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 }
 
 void configureView(WidgetTester tester, {Size size = const Size(430, 900)}) {
@@ -79,7 +99,7 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('10시 0분'));
     await tester.pump();
-    expect(find.text('과거 스윙의 분석 결과 조회는 준비 중입니다.'), findsOneWidget);
+    expect(find.text('stored feedback'), findsOneWidget);
   });
 
   testWidgets(
@@ -130,7 +150,7 @@ void main() {
   );
 
   testWidgets(
-    'records are grouped by local day, decimals are visible, history shows guidance',
+    'records are grouped by local day, decimals are visible, completed history opens',
     (tester) async {
       final now = DateTime.now();
       final repository = repositoryWith(
@@ -147,8 +167,10 @@ void main() {
       expect(find.text('완료 · 77.3점'), findsOneWidget);
       expect(find.byIcon(Icons.play_circle_outline), findsOneWidget);
       await tester.tap(find.text('16시 30분'));
-      await tester.pump();
-      expect(find.text('과거 스윙의 분석 결과 조회는 준비 중입니다.'), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(find.text('stored feedback'), findsOneWidget);
+      await tester.tap(find.text('back to calendar'));
+      await tester.pumpAndSettle();
       expect(find.byType(SwingListScreen), findsOneWidget);
       await tester.tap(find.text('2'));
       await tester.pump();

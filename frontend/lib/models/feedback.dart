@@ -6,9 +6,9 @@
 /// 세부 항목([FeatureAnalysis]: 팔꿈치 각도, 손 높이 등)이 여러 개 들어 있다.
 ///
 /// 한 화면이 두 상태를 모두 표현한다.
-///  - 첫 피드백   : 비교할 이전 스윙이 없다. [previousScore] 가 null.
+///  - 비교 없음  : [previousScore] 가 null. 첫 스윙이라는 의미는 아니다.
 ///                  부위는 프로 기준 대비 점수로 "잘함 / 개선 필요" 를 나눈다.
-///  - 반복 피드백 : 이전 스윙과 비교한다(아직 샘플). [previousScore] 로 증감을
+///  - 비교 있음  : 실제 이전 스윙과 비교한 경우만 [previousScore] 로 증감을
 ///                  보여주고 "개선 / 개선 필요 / 유지" 로 나눈다.
 library;
 
@@ -47,7 +47,7 @@ class FeedbackItem {
   /// 설명 문구(2줄 내외).
   final String description;
 
-  /// 이전 점수. 첫 피드백이면 null → 증감 화살표를 숨긴다.
+  /// 실제 비교한 이전 점수. 비교하지 않았으면 null → 증감 화살표를 숨긴다.
   final int? previousScore;
 
   /// 부위 수준. 'good' | 'caution' | 'warning'.
@@ -60,7 +60,7 @@ class FeedbackItem {
   /// 이 부위를 이루는 세부 항목(피처) 목록.
   final List<FeatureAnalysis> features;
 
-  /// 이전 대비 증감. 첫 피드백이면 null.
+  /// 이전 대비 증감. 비교하지 않았으면 null.
   int? get delta =>
       previousScore == null ? null : currentScore - previousScore!;
 }
@@ -175,7 +175,7 @@ enum SwingPhase {
 ///  - [unchanged] : 변화가 거의 없음(회색).
 ///  - [limited]   : 비교할 이전 스윙이 없어 평가 제한(연한 회색).
 ///
-/// 첫 피드백(비교 대상 없음)에서는 프로 기준 대비로:
+/// 이전 스윙과 비교하지 않았으면 프로 기준 대비로:
 ///  - [proGood]   : 프로 기준에 잘 맞음 → "잘함"(초록).
 ///  - [proBad]    : 프로 기준과 차이 있음 → "개선 필요"(빨강).
 enum JointStatus { improved, worsened, unchanged, limited, proGood, proBad }
@@ -270,13 +270,13 @@ class OverallFeedback {
   /// 부위별 피드백 목록.
   final List<FeedbackItem> items;
 
-  /// 이전 전체 점수. 첫 피드백이면 null.
+  /// 실제 비교한 이전 전체 점수. 비교하지 않았으면 null.
   final int? previousTotalScore;
 
-  /// 비교할 이전 스윙이 없으면(=첫 피드백) true.
-  bool get isFirst => previousTotalScore == null;
+  /// 실제 이전 스윙과 비교한 점수가 있는지 여부. 촬영 순서와는 무관하다.
+  bool get hasComparison => previousTotalScore != null;
 
-  /// 전체 점수 증감. 첫 피드백이면 null.
+  /// 전체 점수 증감. 비교하지 않았으면 null.
   int? get totalDelta =>
       previousTotalScore == null ? null : totalScore - previousTotalScore!;
 }
