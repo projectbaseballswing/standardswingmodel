@@ -1,27 +1,34 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../api/auth_api.dart' show ApiException;
 import '../data/session.dart';
 import '../data/swing_repository.dart';
 import '../models/swing.dart';
+import '../route_observer.dart';
 import '../theme/app_theme.dart';
 
 /// 스윙 목록 화면 (로그인 후 첫 화면).
 ///
 /// 달력에서 촬영한 날짜에 썸네일을 보여주고, 날짜를 선택하면 아래에 그날의
-/// 스윙 영상들이 나온다. 영상을 누르면 피드백 화면으로 이동한다(다음 작업).
+/// 스윙 영상들이 나온다. 과거 피드백 화면 연결은 다음 작업이다.
 class SwingListScreen extends StatefulWidget {
-  const SwingListScreen({super.key});
+  const SwingListScreen({super.key, this.repository});
+
+  final SwingRepository? repository;
 
   @override
   State<SwingListScreen> createState() => _SwingListScreenState();
 }
 
-class _SwingListScreenState extends State<SwingListScreen> {
-  final _repository = SwingRepository();
+class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
+  late final SwingRepository _repository;
+  ModalRoute<dynamic>? _route;
+  int _requestId = 0;
 
   List<Swing> _swings = [];
   bool _loading = true;
+  String? _error;
 
   // 달력에 표시할 기준 달과, 현재 선택된 날짜.
   late DateTime _month;
@@ -33,23 +40,76 @@ class _SwingListScreenState extends State<SwingListScreen> {
   @override
   void initState() {
     super.initState();
+    _repository = widget.repository ?? SwingRepository();
     final now = DateTime.now();
     _month = DateTime(now.year, now.month);
     _load();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != _route) {
+      swingRouteObserver.unsubscribe(this);
+      _route = route;
+      if (route != null) swingRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didPopNext() {
+    // 카메라 push의 Future는 pushReplacement 시점에 끝날 수 있으므로,
+    // 실제 결과 화면에서 목록으로 돌아왔을 때 다시 조회한다.
+    _load();
+  }
+
+  @override
+  void dispose() {
+    swingRouteObserver.unsubscribe(this);
+    if (widget.repository == null) _repository.dispose();
+    super.dispose();
+  }
+
+  DateTime _defaultDay(DateTime month) {
+    final now = DateTime.now();
+    return now.year == month.year && now.month == month.month
+        ? DateTime(now.year, now.month, now.day)
+        : month;
+  }
+
   Future<void> _load() async {
-    final swings = await _repository.fetchMySwings();
-    if (!mounted) return;
+    final requestId = ++_requestId;
+    final month = _month;
     setState(() {
-      _swings = swings;
-      _loading = false;
-      // 스윙이 있는 첫 날짜를 기본 선택(없으면 오늘).
-      _selectedDay = swings.isNotEmpty
-          ? DateTime(swings.first.recordedAt.year,
-              swings.first.recordedAt.month, swings.first.recordedAt.day)
-          : DateTime.now();
+      _loading = true;
+      _error = null;
+      _swings = [];
+      _selectedDay = _defaultDay(month);
     });
+    try {
+      final swings = await _repository.fetchMySwings(
+        year: month.year,
+        month: month.month,
+      );
+      if (!mounted || requestId != _requestId) return;
+      setState(() {
+        _swings = swings;
+        _loading = false;
+        if (swings.isNotEmpty) {
+          final latest = swings.first.recordedAt;
+          if (latest.year == month.year && latest.month == month.month) {
+            _selectedDay = DateTime(latest.year, latest.month, latest.day);
+          }
+        }
+      });
+    } on ApiException catch (e) {
+      if (!mounted || requestId != _requestId) return;
+      setState(() {
+        _loading = false;
+        _error = e.message;
+      });
+    }
   }
 
   // 이전/다음 달로 이동. delta: -1 = 이전 달, +1 = 다음 달.
@@ -57,6 +117,7 @@ class _SwingListScreenState extends State<SwingListScreen> {
     setState(() {
       _month = DateTime(_month.year, _month.month + delta);
     });
+    _load();
   }
 
   List<Swing> _swingsOn(DateTime day) =>
@@ -64,20 +125,34 @@ class _SwingListScreenState extends State<SwingListScreen> {
         ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
 
   void _openFeedback(Swing swing) {
-    // 목록에서 연 스윙은 이전 스윙과 비교하는 반복 피드백으로 본다.
-    context.push('/analyses/${swing.analysisId}');
+    final message = switch (swing.status) {
+      'queued' || 'processing' => '분석이 진행 중입니다. 잠시 후 다시 확인해주세요.',
+      'failed' => '분석에 실패한 기록입니다. 영상을 다시 업로드해주세요.',
+      _ => '과거 스윙의 분석 결과 조회는 준비 중입니다.',
+    };
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
     final selected = _selectedDay ?? DateTime.now();
     final daySwings = _swingsOn(selected);
+    final days = DateTime(_month.year, _month.month + 1, 0).day;
+    final rows = ((_month.weekday % 7 + days) / 7).ceil();
+    // 64px 달력 셀과 기존 배치를 유지하되 작은 화면에서도 상태/재시도를 볼 수 있게 한다.
+    final minimumHeight = rows * 68.0 + 340;
 
     return Scaffold(
       body: SafeArea(
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : Column(
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: SizedBox(
+              height: constraints.maxHeight < minimumHeight
+                  ? minimumHeight
+                  : constraints.maxHeight,
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _header(),
@@ -86,12 +161,31 @@ class _SwingListScreenState extends State<SwingListScreen> {
                   const Divider(height: 1),
                   _calendarGrid(),
                   const Divider(height: 1),
-                  Expanded(child: _daySection(selected, daySwings)),
+                  Expanded(child: _listContent(selected, daySwings)),
                 ],
               ),
+            ),
+          ),
+        ),
       ),
       bottomNavigationBar: _bottomNav(),
     );
+  }
+
+  Widget _listContent(DateTime selected, List<Swing> daySwings) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_error!, textAlign: TextAlign.center),
+            TextButton(onPressed: _load, child: const Text('다시 시도')),
+          ],
+        ),
+      );
+    }
+    return _daySection(selected, daySwings);
   }
 
   // 상단: 프로필 아바타 + "N월" + 목록/추가 아이콘.
@@ -162,14 +256,17 @@ class _SwingListScreenState extends State<SwingListScreen> {
             children: [
               // 연도는 올해가 아닐 때만 보조로 표시.
               if (_month.year != DateTime.now().year) ...[
-                Text('${_month.year}년 ',
-                    style: const TextStyle(
-                        fontSize: 15, color: AppColors.hint)),
+                Text(
+                  '${_month.year}년 ',
+                  style: const TextStyle(fontSize: 15, color: AppColors.hint),
+                ),
               ],
               Text(
                 '${_month.month}월',
                 style: const TextStyle(
-                    fontSize: 24, fontWeight: FontWeight.w700),
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.chevron_left),
@@ -186,10 +283,7 @@ class _SwingListScreenState extends State<SwingListScreen> {
                   // TODO(next): 리스트(목록형) 보기 전환.
                 },
               ),
-              IconButton(
-                icon: const Icon(Icons.add),
-                onPressed: _openCamera,
-              ),
+              IconButton(icon: const Icon(Icons.add), onPressed: _openCamera),
             ],
           ),
         ],
@@ -203,14 +297,19 @@ class _SwingListScreenState extends State<SwingListScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Row(
         children: labels
-            .map((d) => Expanded(
-                  child: Center(
-                    child: Text(d,
-                        style: const TextStyle(
-                            color: AppColors.hint,
-                            fontWeight: FontWeight.w600)),
+            .map(
+              (d) => Expanded(
+                child: Center(
+                  child: Text(
+                    d,
+                    style: const TextStyle(
+                      color: AppColors.hint,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ))
+                ),
+              ),
+            )
             .toList(),
       ),
     );
@@ -247,7 +346,8 @@ class _SwingListScreenState extends State<SwingListScreen> {
   Widget _dayCell(DateTime date, int dayNum) {
     final swings = _swingsOn(date);
     final hasSwing = swings.isNotEmpty;
-    final isSelected = _selectedDay != null &&
+    final isSelected =
+        _selectedDay != null &&
         date.year == _selectedDay!.year &&
         date.month == _selectedDay!.month &&
         date.day == _selectedDay!.day;
@@ -273,8 +373,11 @@ class _SwingListScreenState extends State<SwingListScreen> {
                   borderRadius: BorderRadius.circular(6),
                   child: Container(
                     color: AppColors.fieldFill,
-                    child: const Icon(Icons.sports_baseball,
-                        color: AppColors.hint, size: 20),
+                    child: const Icon(
+                      Icons.sports_baseball,
+                      color: AppColors.hint,
+                      size: 20,
+                    ),
                   ),
                 ),
               ),
@@ -288,7 +391,9 @@ class _SwingListScreenState extends State<SwingListScreen> {
                 alignment: Alignment.center,
                 decoration: hasSwing
                     ? const BoxDecoration(
-                        color: AppColors.primary, shape: BoxShape.circle)
+                        color: AppColors.primary,
+                        shape: BoxShape.circle,
+                      )
                     : null,
                 child: Text(
                   '$dayNum',
@@ -313,15 +418,20 @@ class _SwingListScreenState extends State<SwingListScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('${day.month}월 ${day.day}일',
-              style:
-                  const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          Text(
+            '${day.month}월 ${day.day}일',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 12),
           Expanded(
             child: daySwings.isEmpty
-                ? const Center(
-                    child: Text('이 날 촬영한 스윙이 없습니다.',
-                        style: TextStyle(color: AppColors.hint)),
+                ? Center(
+                    child: Text(
+                      _swings.isEmpty
+                          ? '이번 달의 스윙 기록이 없습니다.'
+                          : '이 날 촬영한 스윙이 없습니다.',
+                      style: TextStyle(color: AppColors.hint),
+                    ),
                   )
                 : ListView.separated(
                     scrollDirection: Axis.horizontal,
@@ -353,16 +463,43 @@ class _SwingListScreenState extends State<SwingListScreen> {
                 color: AppColors.fieldFill,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.play_circle_outline,
-                  color: AppColors.hint, size: 32),
+              child: swing.thumbnailUrl == null
+                  ? _thumbnailPlaceholder()
+                  : ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        swing.thumbnailUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) =>
+                            _thumbnailPlaceholder(),
+                      ),
+                    ),
             ),
           ),
           const SizedBox(height: 6),
           Text(swing.timeLabel, style: const TextStyle(fontSize: 13)),
+          Text(
+            _statusLabel(swing),
+            style: const TextStyle(fontSize: 12, color: AppColors.hint),
+          ),
         ],
       ),
     );
   }
+
+  Widget _thumbnailPlaceholder() =>
+      const Icon(Icons.play_circle_outline, color: AppColors.hint, size: 32);
+
+  String _statusLabel(Swing swing) => switch (swing.status) {
+    'queued' => '분석 대기 중',
+    'processing' => '분석 중',
+    'failed' => '분석 실패',
+    'done' =>
+      swing.score == null
+          ? '분석 완료'
+          : '완료 · ${swing.score!.toStringAsFixed(1)}점',
+    _ => '상태 확인 중',
+  };
 
   // 스윙 촬영 화면으로 이동.
   void _openCamera() => context.push('/swings/camera');
@@ -387,11 +524,11 @@ class _SwingListScreenState extends State<SwingListScreen> {
       },
       items: const [
         BottomNavigationBarItem(
-            icon: Icon(Icons.videocam_outlined), label: '스윙 촬영'),
-        BottomNavigationBarItem(
-            icon: Icon(Icons.show_chart), label: '스윙 추이'),
-        BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline), label: '프로필'),
+          icon: Icon(Icons.videocam_outlined),
+          label: '스윙 촬영',
+        ),
+        BottomNavigationBarItem(icon: Icon(Icons.show_chart), label: '스윙 추이'),
+        BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: '프로필'),
       ],
     );
   }

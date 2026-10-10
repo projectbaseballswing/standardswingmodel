@@ -3,18 +3,30 @@ class Swing {
   const Swing({
     required this.analysisId,
     required this.recordedAt,
+    required this.status,
     this.score,
     this.thumbnailUrl,
   });
 
-  /// 분석 식별자. 영상을 클릭하면 GET /api/analyses/{analysisId} 로 피드백을 조회한다.
+  factory Swing.fromJson(Map<String, dynamic> json) => Swing(
+    analysisId: json['analysis_id'] as String,
+    recordedAt: DateTime.parse(json['recorded_at'] as String).toLocal(),
+    status: json['status'] as String,
+    score: (json['score'] as num?)?.toDouble(),
+    thumbnailUrl: json['thumbnail_url'] as String?,
+  );
+
+  /// 분석 식별자. 과거 결과 조회는 다음 단계에서 연결한다.
   final String analysisId;
 
-  /// 촬영/분석 시각.
+  /// 기기 로컬 시간대로 변환한 촬영/분석 시각.
   final DateTime recordedAt;
 
+  /// queued / processing / done / failed.
+  final String status;
+
   /// 종합 점수(없을 수 있음).
-  final int? score;
+  final double? score;
 
   /// 썸네일 이미지 URL(없을 수 있음).
   final String? thumbnailUrl;

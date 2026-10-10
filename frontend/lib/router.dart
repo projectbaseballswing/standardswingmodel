@@ -1,6 +1,7 @@
 import 'package:go_router/go_router.dart';
 
 import 'models/feedback.dart';
+import 'route_observer.dart';
 import 'screens/joint_analysis_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/overall_feedback_screen.dart';
@@ -11,15 +12,10 @@ import 'screens/swing_list_screen.dart';
 
 final router = GoRouter(
   initialLocation: '/login',
+  observers: [swingRouteObserver],
   routes: [
-    GoRoute(
-      path: '/login',
-      builder: (context, state) => const LoginScreen(),
-    ),
-    GoRoute(
-      path: '/signup',
-      builder: (context, state) => const SignupScreen(),
-    ),
+    GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+    GoRoute(path: '/signup', builder: (context, state) => const SignupScreen()),
     GoRoute(
       path: '/swings',
       builder: (context, state) => const SwingListScreen(),
