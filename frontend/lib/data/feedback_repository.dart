@@ -384,6 +384,103 @@ class FeedbackRepository {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // 구간별 분석 (구간별 피드백)
+  // -------------------------------------------------------------------------
+
+  /// 종합 피드백을 스윙 구간(4개)별 분석으로 바꾼다.
+  ///
+  /// 관절별 분석이 "어느 부위" 라면 이건 "어느 타이밍" 을 본다.
+  /// 구간 점수 = 그 구간에서 모든 (믿을 만한) 피처 점수의 평균.
+  /// 다만 평균에 약한 고리가 묻히지 않도록, 수준(level)은 평균과 함께
+  /// 그 구간 최저 피처 점수도 본다.
+  ///
+  /// ⚠️ 백엔드 연동 상태 ⚠️
+  ///  - 구간 점수는 서버 피처 z_score 환산값(실제)이다.
+  ///  - 이전 스윙 비교(previousScore)는 조회 API 가 없어 반복 피드백에서만
+  ///    샘플 증감을 넣는다. 첫 피드백은 비교 없이 현재 점수만.
+  ///  - 코치 문장·팁은 규칙 기반 임시(추후 구간별 LLM 문장으로 교체).
+  List<PhaseAnalysis> buildPhaseAnalyses(OverallFeedback feedback) {
+    // 구간 점수가 다 있는(4구간) 피처만 모은다. 신뢰도 낮은 피처는 이미 제외돼 있다.
+    final feats = <FeatureAnalysis>[
+      for (final item in feedback.items)
+        for (final f in item.features)
+          if (f.phaseScores != null &&
+              f.phaseScores!.length == SwingPhase.values.length)
+            f,
+    ];
+    if (feats.isEmpty) return const [];
+
+    // 반복 피드백 샘플용 구간별 증감(백엔드 조회 API 전까지 임시).
+    // TODO(backend): 기록 조회가 생기면 실제 이전 스윙 구간 점수로 교체.
+    const sampleDelta = [5, -8, 0, 4];
+
+    final list = <PhaseAnalysis>[];
+    for (var i = 0; i < SwingPhase.values.length; i++) {
+      final phase = SwingPhase.values[i];
+      final scores = [for (final f in feats) f.phaseScores![i]];
+      final avg = (scores.reduce((a, b) => a + b) / scores.length).round();
+
+      // 이 구간에서 가장 낮은 피처(약한 고리).
+      var worst = feats.first;
+      for (final f in feats) {
+        if (f.phaseScores![i] < worst.phaseScores![i]) worst = f;
+      }
+      final minScore = worst.phaseScores![i];
+
+      // 평균이 높아도 확 낮은 항목이 하나라도 있으면 '개선 필요'.
+      final level = (avg >= _goodScore && minScore >= 70) ? 'good' : 'caution';
+      final needWork = level != 'good';
+
+      final prev = feedback.isFirst
+          ? null
+          : (avg - sampleDelta[i % sampleDelta.length]).clamp(0, 100);
+
+      list.add(PhaseAnalysis(
+        phase: phase,
+        number: i + 1,
+        score: avg,
+        level: level,
+        worstFeatureName: needWork ? worst.name : null,
+        previousScore: prev,
+        shortComment: _phaseShort(level, worst),
+        detailComment: _phaseDetail(phase, level, worst),
+        tip: _phaseTip(phase, level),
+      ));
+    }
+    return list;
+  }
+
+  /// 카드 한 줄 설명.
+  String _phaseShort(String level, FeatureAnalysis worst) {
+    if (level == 'good') return '전반적으로 안정적이에요.';
+    final dir = _directionWord(worst.direction);
+    return dir == null
+        ? '${worst.name}이(가)\n기준과 차이가 있어요.'
+        : '${worst.name}이(가)\n기준보다 $dir 편이에요.';
+  }
+
+  /// 상세 카드 본문.
+  String _phaseDetail(SwingPhase phase, String level, FeatureAnalysis worst) {
+    if (level == 'good') {
+      return '${phase.ko} 구간은 프로 기준과 비교해 전반적으로 안정적이에요.\n'
+          '지금의 흐름을 그대로 다음 구간으로 이어가 보세요.';
+    }
+    final dir = _directionWord(worst.direction);
+    final diff = dir == null ? '기준과 차이가 있어요' : '기준보다 $dir 편이에요';
+    return '${phase.ko} 구간의 전반적인 안정성은 보통이지만, '
+        '특히 ${worst.name}이(가) $diff.\n'
+        '이 구간의 자세와 리듬을 점검해 보세요.';
+  }
+
+  /// 코칭 팁.
+  String _phaseTip(SwingPhase phase, String level) {
+    if (level == 'good') {
+      return '지금의 안정적인 리듬을 유지하면서 다음 구간으로 자연스럽게 연결해 보세요.';
+    }
+    return '${phase.ko} 구간에서 상·하체의 타이밍과 균형을 맞추는 데 집중해 보세요.';
+  }
+
   /// 반복 피드백 샘플(디자인 시안과 동일한 값).
   /// 이전 스윙과 비교해 증감(→, +8/-9)과 "개선 / 개선 필요 / 유지" 를 보여준다.
   ///

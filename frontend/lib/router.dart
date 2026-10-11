@@ -4,6 +4,7 @@ import 'models/feedback.dart';
 import 'screens/joint_analysis_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/overall_feedback_screen.dart';
+import 'screens/phase_feedback_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/swing_camera_screen.dart';
@@ -48,6 +49,12 @@ final router = GoRouter(
       path: '/joint-analysis',
       builder: (context, state) =>
           JointAnalysisScreen(feedback: state.extra as OverallFeedback),
+    ),
+    // 구간별 피드백. 종합 피드백 결과를 extra 로 넘겨 받는다.
+    GoRoute(
+      path: '/phase-feedback',
+      builder: (context, state) =>
+          PhaseFeedbackScreen(feedback: state.extra as OverallFeedback),
     ),
   ],
 );

@@ -180,6 +180,68 @@ enum SwingPhase {
 ///  - [proBad]    : 프로 기준과 차이 있음 → "개선 필요"(빨강).
 enum JointStatus { improved, worsened, unchanged, limited, proGood, proBad }
 
+/// 스윙 구간(SwingPhase) 하나의 분석. 종합 피드백([OverallFeedback])에서 만든다.
+///
+/// 관절별 분석이 "어느 부위(공간)가 문제인가" 라면, 구간별 분석은 "스윙의
+/// 어느 타이밍(시간)이 문제인가" 를 본다. 같은 피처 데이터를 시간 축으로 자른다.
+///
+/// 점수([score])는 그 구간에 속한 피처 점수들의 평균이다.
+/// 다만 평균에 약한 고리가 묻히지 않도록, 수준([level])은 평균과 함께
+/// 그 구간의 최저 피처 점수도 본다(=하나라도 많이 낮으면 '개선 필요').
+/// 코치 문장·팁은 아직 규칙 기반 임시(백엔드 LLM 문장이 생기면 교체).
+///
+/// 첫 피드백([previousScore] == null)은 비교 없이 현재 점수만,
+/// 반복 피드백은 이전 대비 증감([delta])을 함께 보여준다.
+///
+/// ⚠️ 이전 스윙 비교값과 포즈 오버레이 이미지는 아직 프론트가 만들 수 없다.
+///    (백엔드 조회 API·포즈 이미지가 생기면 채운다. 그 전까지 반복 피드백은 샘플.)
+class PhaseAnalysis {
+  const PhaseAnalysis({
+    required this.phase,
+    required this.number,
+    required this.score,
+    required this.level,
+    required this.shortComment,
+    required this.detailComment,
+    required this.tip,
+    this.worstFeatureName,
+    this.previousScore,
+  });
+
+  /// 어떤 구간인지.
+  final SwingPhase phase;
+
+  /// 화면에 보이는 순번(1부터). 스텝퍼·카드 번호.
+  final int number;
+
+  /// 이 구간 점수(0~100). 구간 내 피처 점수 평균.
+  final int score;
+
+  /// 구간 수준. 'good' | 'caution'. 평균·최저 피처를 함께 보고 정한다.
+  final String level;
+
+  /// 카드에 들어가는 한 줄 설명. 예) "자세가 안정적이에요."
+  final String shortComment;
+
+  /// 상세 카드 본문(2~3줄).
+  final String detailComment;
+
+  /// 코칭 팁 문구.
+  final String tip;
+
+  /// 이 구간에서 기준과 가장 차이가 큰 세부 항목 이름(없으면 null).
+  final String? worstFeatureName;
+
+  /// 이전 스윙의 이 구간 점수. 첫 피드백이면 null → 증감을 숨긴다.
+  final int? previousScore;
+
+  /// 이전 대비 증감. 첫 피드백이면 null.
+  int? get delta => previousScore == null ? null : score - previousScore!;
+
+  /// 개선이 필요한 구간인지(점수가 기준 미만).
+  bool get needWork => level != 'good';
+}
+
 /// 부위 하나의 상세 분석. 종합 피드백([OverallFeedback.items])에서 만든다.
 ///
 /// 점수·세부 항목은 서버 실제 값이고, 코치 문장·포인트는 아직 규칙 기반 임시다.
