@@ -743,7 +743,8 @@ class _BottomBar extends StatelessWidget {
                 height: 50,
                 child: ElevatedButton(
                   onPressed: () {
-                    // TODO(next): 구간별 피드백 화면으로 이동.
+                    // 구간별 피드백 화면으로 이동.
+                    context.push('/phase-feedback', extra: feedback);
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
