@@ -150,7 +150,7 @@ void main() {
         'saved-analysis',
       );
       expect(find.text('종합 피드백'), findsOneWidget);
-      expect(find.text('77'), findsOneWidget);
+      expect(find.text('77.3'), findsOneWidget);
       expect(find.textContaining('첫 스윙'), findsNothing);
       expect(find.textContaining('이전 70'), findsNothing);
       expect(find.text('개선된 부분'), findsNothing);
@@ -175,7 +175,7 @@ void main() {
       final screen = tester.widget<JointAnalysisScreen>(
         find.byType(JointAnalysisScreen),
       );
-      expect(screen.feedback.items.single.currentScore, 64);
+      expect(screen.feedback.items.single.currentScore, 63.8);
       expect(
         screen.feedback.items.single.features.single.series!.last.user,
         123.4,
@@ -196,7 +196,6 @@ void main() {
     '404',
     'network',
     'result',
-    'score',
   ]) {
     testWidgets(
       '$failure shows a specific error and retry loads real feedback',
@@ -213,8 +212,6 @@ void main() {
             final body = storedAnalysis();
             if (failure == 'result') {
               body['result'] = null;
-            } else if (failure == 'score') {
-              body['result']['overall']['score'] = null;
             } else {
               body['status'] = failure;
             }
@@ -248,7 +245,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(calls, 2);
         expect(find.text('전체 스윙 점수'), findsOneWidget);
-        expect(find.text('77'), findsOneWidget);
+        expect(find.text('77.3'), findsOneWidget);
       },
     );
   }

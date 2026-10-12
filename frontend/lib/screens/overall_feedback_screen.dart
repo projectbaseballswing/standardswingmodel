@@ -6,6 +6,7 @@ import '../data/feedback_repository.dart';
 import '../models/feedback.dart';
 import '../theme/app_theme.dart';
 import '../widgets/swing_video.dart';
+import '../widgets/feedback_metrics.dart';
 
 /// 종합 피드백 화면.
 ///
@@ -139,13 +140,14 @@ class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
 
 /// 스크롤되는 본문 + 하단 고정 버튼.
 class _FeedbackBody extends StatelessWidget {
-  const _FeedbackBody({
+  _FeedbackBody({
     required this.feedback,
     required this.analysisId,
     this.videoPath,
   });
 
   final OverallFeedback feedback;
+  final _phasesKey = GlobalKey();
   final String analysisId;
   final String? videoPath;
 
@@ -154,22 +156,46 @@ class _FeedbackBody extends StatelessWidget {
     return Column(
       children: [
         Expanded(
-          child: ListView(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-            children: [
-              _dateLabel(feedback.recordedAt),
-              const SizedBox(height: 12),
-              _VideoRow(analysisId: analysisId, videoPath: videoPath),
-              const SizedBox(height: 16),
-              _ScoreCard(feedback: feedback),
-              const SizedBox(height: 12),
-              ..._buildCategorySections(feedback),
-              const SizedBox(height: 12),
-              _CoachCard(comment: feedback.coachComment),
-            ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _dateLabel(feedback.recordedAt),
+                const SizedBox(height: 12),
+                _VideoRow(analysisId: analysisId, videoPath: videoPath),
+                const SizedBox(height: 16),
+                _ScoreCard(feedback: feedback),
+                const SizedBox(height: 12),
+                ..._buildCategorySections(feedback),
+                const SizedBox(height: 12),
+                _CoachCard(comment: feedback.coachComment),
+                if (feedback.phases.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  PhaseFeedbackCard(key: _phasesKey, feedback: feedback),
+                ],
+                if (feedback.speedMetrics.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  SpeedFeedbackCard(metrics: feedback.speedMetrics),
+                ],
+              ],
+            ),
           ),
         ),
-        _BottomBar(feedback: feedback),
+        _BottomBar(
+          feedback: feedback,
+          onPhases: feedback.phases.isEmpty
+              ? null
+              : () {
+                  final phaseContext = _phasesKey.currentContext;
+                  if (phaseContext != null) {
+                    Scrollable.ensureVisible(
+                      phaseContext,
+                      duration: const Duration(milliseconds: 300),
+                    );
+                  }
+                },
+        ),
       ],
     );
   }
@@ -187,20 +213,27 @@ class _FeedbackBody extends StatelessWidget {
   /// 실제 이전 스윙과의 비교 여부에 따라 분류 카드를 만든다.
   List<Widget> _buildCategorySections(OverallFeedback f) {
     final sections = <_CategorySpec>[];
+    sections.add(
+      _CategorySpec(
+        title: '참고용 · 분석 제한',
+        tone: _Tone.neutral,
+        items: f.items.where((i) => i.limited).toList(),
+      ),
+    );
     if (!f.hasComparison) {
       // 이전 스윙과 비교하지 않은 결과: 프로 기준 대비 level로 나눈다.
       sections.add(
         _CategorySpec(
           title: '잘한 부분',
           tone: _Tone.good,
-          items: f.items.where((i) => i.level == 'good').toList(),
+          items: f.items.where((i) => !i.limited && i.level == 'good').toList(),
         ),
       );
       sections.add(
         _CategorySpec(
           title: '개선이 필요한 부분',
           tone: _Tone.bad,
-          items: f.items.where((i) => i.level != 'good').toList(),
+          items: f.items.where((i) => !i.limited && i.level != 'good').toList(),
         ),
       );
     } else {
@@ -349,6 +382,22 @@ class _ScoreCard extends StatelessWidget {
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 10),
+          Text(
+            reliabilityLabel(feedback.reliability),
+            style: const TextStyle(fontSize: 11.5, color: AppColors.hint),
+          ),
+          for (final warning in feedback.warnings)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                warning,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: AppColors.subtitle,
+                ),
+              ),
+            ),
+          const SizedBox(height: 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -366,7 +415,7 @@ class _ScoreCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            '${feedback.totalScore}',
+                            feedbackNumber(feedback.totalScore),
                             style: const TextStyle(
                               fontSize: 44,
                               height: 1.0,
@@ -434,7 +483,7 @@ class _ScoreCard extends StatelessWidget {
 class _DeltaBadge extends StatelessWidget {
   const _DeltaBadge({required this.delta});
 
-  final int delta;
+  final double delta;
 
   @override
   Widget build(BuildContext context) {
@@ -449,7 +498,7 @@ class _DeltaBadge extends StatelessWidget {
           color: color,
         ),
         Text(
-          '${delta.abs()}',
+          feedbackNumber(delta.abs()),
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w700,
@@ -587,7 +636,7 @@ class _ItemRow extends StatelessWidget {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      '${item.previousScore} → ${item.currentScore}점',
+                      '${item.previousScore} → ${feedbackNumber(item.currentScore)}점',
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -617,7 +666,7 @@ class _ItemRow extends StatelessWidget {
                     children: [
                       TextSpan(text: item.label),
                       TextSpan(
-                        text: '  -  ${item.currentScore}점',
+                        text: '  -  ${feedbackNumber(item.currentScore)}점',
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -627,6 +676,10 @@ class _ItemRow extends StatelessWidget {
                   ),
                 ),
               const SizedBox(height: 3),
+              Text(
+                reliabilityLabel(item.reliability),
+                style: const TextStyle(fontSize: 11, color: AppColors.hint),
+              ),
               Text(
                 item.description,
                 style: const TextStyle(
@@ -724,7 +777,9 @@ class _CoachCard extends StatelessWidget {
 // 하단 버튼 2개
 // ---------------------------------------------------------------------------
 class _BottomBar extends StatelessWidget {
-  const _BottomBar({required this.feedback});
+  const _BottomBar({required this.feedback, this.onPhases});
+
+  final VoidCallback? onPhases;
 
   final OverallFeedback feedback;
 
@@ -764,9 +819,7 @@ class _BottomBar extends StatelessWidget {
               child: SizedBox(
                 height: 50,
                 child: ElevatedButton(
-                  onPressed: () {
-                    // TODO(next): 구간별 피드백 화면으로 이동.
-                  },
+                  onPressed: onPhases,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,

@@ -66,44 +66,85 @@ class FeedbackRepository {
   /// 서버 응답을 새 업로드와 과거 기록에 공통으로 사용하는 모델로 변환한다.
   OverallFeedback _mapReport(Map<String, dynamic> body) {
     final result = body['result'] as Map<String, dynamic>? ?? const {};
-    final overall = result['overall'] as Map<String, dynamic>? ?? const {};
+    if (result['overall'] is! Map<String, dynamic>) {
+      throw ApiException('종합 분석 결과가 없습니다.');
+    }
+    final overall = result['overall'] as Map<String, dynamic>;
+    final version =
+        (result['model_version'] ?? overall['model_version']) as String? ??
+        'unknown';
+    final eventBased = version.startsWith('0.2');
     final rawJoints = (result['joints'] as List?) ?? const [];
     final rawGroups = (overall['group_scores'] as List?) ?? const [];
 
-    final totalScore = _round(overall['score']);
-    if (totalScore == null) {
-      throw ApiException('종합 점수가 제공되지 않아 피드백을 표시할 수 없습니다.');
-    }
+    final available = overall['available'] != false;
+    final totalScore = available ? _number(overall['score']) : null;
+    final reliability = _reliability(overall['reliability']);
 
     // 부위별 세부 항목(피처)을 모은다.
-    // 신뢰도 낮음(뒷팔 팔꿈치 등)과 미측정 항목은 뺀다 — 서버도 종합/상세에서 제외한다.
+    // 신뢰도 낮음(뒷팔 팔꿈치 등)과 미측정 세부 항목은 제외하되 부위 점수는 보존한다.
     final featuresByPart = <String, List<FeatureAnalysis>>{};
     for (final j in rawJoints.whereType<Map<String, dynamic>>()) {
-      if (j['available'] != true || j['reliability'] == 'low') continue;
+      if (j['available'] == false || j['reliability'] == 'low') continue;
       final part = (j['body_part'] as String?) ?? 'other';
-      (featuresByPart[part] ??= []).add(_mapFeature(j));
+      (featuresByPart[part] ??= []).add(_mapFeature(j, eventBased: eventBased));
     }
 
     // 부위(그룹) 단위로 묶는다. 점수는 group_scores.score 실제값.
     final items = <FeedbackItem>[];
     for (final g in rawGroups.whereType<Map<String, dynamic>>()) {
-      if (g['available'] != true) continue;
       final key = (g['key'] as String?) ?? '';
       final features = featuresByPart[key] ?? const <FeatureAnalysis>[];
-      // 믿을 만한 세부 항목이 하나도 없는 부위(뒷팔 등)는 보여주지 않는다.
-      if (features.isEmpty) continue;
-      final score = _round(g['score']);
-      if (score == null) continue;
+      final groupAvailable = g['available'] != false;
+      final score = groupAvailable ? _number(g['score']) : null;
+      final groupReliability = _reliability(g['reliability']);
       items.add(
         FeedbackItem(
           key: key,
           label: (g['name'] as String?) ?? '부위',
           part: _partOf(key),
           currentScore: score,
-          level: score >= _goodScore ? 'good' : 'caution',
-          description: _partDescription(features),
-          reliability: (g['reliability'] as String?) ?? 'high',
-          features: features,
+          available: groupAvailable,
+          level: score == null || !groupAvailable || groupReliability == 'low'
+              ? 'unavailable'
+              : score >= _goodScore
+              ? 'good'
+              : 'caution',
+          description: !groupAvailable
+              ? '이 부위는 분석할 수 없습니다.'
+              : score == null
+              ? '부위 점수가 제공되지 않았습니다.'
+              : features.isEmpty
+              ? '신뢰할 수 있는 세부 관절 데이터가 없어 부위 점수만 표시합니다.'
+              : groupReliability == 'low'
+              ? '검출 신뢰도가 낮습니다. 점수는 참고용으로 확인하세요.'
+              : _partDescription(features),
+          reliability: groupReliability,
+          features: groupAvailable ? features : const [],
+        ),
+      );
+    }
+
+    // 0.1의 pose/velocity 등 그룹 점수는 관절 부위 점수가 아니다.
+    // 연결되지 않은 관절은 점수를 합성하지 않고 별도 부위로 보존한다.
+    for (final entry in featuresByPart.entries) {
+      if (items.any((i) => i.key == entry.key)) continue;
+      final label = switch (entry.key) {
+        'arm' => '팔',
+        'leg' => '다리',
+        'torso' => '몸통',
+        _ => entry.key,
+      };
+      items.add(
+        FeedbackItem(
+          key: entry.key,
+          label: label,
+          part: _partOf(entry.key),
+          currentScore: null,
+          description: '부위 점수는 미제공이며 측정된 관절 정보만 표시합니다.',
+          level: 'unavailable',
+          reliability: reliability,
+          features: entry.value,
         ),
       );
     }
@@ -111,15 +152,37 @@ class FeedbackRepository {
     return OverallFeedback(
       recordedAt: _parseTime(body),
       totalScore: totalScore,
-      summary: _buildSummary(totalScore, items),
-      coachComment: _buildCoach(items),
+      modelVersion: version,
+      available: available,
+      reliability: reliability,
+      warnings: _strings(_map(overall['quality'])['warnings']),
+      phases: _mapPhases(_map(result['phases'])['phases']),
+      speedMetrics: _mapSpeed(_map(result['speed'])),
+      events: eventBased
+          ? _mapEvents(_map(result['phases'])['events'])
+          : const [],
+      summary: !available
+          ? '영상에서 종합 분석에 필요한 정보를 확인하지 못했습니다.'
+          : totalScore == null
+          ? '종합 점수가 제공되지 않았습니다. 측정된 항목만 확인하세요.'
+          : reliability == 'low'
+          ? '분석 신뢰도가 낮습니다. 점수는 참고용으로 확인하세요.'
+          : _buildSummary(totalScore, items),
+      coachComment: !available || reliability == 'low'
+          ? '분석 정보가 부족하거나 신뢰도가 낮아 자세에 대한 판단을 보류합니다.'
+          : _buildCoach(
+              items.where((i) => !i.limited && i.features.isNotEmpty).toList(),
+            ),
       items: items,
       // 실제 이전 기록과 비교하지 않았으므로 previousTotalScore는 주지 않는다.
     );
   }
 
   /// 서버 joints[] 한 건을 세부 항목으로 변환한다.
-  FeatureAnalysis _mapFeature(Map<String, dynamic> j) {
+  FeatureAnalysis _mapFeature(
+    Map<String, dynamic> j, {
+    required bool eventBased,
+  }) {
     return FeatureAnalysis(
       key: (j['key'] as String?) ?? '',
       name: (j['name'] as String?) ?? '항목',
@@ -130,24 +193,36 @@ class FeedbackRepository {
       impact: _measure(j['impact']),
       rangeOfMotion: _measure(j['range_of_motion']),
       series: _series(j['series']),
-      phaseScores: _phaseScores(j['phases']),
+      phaseScores: _phaseScores(j['phases'], eventBased: eventBased),
+      reliability: _reliability(j['reliability']),
+      eventBasedSeries: eventBased,
     );
   }
 
-  /// 구간별 z_score → SwingPhase 순서의 0~100 점수. 4구간이 다 있어야 쓴다.
-  /// 서버가 구간별 피처 점수를 직접 주지 않아 환산한 임시값이다.
-  List<int>? _phaseScores(dynamic phasesRaw) {
+  /// 관절 z-score 환산 참고 점수. 결측 구간은 null로 남기며 실제 구간 점수와 분리한다.
+  List<JointPhaseScore>? _phaseScores(
+    dynamic phasesRaw, {
+    required bool eventBased,
+  }) {
     if (phasesRaw is! List) return null;
-    final byKey = <String, double>{};
+    final byKey = <String, JointPhaseScore>{};
     for (final p in phasesRaw.whereType<Map<String, dynamic>>()) {
       final key = p['phase'] as String?;
-      final z = (p['z_score'] as num?)?.toDouble();
-      if (key != null && z != null) byKey[key] = z;
+      if (key == null) continue;
+      final z = p['available'] == false ? null : _number(p['z_score']);
+      byKey[key] = JointPhaseScore(
+        key: key,
+        name: p['phase_name'] as String? ?? key,
+        score: z == null ? null : _scoreFromZ(z),
+      );
     }
-    if (!SwingPhase.values.every((ph) => byKey.containsKey(ph.key))) {
-      return null;
-    }
-    return [for (final ph in SwingPhase.values) _scoreFromZ(byKey[ph.key]!)];
+    if (byKey.isEmpty) return null;
+    return eventBased
+        ? [
+            for (final ph in SwingPhase.values)
+              byKey[ph.key] ?? JointPhaseScore(key: ph.key, name: ph.ko),
+          ]
+        : byKey.values.toList();
   }
 
   /// z-score(표준편차 단위) → 0~100 점수.
@@ -167,11 +242,10 @@ class FeedbackRepository {
   /// {user, reference, diff} → [Measure]. 없으면 null.
   Measure? _measure(dynamic raw) {
     if (raw is! Map) return null;
-    double? d(dynamic v) => (v as num?)?.toDouble();
     return Measure(
-      user: d(raw['user']),
-      reference: d(raw['reference']),
-      diff: d(raw['diff']),
+      user: _number(raw['user']),
+      reference: _number(raw['reference']),
+      diff: _number(raw['diff']),
     );
   }
 
@@ -181,10 +255,9 @@ class FeedbackRepository {
     final user = (raw['user'] as List?) ?? const [];
     final ref = (raw['reference'] as List?) ?? const [];
     final std = (raw['reference_std'] as List?) ?? const [];
-    final n = ref.length;
+    final n = max(user.length, max(ref.length, std.length));
     if (n == 0) return null;
-    double? at(List l, int i) =>
-        i < l.length ? (l[i] as num?)?.toDouble() : null;
+    double? at(List l, int i) => i < l.length ? _number(l[i]) : null;
     return [
       for (var i = 0; i < n; i++)
         SeriesSample(
@@ -200,16 +273,85 @@ class FeedbackRepository {
     switch (key) {
       case 'lead_leg':
       case 'rear_leg':
+      case 'leg':
         return BodyPart.leg;
       case 'lead_arm':
       case 'rear_arm':
+      case 'arm':
         return BodyPart.arm;
       default:
         return BodyPart.torso;
     }
   }
 
-  int? _round(dynamic v) => v is num && v.isFinite ? v.round() : null;
+  double? _number(dynamic v) => v is num && v.isFinite ? v.toDouble() : null;
+  String _reliability(dynamic v) => v is String ? v : 'medium';
+  Map<String, dynamic> _map(dynamic v) =>
+      v is Map<String, dynamic> ? v : const {};
+  List<String> _strings(dynamic v) =>
+      v is List ? v.whereType<String>().toList() : const [];
+  Iterable<Map<String, dynamic>> _rows(dynamic v) =>
+      v is List ? v.whereType<Map<String, dynamic>>() : const [];
+
+  List<AnalysisPhase> _mapPhases(dynamic raw) => [
+    for (final p in _rows(raw))
+      AnalysisPhase(
+        key: p['key'] as String? ?? '',
+        name: p['name'] as String? ?? p['key'] as String? ?? '구간',
+        available: p['available'] != false,
+        reliability: _reliability(p['reliability']),
+        score: p['available'] == false ? null : _number(p['score']),
+        unavailableReason: p['unavailable_reason'] as String?,
+        userDurationMs: p['available'] == false
+            ? null
+            : _number(p['user_duration_ms']),
+        referenceDurationMs: _number(p['reference_duration_ms']),
+        tempoRatio: p['available'] == false ? null : _number(p['tempo_ratio']),
+        tempoLevel: p['available'] == false
+            ? null
+            : p['tempo_level'] as String?,
+        warnings: _strings(p['warnings']),
+        deviations: p['available'] == false
+            ? const []
+            : [
+                for (final d in _rows(p['top_deviations']))
+                  PhaseDeviation(
+                    joint: d['joint'] as String? ?? '',
+                    name: d['joint_name'] as String? ?? '관절',
+                    diff: _number(d['diff']),
+                    zScore: _number(d['z_score']),
+                    direction: d['direction'] as String? ?? 'similar',
+                    level: d['level'] as String? ?? '',
+                  ),
+              ],
+      ),
+  ];
+
+  List<SpeedMetric> _mapSpeed(Map<String, dynamic> raw) => [
+    for (final m in _rows(raw['metrics']))
+      SpeedMetric(
+        key: m['key'] as String? ?? '',
+        name: m['name'] as String? ?? '속도 지표',
+        unit: m['unit'] as String? ?? '',
+        available: raw['available'] != false && m['available'] == true,
+        reliability: _reliability(m['reliability'] ?? 'low'),
+        user: raw['available'] == false || m['available'] != true
+            ? null
+            : _number(m['user']),
+        reference: _number(m['reference']),
+      ),
+  ];
+
+  List<SwingEvent> _mapEvents(dynamic raw) => [
+    for (final e in _map(raw).entries)
+      if (_map(e.value)['frame'] is int && (_map(e.value)['frame'] as int) >= 0)
+        SwingEvent(
+          key: e.key,
+          name: _map(e.value)['name'] as String? ?? e.key,
+          frame: _map(e.value)['frame'] as int,
+          msFromImpact: _number(_map(e.value)['ms_from_impact']),
+        ),
+  ];
 
   DateTime _parseTime(Map<String, dynamic> body) {
     for (final key in ['recorded_at', 'created_at', 'finished_at']) {
@@ -248,7 +390,7 @@ class FeedbackRepository {
   }
 
   /// 점수 옆 분홍 박스 문구. (임시: 규칙 기반)
-  String _buildSummary(int totalScore, List<FeedbackItem> items) {
+  String _buildSummary(double totalScore, List<FeedbackItem> items) {
     final worst = _worst(items);
     if (worst == null) {
       return '스윙 분석 결과예요. 전체 점수는 $totalScore점이에요.';
@@ -259,7 +401,7 @@ class FeedbackRepository {
 
   /// AI 코치의 한마디. (임시: 규칙 기반. 추후 LLM 문장으로 교체)
   String _buildCoach(List<FeedbackItem> items) {
-    if (items.isEmpty) return '표시할 부위별 점수와 세부 분석 정보가 없습니다.';
+    if (items.isEmpty) return '자세를 평가할 만큼 신뢰할 수 있는 세부 분석 정보가 없습니다.';
     final goods = items.where((i) => i.level == 'good').toList();
     final worst = _worst(items);
     final sb = StringBuffer();
@@ -276,8 +418,11 @@ class FeedbackRepository {
 
   /// 프로 기준에서 가장 많이 벗어난(점수가 가장 낮은) 부위.
   FeedbackItem? _worst(List<FeedbackItem> items) {
-    if (items.isEmpty) return null;
-    return items.reduce((a, b) => a.currentScore <= b.currentScore ? a : b);
+    final measured = items.where((i) => !i.limited).toList();
+    if (measured.isEmpty) return null;
+    return measured.reduce(
+      (a, b) => a.currentScore! <= b.currentScore! ? a : b,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -308,7 +453,11 @@ class FeedbackRepository {
           features: item.features,
           summary: _jointSummary(item, status),
           coachComment: _jointCoach(item, status),
-          pointsTitle: needWork ? '개선 포인트' : '유지 포인트',
+          pointsTitle: status == JointStatus.limited
+              ? '분석 안내'
+              : needWork
+              ? '개선 포인트'
+              : '유지 포인트',
           points: _jointPoints(item, status),
         ),
       );
@@ -321,6 +470,7 @@ class FeedbackRepository {
   ///    "잘함([proGood]) / 개선 필요([proBad])" 를 나눈다.
   ///  - 반복 피드백: 이전 대비 증감으로 개선/개선 필요/변화 없음을 나눈다.
   JointStatus _statusOf(FeedbackItem item, {required bool hasComparison}) {
+    if (item.limited || item.features.isEmpty) return JointStatus.limited;
     if (!hasComparison) {
       return item.level == 'good' ? JointStatus.proGood : JointStatus.proBad;
     }
@@ -345,7 +495,7 @@ class FeedbackRepository {
       case JointStatus.limited:
         return item.description.isNotEmpty
             ? item.description
-            : '${item.label}은(는) 비교할 이전 스윙이 없어 이번 결과만 보여드려요.';
+            : '${item.label}의 측정 정보가 부족해 자세 판정을 보류합니다.';
       case JointStatus.proGood:
         return '${item.label}의 움직임이 프로 선수 기준과 잘 맞는 편이에요.\n'
             '스윙 중 각도가 기준 스윙과 가깝게 유지되고 있습니다.';
@@ -367,8 +517,7 @@ class FeedbackRepository {
         return '이번 스윙에서 ${item.label}의 움직임은 이전과 큰 차이 없이 유지되었습니다.\n'
             '안정적인 흐름이니 지금 리듬을 그대로 이어가 보세요.';
       case JointStatus.limited:
-        return '${item.label}은(는) 비교할 이전 스윙이 아직 없어 변화는 보여드릴 수 없어요.\n'
-            '다음 스윙을 촬영하면 이번 결과와 비교해 변화를 알려드릴게요.';
+        return '${item.description}\n${reliabilityLabel(item.reliability)}';
       case JointStatus.proGood:
         return '${item.label}의 움직임이 프로 선수 기준과 잘 맞는 편이에요.\n'
             '지금의 안정적인 각도를 그대로 유지해 보세요.';
@@ -404,7 +553,7 @@ class FeedbackRepository {
       case JointStatus.unchanged:
         return ['현재의 안정적인 움직임을 유지해 보세요.', '무리하게 바꾸기보다 지금 리듬을 반복해 몸에 익혀 보세요.'];
       case JointStatus.limited:
-        return ['다음 스윙을 촬영하면 이번 결과와 비교해 변화를 확인할 수 있어요.'];
+        return ['측정되지 않았거나 신뢰하기 어려운 값으로 자세를 판정하지 않습니다.'];
       case JointStatus.proGood:
         return ['지금의 안정적인 각도 흐름을 그대로 유지해 보세요.', '다음 스윙에서도 같은 리듬으로 가져가 보세요.'];
     }

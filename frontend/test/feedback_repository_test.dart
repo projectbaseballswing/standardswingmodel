@@ -41,7 +41,7 @@ void main() {
       });
       final feedback = await repo.fetchFeedback('saved-analysis');
       expect(calls, 1);
-      expect(feedback.totalScore, 77); // 기존 UI의 정수 반올림 유지.
+      expect(feedback.totalScore, 77.3); // 서버의 소수점 점수 보존.
       expect(
         feedback.recordedAt,
         DateTime.parse('2026-10-09T09:30:00Z').toLocal(),
@@ -52,7 +52,7 @@ void main() {
       expect(feedback.hasComparison, isFalse);
       expect(feedback.summary, isNot(contains('첫')));
       final item = feedback.items.single;
-      expect(item.currentScore, 64);
+      expect(item.currentScore, 63.8);
       expect(item.previousScore, isNull);
       expect(item.delta, isNull);
       final feature = item.features.single;
@@ -64,7 +64,8 @@ void main() {
         null,
         123.4,
       ]);
-      expect(feature.phaseScores, isNull); // 누락된 구간은 합성하지 않는다.
+      expect(feature.phaseScores!.single.key, 'swing');
+      expect(feature.phaseScores!.single.score, 80); // 있는 구간만 참고 점수로 표시.
       final part = repo.buildPartAnalyses(feedback).single;
       expect(part.status, JointStatus.proBad);
       expect(part.previousScore, isNull);
@@ -138,30 +139,20 @@ void main() {
     );
   });
 
-  for (final result in [
-    null,
-    <String, dynamic>{},
-    {'overall': <String, dynamic>{}},
-    {
-      'overall': {'score': null},
-    },
-  ]) {
-    test(
-      'missing result or required score reports unavailable ($result)',
-      () async {
-        final repo = repositoryFor(
-          (_) async => response({...storedAnalysis(), 'result': result}),
-        );
-        await expectLater(
-          repo.fetchFeedback('saved-analysis'),
-          throwsA(isA<ApiException>()),
-        );
-      },
-    );
+  for (final result in [null, <String, dynamic>{}]) {
+    test('missing result reports unavailable ($result)', () async {
+      final repo = repositoryFor(
+        (_) async => response({...storedAnalysis(), 'result': result}),
+      );
+      await expectLater(
+        repo.fetchFeedback('saved-analysis'),
+        throwsA(isA<ApiException>()),
+      );
+    });
   }
 
   test(
-    'missing group score is omitted, while legitimate zero is preserved',
+    'missing group score stays null, while legitimate zero is preserved',
     () async {
       final body = storedAnalysis();
       body['result']['overall']['score'] = 0;
@@ -169,7 +160,8 @@ void main() {
       final repo = repositoryFor((_) async => response(body));
       final feedback = await repo.fetchFeedback('saved-analysis');
       expect(feedback.totalScore, 0);
-      expect(feedback.items, isEmpty);
+      expect(feedback.items.single.currentScore, isNull);
+      expect(feedback.items.single.limited, isTrue);
       expect(feedback.coachComment, contains('정보가 없습니다'));
     },
   );
@@ -213,7 +205,7 @@ void main() {
         'saved-analysis',
         firstTime: true,
       );
-      expect(feedback.totalScore, 77);
+      expect(feedback.totalScore, 77.3);
       expect(calls, 3);
     },
   );
