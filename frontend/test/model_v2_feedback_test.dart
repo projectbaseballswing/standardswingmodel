@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:swing_analysis/api/analysis_api.dart';
@@ -10,6 +11,7 @@ import 'package:swing_analysis/data/feedback_repository.dart';
 import 'package:swing_analysis/models/feedback.dart';
 import 'package:swing_analysis/screens/joint_analysis_screen.dart';
 import 'package:swing_analysis/screens/overall_feedback_screen.dart';
+import 'package:swing_analysis/screens/phase_feedback_screen.dart';
 import 'package:swing_analysis/theme/app_theme.dart';
 import 'package:swing_analysis/widgets/feedback_metrics.dart';
 
@@ -298,42 +300,61 @@ void main() {
   );
 
   testWidgets(
-    'overall shows actual phase scores, deferred tempo, speed units and event times',
+    'overall keeps speed and opens actual phase feedback without another GET',
     (tester) async {
       smallView(tester);
-      await tester.pumpWidget(
-        MaterialApp(
-          home: OverallFeedbackScreen(
-            analysisId: 'model-v2-test',
-            repository: repository(v2()),
+      final requests = <Uri>[];
+      final repo = repository(v2(), requests: requests);
+      final router = GoRouter(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (_, _) => OverallFeedbackScreen(
+              analysisId: 'model-v2-test',
+              repository: repo,
+            ),
           ),
-        ),
+          GoRoute(
+            path: '/phase-feedback',
+            builder: (_, state) =>
+                PhaseFeedbackScreen(feedback: state.extra as OverallFeedback),
+          ),
+        ],
       );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
       await tester.pumpAndSettle();
       expect(find.text('77.3'), findsOneWidget);
       expect(find.text('일부 관절이 가려져 있습니다.'), findsOneWidget);
       expect(find.text('탭하여 재생'), findsOneWidget);
+      expect(find.byType(PhaseMetrics), findsNothing);
+      await tester.ensureVisible(find.byType(SpeedFeedbackCard));
+      expect(find.text('내 26.7 body/s / 기준 18 body/s'), findsOneWidget);
+      expect(find.textContaining('체장 기준 상대속도'), findsOneWidget);
       await tester.tap(find.text('구간별 피드백 보기'));
       await tester.pumpAndSettle();
-      expect(find.byType(PhaseFeedbackCard).hitTestable(), findsOneWidget);
+      expect(find.byType(PhaseFeedbackScreen), findsOneWidget);
       await tester.ensureVisible(
-        find.byKey(const ValueKey('phase-transition')),
+        find.byKey(const ValueKey('phase-card-transition')),
       );
-      await tester.tap(find.text('착지 후 준비 · 75.1점'));
+      await tester.tap(find.byKey(const ValueKey('phase-card-transition')));
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.byType(PhaseMetrics), 200);
       expect(
         find.textContaining('0.8배 (소요 시간이 더 짧음) · 템포 판정 보류'),
         findsOneWidget,
       );
       expect(find.textContaining('구간이 짧아'), findsOneWidget);
-      expect(find.textContaining('스트라이드 · 82.5점'), findsOneWidget);
+      expect(find.text('75.1'), findsWidgets);
+      await tester.scrollUntilVisible(find.byType(SwingEventsCard), 200);
       expect(find.textContaining('앞발 착지: 임팩트 전 300 ms'), findsOneWidget);
       expect(find.textContaining('팔로우 종료: 임팩트 후 300 ms'), findsOneWidget);
       expect(find.textContaining('로딩 시작:'), findsNothing);
-      await tester.ensureVisible(find.byType(SpeedFeedbackCard));
+      expect(find.byType(SpeedFeedbackCard), findsNothing);
+      await tester.tap(find.byIcon(Icons.arrow_back_ios_new));
       await tester.pumpAndSettle();
-      expect(find.text('내 26.7 body/s / 기준 18 body/s'), findsOneWidget);
-      expect(find.textContaining('체장 기준 상대속도'), findsOneWidget);
+      expect(find.byType(OverallFeedbackScreen), findsOneWidget);
+      expect(requests.length, 1);
       expect(tester.takeException(), isNull);
     },
   );
@@ -357,7 +378,8 @@ void main() {
       expect(find.text('-'), findsOneWidget);
       expect(find.text('참고용 · 분석 제한'), findsOneWidget);
       expect(find.textContaining('51.2점', findRichText: true), findsOneWidget);
-      expect(find.byType(PhaseFeedbackCard), findsOneWidget);
+      expect(find.byType(PhaseMetrics), findsNothing);
+      expect(find.text('구간별 피드백 보기'), findsOneWidget);
       expect(find.textContaining('null'), findsNothing);
       expect(tester.takeException(), isNull);
     },
@@ -375,7 +397,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('77.3'), findsOneWidget);
-      expect(find.text('준비 자세 · 80점'), findsOneWidget);
+      expect(find.byType(PhaseMetrics), findsNothing);
       expect(find.byType(SpeedFeedbackCard), findsNothing);
       expect(tester.takeException(), isNull);
       final feedback = await repo.fetchFeedback('legacy');

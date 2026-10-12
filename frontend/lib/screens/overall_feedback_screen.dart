@@ -140,14 +140,13 @@ class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
 
 /// 스크롤되는 본문 + 하단 고정 버튼.
 class _FeedbackBody extends StatelessWidget {
-  _FeedbackBody({
+  const _FeedbackBody({
     required this.feedback,
     required this.analysisId,
     this.videoPath,
   });
 
   final OverallFeedback feedback;
-  final _phasesKey = GlobalKey();
   final String analysisId;
   final String? videoPath;
 
@@ -170,10 +169,6 @@ class _FeedbackBody extends StatelessWidget {
                 ..._buildCategorySections(feedback),
                 const SizedBox(height: 12),
                 _CoachCard(comment: feedback.coachComment),
-                if (feedback.phases.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  PhaseFeedbackCard(key: _phasesKey, feedback: feedback),
-                ],
                 if (feedback.speedMetrics.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   SpeedFeedbackCard(metrics: feedback.speedMetrics),
@@ -182,20 +177,7 @@ class _FeedbackBody extends StatelessWidget {
             ),
           ),
         ),
-        _BottomBar(
-          feedback: feedback,
-          onPhases: feedback.phases.isEmpty
-              ? null
-              : () {
-                  final phaseContext = _phasesKey.currentContext;
-                  if (phaseContext != null) {
-                    Scrollable.ensureVisible(
-                      phaseContext,
-                      duration: const Duration(milliseconds: 300),
-                    );
-                  }
-                },
-        ),
+        _BottomBar(feedback: feedback),
       ],
     );
   }
@@ -777,9 +759,7 @@ class _CoachCard extends StatelessWidget {
 // 하단 버튼 2개
 // ---------------------------------------------------------------------------
 class _BottomBar extends StatelessWidget {
-  const _BottomBar({required this.feedback, this.onPhases});
-
-  final VoidCallback? onPhases;
+  const _BottomBar({required this.feedback});
 
   final OverallFeedback feedback;
 
@@ -819,7 +799,10 @@ class _BottomBar extends StatelessWidget {
               child: SizedBox(
                 height: 50,
                 child: ElevatedButton(
-                  onPressed: onPhases,
+                  onPressed: () {
+                    // 구간별 피드백 화면으로 이동.
+                    context.push('/phase-feedback', extra: feedback);
+                  },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,

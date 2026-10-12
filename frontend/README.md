@@ -20,6 +20,15 @@ samples, guidance on mobile development, and a full API reference.
 
 `FeedbackRepository`는 새 업로드의 polling 결과와 과거 기록의 단일 GET 결과에
 같은 매핑을 적용한다. 모두 `include_series=true`로 조회한다.
+종합 화면은 영상·종합/부위 점수·신뢰도·속도를 표시하고, 구간 상세는
+`/phase-feedback`으로 이동해 표시한다. 별도 구간 화면은 전달받은
+`OverallFeedback.phases`의 `AnalysisPhase`를 직접 사용하며 추가 GET을 하지 않는다.
+팀원의 스텝퍼·2열 구간 카드·선택 상세 레이아웃을 유지한다.
+구간 선택은 서버 key를 사용하고 이름·순서는 응답 그대로 보존한다.
+상단 전체 점수도 서버 `overall.score`이며 구간 점수를 평균 내지 않는다.
+관절 점수를 평균 내는 `buildPhaseAnalyses`와 샘플 비교값은 사용하지 않는다.
+구간 배지는 측정 완료/점수 미제공/참고용/분석 불가 상태를 나타내며,
+점수 임계값으로 임의의 자세 등급을 만들지 않는다. 템포 판정은 서버 값만 사용한다.
 계약은 `../feedback/compare_v2.py`, `../feedback/compare.py`, `../api/schemas.py`를
 기준으로 한다. `../api/fixtures/analysis_sample.json`은 0.2-draft 예시다.
 
