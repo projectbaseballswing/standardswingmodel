@@ -1,21 +1,21 @@
-import 'dart:io';
 import 'dart:math' show pi;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:video_player/video_player.dart';
 
 import '../api/analysis_api.dart';
 import '../api/auth_api.dart' show ApiException;
 import '../data/session.dart';
 import '../theme/app_theme.dart';
+import '../video/selected_video.dart';
+import '../widgets/swing_video.dart';
 
 /// 스윙 영상 촬영 화면.
 ///
 /// 카메라 프리뷰를 세로로 꽉 채우고, 하단의 흰 원형 버튼으로 녹화를 시작/중지한다.
-/// 녹화가 끝나면 미리보기 화면([_ReviewScreen])으로 넘어가 확인 후 업로드한다.
+/// 녹화가 끝나면 미리보기 화면([SwingVideoReviewScreen])에서 확인 후 업로드한다.
 /// 왼쪽 아래 썸네일을 누르면 갤러리에서 기존 영상을 불러온다.
 class SwingCameraScreen extends StatefulWidget {
   const SwingCameraScreen({super.key});
@@ -30,6 +30,7 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
   List<CameraDescription> _cameras = [];
   bool _initializing = true;
   bool _recording = false;
+  bool _picking = false;
   String? _error;
 
   @override
@@ -63,6 +64,7 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
   Future<void> _setupCamera() async {
     try {
       _cameras = await availableCameras();
+      if (!mounted) return;
       if (_cameras.isEmpty) {
         setState(() {
           _error = '사용할 수 있는 카메라가 없습니다.';
@@ -92,13 +94,14 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = '카메라를 열 수 없습니다. 권한을 확인해주세요.';
+        _error = '카메라를 열 수 없습니다. 권한을 확인해주세요.\n왼쪽 아래에서 영상을 선택할 수 있습니다.';
         _initializing = false;
       });
     }
   }
 
   Future<void> _toggleRecording() async {
+    if (_picking) return;
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
 
@@ -112,9 +115,14 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
     } else {
       try {
         final file = await controller.stopVideoRecording();
+        if (!mounted) {
+          releaseSelectedVideo(file.path);
+          return;
+        }
         setState(() => _recording = false);
-        await _openReview(file.path);
+        await _openReview(file);
       } catch (_) {
+        if (!mounted) return;
         setState(() => _recording = false);
         _showSnack('녹화를 저장할 수 없습니다.');
       }
@@ -122,24 +130,33 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
   }
 
   Future<void> _pickFromGallery() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickVideo(source: ImageSource.gallery);
-    if (picked != null) {
-      await _openReview(picked.path);
+    if (_picking || _recording) return;
+    setState(() => _picking = true);
+    try {
+      final picked = await ImagePicker().pickVideo(source: ImageSource.gallery);
+      if (picked != null) await _openReview(picked);
+    } catch (_) {
+      _showSnack('영상을 선택하지 못했습니다. 다시 시도해주세요.');
+    } finally {
+      if (mounted) setState(() => _picking = false);
     }
   }
 
-  Future<void> _openReview(String videoPath) async {
-    if (!mounted) return;
+  Future<void> _openReview(XFile video) async {
+    if (!mounted) {
+      releaseSelectedVideo(video.path);
+      return;
+    }
     await Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => _ReviewScreen(videoPath: videoPath)),
+      MaterialPageRoute(builder: (_) => SwingVideoReviewScreen(video: video)),
     );
   }
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   // 촬영 가이드(측면 촬영 / 전신 촬영)를 단계별로 보여준다.
@@ -173,11 +190,14 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
       padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
       child: Row(
         children: [
-          const Text('영상 촬영',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600)),
+          const Text(
+            '영상 촬영',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const Spacer(),
           // 촬영 가이드 다시 보기.
           IconButton(
@@ -191,15 +211,19 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
 
   Widget _preview() {
     if (_initializing) {
-      return const Center(child: CircularProgressIndicator(color: Colors.white));
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      );
     }
     if (_error != null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(_error!,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70)),
+          child: Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70),
+          ),
         ),
       );
     }
@@ -236,11 +260,16 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.fiber_manual_record,
-                      color: AppColors.primary, size: 12),
+                  Icon(
+                    Icons.fiber_manual_record,
+                    color: AppColors.primary,
+                    size: 12,
+                  ),
                   SizedBox(width: 6),
-                  Text('녹화 중',
-                      style: TextStyle(color: Colors.white, fontSize: 12)),
+                  Text(
+                    '녹화 중',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
                 ],
               ),
             ),
@@ -258,7 +287,7 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
         children: [
           // 왼쪽: 갤러리에서 불러오기 썸네일.
           GestureDetector(
-            onTap: _recording ? null : _pickFromGallery,
+            onTap: _recording || _picking ? null : _pickFromGallery,
             child: Container(
               width: 44,
               height: 44,
@@ -267,8 +296,11 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(color: Colors.white24),
               ),
-              child: const Icon(Icons.photo_library_outlined,
-                  color: Colors.white70, size: 20),
+              child: const Icon(
+                Icons.photo_library_outlined,
+                color: Colors.white70,
+                size: 20,
+              ),
             ),
           ),
           // 가운데: 녹화 버튼.
@@ -288,8 +320,7 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
                   height: _recording ? 28 : 56,
                   decoration: BoxDecoration(
                     color: _recording ? AppColors.primary : Colors.white,
-                    borderRadius:
-                        BorderRadius.circular(_recording ? 6 : 28),
+                    borderRadius: BorderRadius.circular(_recording ? 6 : 28),
                   ),
                 ),
               ),
@@ -302,10 +333,11 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
                 ? const SizedBox.shrink()
                 : GestureDetector(
                     onTap: () => Navigator.of(context).maybePop(),
-                    child: const Text('취소',
-                        textAlign: TextAlign.end,
-                        style:
-                            TextStyle(color: Colors.white, fontSize: 16)),
+                    child: const Text(
+                      '취소',
+                      textAlign: TextAlign.end,
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
                   ),
           ),
         ],
@@ -315,53 +347,55 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
 }
 
 /// 녹화/선택한 영상을 미리 보고, 좌타·우타를 고른 뒤 업로드하는 화면.
-class _ReviewScreen extends StatefulWidget {
-  const _ReviewScreen({required this.videoPath});
-  final String videoPath;
+class SwingVideoReviewScreen extends StatefulWidget {
+  const SwingVideoReviewScreen({
+    super.key,
+    required this.video,
+    this.api,
+    this.controllerFactory,
+  });
+  final XFile video;
+  final AnalysisApi? api;
+  final SwingVideoControllerFactory? controllerFactory;
 
   @override
-  State<_ReviewScreen> createState() => _ReviewScreenState();
+  State<SwingVideoReviewScreen> createState() => _ReviewScreenState();
 }
 
-class _ReviewScreenState extends State<_ReviewScreen> {
-  late final VideoPlayerController _video;
-  final _api = AnalysisApi();
+class _ReviewScreenState extends State<SwingVideoReviewScreen> {
+  late final AnalysisApi _api;
   bool _isLeft = false; // 기본: 우타
   bool _uploading = false;
+  bool _videoTransferred = false;
 
   @override
   void initState() {
     super.initState();
-    _video = VideoPlayerController.file(File(widget.videoPath))
-      ..initialize().then((_) {
-        if (!mounted) return;
-        setState(() {});
-        _video
-          ..setLooping(true)
-          ..play();
-      });
+    _api = widget.api ?? AnalysisApi();
   }
 
   @override
   void dispose() {
-    _video.dispose();
-    _api.dispose();
+    // 결과 화면으로 넘긴 Blob은 그 화면이 종료될 때 해제한다.
+    if (!_videoTransferred) releaseSelectedVideo(widget.video.path);
+    if (widget.api == null) _api.dispose();
     super.dispose();
   }
 
   Future<void> _upload() async {
+    if (_uploading) return;
     final userId = Session.instance.userId;
     if (userId == null || userId.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('로그인한 뒤 영상을 업로드해주세요.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('로그인한 뒤 영상을 업로드해주세요.')));
       return;
     }
 
     setState(() => _uploading = true);
     try {
       final created = await _api.uploadSwingVideo(
-        videoPath: widget.videoPath,
+        video: widget.video,
         isLeft: _isLeft,
         userId: userId,
         // 현재는 업로드 시각 사용. 실제 촬영 시각은 미디어 메타데이터 연결이 필요하다.
@@ -371,85 +405,98 @@ class _ReviewScreenState extends State<_ReviewScreen> {
       // 리뷰(중첩 MaterialPageRoute)만 닫고, 촬영 화면은 GoRouter 로 피드백으로
       // 교체한다. GoRoute 페이지를 Navigator.pop 으로 직접 닫으면 GoRouter 상태와
       // 어긋나 push 가 무시되므로, 교체는 반드시 router 로 한다.
-      // 갓 촬영한 스윙이므로 비교 대상이 없는 첫 피드백(first=1)으로 연다.
-      // TODO(backend): 실제로는 이 유저의 이전 기록 유무로 first 여부를 정한다.
+      // first=1은 새 업로드 분석의 polling을 유지한다. 과거 비교 여부와는 별개다.
       final router = GoRouter.of(context);
+      final videoPath = widget.video.path;
+      _videoTransferred = true;
       Navigator.of(context).pop(); // review 닫기
-      // 방금 촬영한 영상 경로를 함께 넘겨 "내 스윙 영상" 에 실제 영상을 보여준다.
+      // 웹 Blob은 결과 화면에서도 재사용한다. DB에는 저장하지 않는다.
       router.pushReplacement(
         '/analyses/${created.analysisId}?first=1',
-        extra: widget.videoPath,
+        extra: videoPath,
       );
     } on ApiException catch (e) {
       if (!mounted) return;
-      setState(() => _uploading = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('업로드를 완료하지 못했습니다. 다시 시도해주세요.')),
+      );
+    } finally {
+      if (mounted) setState(() => _uploading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return PopScope(
+      canPop: !_uploading,
+      child: Scaffold(
         backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: const Text('촬영 확인'),
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: Center(
-                child: _video.value.isInitialized
-                    ? AspectRatio(
-                        aspectRatio: _video.value.aspectRatio,
-                        child: VideoPlayer(_video),
-                      )
-                    : const CircularProgressIndicator(color: Colors.white),
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: const Text('촬영 확인'),
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: SwingVideo(
+                  analysisId: '', // 아직 서버에 등록하지 않은 선택 영상.
+                  videoPath: widget.video.path,
+                  api: _api,
+                  controllerFactory: widget.controllerFactory,
+                  fit: BoxFit.contain,
+                  autoplay: true, // SwingVideo가 웹에서는 사용자 재생만 허용한다.
+                ),
               ),
-            ),
-            _handednessSelector(),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _uploading
-                          ? null
-                          : () => Navigator.of(context).pop(),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Colors.white54),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+              _handednessSelector(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _uploading
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white54),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        child: const Text('다시 촬영'),
                       ),
-                      child: const Text('다시 촬영'),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _uploading ? null : _upload,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _uploading ? null : _upload,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        child: _uploading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('분석 요청'),
                       ),
-                      child: _uploading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2),
-                            )
-                          : const Text('분석 요청'),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -474,7 +521,7 @@ class _ReviewScreenState extends State<_ReviewScreen> {
     return ChoiceChip(
       label: Text(label),
       selected: selected,
-      onSelected: (_) => onTap(),
+      onSelected: _uploading ? null : (_) => onTap(),
       selectedColor: AppColors.primary,
       backgroundColor: Colors.white12,
       labelStyle: TextStyle(color: selected ? Colors.white : Colors.white70),
@@ -510,7 +557,9 @@ class _CameraGuideDialogState extends State<CameraGuideDialog> {
   void _next() {
     if (_page < _pageCount - 1) {
       _controller.nextPage(
-          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
     } else {
       Navigator.of(context).pop(); // 촬영 시작하기 → 가이드 닫기
     }
@@ -519,7 +568,9 @@ class _CameraGuideDialogState extends State<CameraGuideDialog> {
   void _back() {
     if (_page > 0) {
       _controller.previousPage(
-          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
     }
   }
 
@@ -534,12 +585,16 @@ class _CameraGuideDialogState extends State<CameraGuideDialog> {
           children: const [
             Icon(Icons.sports_baseball, color: AppColors.primary, size: 36),
             SizedBox(height: 12),
-            Text('촬영 가이드를 종료할까요?',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            Text(
+              '촬영 가이드를 종료할까요?',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
             SizedBox(height: 8),
-            Text('가이드를 종료하면 정확한 분석이\n어려울 수 있어요.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.hint, fontSize: 13)),
+            Text(
+              '가이드를 종료하면 정확한 분석이\n어려울 수 있어요.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.hint, fontSize: 13),
+            ),
           ],
         ),
         actionsAlignment: MainAxisAlignment.spaceBetween,
@@ -643,8 +698,10 @@ class _CameraGuideDialogState extends State<CameraGuideDialog> {
           ),
         ),
         const SizedBox(height: 4),
-        Text('${_page + 1}/$_pageCount',
-            style: const TextStyle(fontSize: 11, color: AppColors.hint)),
+        Text(
+          '${_page + 1}/$_pageCount',
+          style: const TextStyle(fontSize: 11, color: AppColors.hint),
+        ),
       ],
     );
   }
@@ -673,17 +730,22 @@ class _GuidePageOne extends StatelessWidget {
               top: 16,
               right: 0,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.primary,
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: const Text('측면',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700)),
+                child: const Text(
+                  '측면',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ),
           ],
@@ -710,8 +772,7 @@ class _GuidePageTwo extends StatelessWidget {
         child: CustomPaint(
           foregroundPainter: const _FramePainter(),
           child: const Center(
-            child: CustomPaint(
-                size: Size(130, 160), painter: _BatterPainter()),
+            child: CustomPaint(size: Size(130, 160), painter: _BatterPainter()),
           ),
         ),
       ),
@@ -746,21 +807,25 @@ class _GuideBody extends StatelessWidget {
             textAlign: TextAlign.center,
             text: TextSpan(
               style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.black),
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: Colors.black,
+              ),
               children: [
                 TextSpan(
-                    text: highlight,
-                    style: const TextStyle(color: AppColors.primary)),
+                  text: highlight,
+                  style: const TextStyle(color: AppColors.primary),
+                ),
                 TextSpan(text: rest),
               ],
             ),
           ),
           const SizedBox(height: 10),
-          Text(subtitle,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.subtitle, fontSize: 13)),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.subtitle, fontSize: 13),
+          ),
           Expanded(child: Center(child: illustration)),
           Container(
             width: double.infinity,
@@ -772,13 +837,21 @@ class _GuideBody extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.lightbulb_outline,
-                    color: AppColors.primary, size: 18),
+                const Icon(
+                  Icons.lightbulb_outline,
+                  color: AppColors.primary,
+                  size: 18,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(tip,
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.subtitle, height: 1.4)),
+                  child: Text(
+                    tip,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.subtitle,
+                      height: 1.4,
+                    ),
+                  ),
                 ),
               ],
             ),

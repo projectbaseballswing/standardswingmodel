@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:swing_analysis/api/analysis_api.dart';
 
 class _CapturingClient extends http.BaseClient {
@@ -42,7 +43,7 @@ void main() {
       final date = DateTime.utc(2026, 10, 10, 5, 30).toLocal();
 
       final result = await api.uploadSwingVideo(
-        videoPath: video.path,
+        video: XFile(video.path),
         isLeft: isLeft,
         userId: 'testuser01',
         recordedAt: date,
@@ -56,6 +57,7 @@ void main() {
       expect(request.files.single.field, 'video');
       expect(request.files.single.filename, 'test.mp4');
       expect(request.files.single.length, videoBytes.length);
+      expect(request.files.single.contentType.toString(), 'video/mp4');
       expect(request.fields, {
         'handedness': isLeft ? 'left' : 'right',
         'user_id': 'testuser01',

@@ -36,7 +36,7 @@ final router = GoRouter(
       builder: (context, state) => OverallFeedbackScreen(
         analysisId: state.pathParameters['id']!,
         firstTime: state.uri.queryParameters['first'] == '1',
-        // 방금 촬영한 로컬 영상 경로(있으면). 촬영 흐름에서 extra 로 넘긴다.
+        // 새 영상의 로컬 경로/웹 Blob URL. 결과 화면이 Blob의 해제를 맡는다.
         videoPath: state.extra as String?,
       ),
     ),

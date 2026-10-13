@@ -5,6 +5,7 @@ import '../api/auth_api.dart' show ApiException;
 import '../data/feedback_repository.dart';
 import '../models/feedback.dart';
 import '../theme/app_theme.dart';
+import '../video/selected_video.dart';
 import '../widgets/swing_video.dart';
 import '../widgets/feedback_metrics.dart';
 
@@ -27,7 +28,7 @@ class OverallFeedbackScreen extends StatefulWidget {
   /// 새 업로드의 분석 완료를 기다릴 때 true. 과거 기록 조회는 false.
   final bool firstTime;
 
-  /// 방금 촬영한 로컬 영상 경로. 있으면 "내 스윙 영상" 에 실제 영상을 보여준다.
+  /// 새 영상의 로컬 경로 또는 웹 Blob URL. 이 화면 종료 시 Blob을 해제한다.
   final String? videoPath;
 
   final FeedbackRepository? repository;
@@ -53,6 +54,9 @@ class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
   @override
   void didUpdateWidget(OverallFeedbackScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoPath != widget.videoPath) {
+      releaseSelectedVideo(oldWidget.videoPath);
+    }
     if (oldWidget.analysisId != widget.analysisId ||
         oldWidget.firstTime != widget.firstTime) {
       _future = _repo.fetchFeedback(
@@ -64,6 +68,7 @@ class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
 
   @override
   void dispose() {
+    releaseSelectedVideo(widget.videoPath);
     if (widget.repository == null) _repo.dispose();
     super.dispose();
   }

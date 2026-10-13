@@ -1,5 +1,45 @@
 # swing_analysis
 
+## Android / Chrome 영상 선택·업로드
+
+- `image_picker`/`camera`의 `XFile`을 리뷰 화면과 `AnalysisApi`까지 그대로 전달한다.
+  `length()`와 `openRead()`로 multipart `video`를 만들며 파일명, MIME,
+  `handedness`, 로그인 세션의 `user_id`, UTC ISO 8601 `recorded_at`을 전송한다.
+  `recorded_at`은 현재 업로드 시각이며 원본 영상 메타데이터의 촬영 시각은 아니다.
+- Android는 기존 파일 컨트롤러와 촬영 흐름을 사용한다. Chrome은 선택한
+  Blob URL을 `VideoPlayerController.networkUrl`로 재생하고 탭으로 재생을 시작한다.
+  리뷰는 원본 비율을 유지하고, 초기화 실패/30초 초과 시 오류와 재시도를 표시한다.
+- 리뷰 취소 시 Blob URL을 해제한다. 업로드 성공 시 `pushReplacement`와 `first=1`
+  polling을 유지하고 같은 Blob을 종합 피드백 화면으로 넘긴다. 결과 조회 실패 시에도
+  결과 화면 종료 시 해제한다. URL은 라우트의 메모리 값이며 DB 등에 저장하지 않는다.
+  결과 화면에서 Blob 재생 실패 시 '저장된 영상으로 재시도'로 Signed URL을 요청한다.
+- 설치된 `cross_file 0.3.5+5`의 웹 `openRead()`는 Blob을 바이트로 변환하고,
+  `http 1.6.0` BrowserClient는 multipart 전체를 버퍼링한다. 앱에서 별도의
+  `readAsBytes()` 복사를 추가하지 않지만, 웹에서 완전한 스트리밍 업로드는 아니다.
+  대용량 파일은 메모리 부담이 있으며 실제 브라우저 성능 검증이 필요하다.
+- 웹 카메라는 HTTPS/localhost와 카메라·마이크 권한이 필요하고 브라우저별 녹화 형식이
+  다르다. 현재 서버 허용 확장자는 mp4/mov/avi/mkv/m4v이며 WebM은 허용하지 않는다.
+  MIME을 바꾸거나 확장자를 위장하지 않으며 서버 415 오류를 표시한다.
+  이번 검증은 갤러리 파일 선택 우선이다. 재생 가능 여부는 브라우저/OS 코덱에 달려 있다.
+  서버 기본 업로드 제한은 200MB이며 실제 설정에 따라 달라진다.
+
+Mock 검증: `flutter test --no-pub`.
+브라우저 분기와 Blob 수명 검증: `flutter test --no-pub --platform chrome test/swing_upload_test.dart`.
+웹 빌드: `flutter build web --no-pub`. 패키지 추가/갱신 없이 실행한다.
+
+현재 Windows 환경에서 일반 테스트는 150개 통과(웹 전용 3개 제외), 정적 분석과
+웹 빌드도 통과했다. 별도 Chrome 자동 테스트는 Flutter 테스트 서버의
+`/canvaskit/chromium/canvaskit.js`·`.wasm` 요청이 404로 실패해 테스트 시작 전
+로딩 단계에서 중단했다. SDK/패키지는 수정하지 않았으며 웹 전용 3개는 미검증이다.
+이는 실제 Chrome 앱의 수동 검증 결과를 의미하지 않는다.
+
+수동 검증(사용자 실행): 로그인 → 촬영 가이드 닫기 → 왼쪽 아래 갤러리에서 짧은
+MP4(H.264/AAC) 선택 → 미리보기 탭·일시정지 → 좌타/우타 선택 → 분석 요청 →
+종합 피드백과 영상 확인 → 뒤로 가기 → 현재 달의 기록 확인. 개발자 도구에서
+POST multipart와 `first=1` 이후 분석 GET 요청을 확인한다. 이후 과거 기록을 다시
+열면 Signed URL로 재생한다. `SWING_MOCK=1`의 분석 값은 실제 AI 정확도 검증이 아니다.
+자동 테스트는 실제 API/Supabase에 데이터를 생성하지 않는다.
+
 A new Flutter project.
 
 ## Getting Started

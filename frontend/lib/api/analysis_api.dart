@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart' show XFile;
 
 import 'api_config.dart';
 import 'auth_api.dart' show ApiException;
@@ -31,33 +32,86 @@ class AnalysisApi {
 
   /// 녹화한 스윙 영상을 업로드해 분석 작업을 등록한다.
   ///
-  /// [videoPath] 로컬 영상 파일 경로, [isLeft] 좌타 여부.
+  /// [video] 촬영/선택한 파일(Android 파일 또는 웹 Blob), [isLeft] 좌타 여부.
   /// [userId] 로그인한 계정 ID, [recordedAt] 등록 시각(현재는 업로드 시각).
   Future<AnalysisCreated> uploadSwingVideo({
-    required String videoPath,
+    required XFile video,
     required bool isLeft,
     required String userId,
     required DateTime recordedAt,
   }) async {
+    if (userId.trim().isEmpty) {
+      throw ApiException('로그인한 뒤 영상을 업로드해주세요.');
+    }
+    late final int length;
+    try {
+      length = await video.length();
+    } catch (_) {
+      throw ApiException('영상 파일을 읽을 수 없습니다. 다시 선택해주세요.');
+    }
+    if (length <= 0) throw ApiException('비어 있는 영상 파일은 업로드할 수 없습니다.');
+    // 앱에서 readAsBytes로 복사하지 않는다. 웹 http.Client 내부 버퍼링은 별도다.
+    final filename = video.name
+        .split(RegExp(r'[/\\]'))
+        .last
+        .replaceAll(RegExp(r'[\x00-\x1f\x7f]'), '');
     final request = http.MultipartRequest('POST', _uri('/api/analyses'))
       ..fields['handedness'] = isLeft ? 'left' : 'right'
       ..fields['user_id'] = userId
-      ..fields['recorded_at'] = recordedAt.toUtc().toIso8601String()
-      ..files.add(await http.MultipartFile.fromPath('video', videoPath));
+      ..fields['recorded_at'] = recordedAt.toUtc().toIso8601String();
 
     http.Response res;
     try {
+      request.files.add(
+        http.MultipartFile(
+          'video',
+          video.openRead(),
+          length,
+          filename: filename.isEmpty ? 'swing' : filename,
+          contentType: _videoContentType(video.mimeType, filename),
+        ),
+      );
       final streamed = await _client.send(request);
       res = await http.Response.fromStream(streamed);
     } catch (_) {
-      throw ApiException('서버에 연결할 수 없습니다. 네트워크를 확인해주세요.');
+      throw ApiException('영상을 전송하지 못했습니다. 파일과 네트워크를 확인하고 다시 시도해주세요.');
     }
 
     final body = _decode(res);
+    final id = body['analysis_id'];
+    final status = body['status'];
+    if (id is! String ||
+        id.trim().isEmpty ||
+        (status != null && status is! String)) {
+      throw ApiException('업로드 응답이 올바르지 않습니다. 스윙 목록에서 등록 여부를 확인해주세요.');
+    }
     return AnalysisCreated(
-      analysisId: body['analysis_id'] as String,
-      status: (body['status'] as String?) ?? 'queued',
+      analysisId: id,
+      status: (status as String?) ?? 'queued',
     );
+  }
+
+  http.MediaType _videoContentType(String? declared, String filename) {
+    if (declared != null && declared.trim().isNotEmpty) {
+      try {
+        final type = http.MediaType.parse(declared);
+        if (type.mimeType != 'application/octet-stream') return type;
+      } on FormatException {
+        // 일부 플랫폼은 MIME 정보를 제공하지 않는다. 확장자를 사용한다.
+      }
+    }
+    return http.MediaType.parse(switch (filename
+        .toLowerCase()
+        .split('.')
+        .last) {
+      'mp4' => 'video/mp4',
+      'mov' => 'video/quicktime',
+      'm4v' => 'video/x-m4v',
+      'avi' => 'video/x-msvideo',
+      'mkv' => 'video/x-matroska',
+      'webm' => 'video/webm',
+      _ => 'application/octet-stream',
+    });
   }
 
   /// 분석 결과 1건을 조회한다.

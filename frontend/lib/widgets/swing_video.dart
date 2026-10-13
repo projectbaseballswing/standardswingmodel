@@ -1,12 +1,13 @@
 import 'dart:async';
-import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../api/analysis_api.dart';
 import '../api/auth_api.dart' show ApiException;
 import '../route_observer.dart';
+import '../video/selected_video.dart';
 
 typedef SwingVideoControllerFactory =
     VideoPlayerController Function({String? videoPath, Uri? url});
@@ -21,6 +22,8 @@ class SwingVideo extends StatefulWidget {
     this.api,
     this.controllerFactory,
     this.now,
+    this.fit = BoxFit.cover,
+    this.autoplay = false,
   });
 
   final String analysisId;
@@ -28,6 +31,8 @@ class SwingVideo extends StatefulWidget {
   final AnalysisApi? api;
   final SwingVideoControllerFactory? controllerFactory;
   final DateTime Function()? now;
+  final BoxFit fit;
+  final bool autoplay;
 
   @override
   State<SwingVideo> createState() => _SwingVideoState();
@@ -48,8 +53,9 @@ class _SwingVideoState extends State<SwingVideo>
   String? _error;
   int _generation = 0;
   int _playIntent = 0;
+  bool _useStoredVideo = false;
 
-  bool get _local => widget.videoPath != null;
+  bool get _local => widget.videoPath != null && !_useStoredVideo;
   DateTime get _now => (widget.now ?? DateTime.now)();
   bool get _expired =>
       !_local && (_expiresAt == null || !_now.isBefore(_expiresAt!));
@@ -64,7 +70,7 @@ class _SwingVideoState extends State<SwingVideo>
     WidgetsBinding.instance.addObserver(this);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
-    if (_local) unawaited(_load());
+    if (_local) unawaited(_load(play: widget.autoplay && !kIsWeb));
   }
 
   @override
@@ -91,7 +97,8 @@ class _SwingVideoState extends State<SwingVideo>
       _expiresAt = null;
       _position = Duration.zero;
       _error = null;
-      if (_local) unawaited(_load());
+      _useStoredVideo = false;
+      if (_local) unawaited(_load(play: widget.autoplay && !kIsWeb));
     }
   }
 
@@ -164,7 +171,7 @@ class _SwingVideoState extends State<SwingVideo>
     if (_loading) return;
     final generation = ++_generation;
     final playIntent = _playIntent;
-    final localPath = widget.videoPath;
+    final localPath = _local ? widget.videoPath : null;
     final analysisId = widget.analysisId;
     final resumeAt = position ?? _position;
     setState(() {
@@ -191,7 +198,7 @@ class _SwingVideoState extends State<SwingVideo>
       final c = factory != null
           ? factory(videoPath: localPath, url: url)
           : localPath != null
-          ? VideoPlayerController.file(File(localPath))
+          ? selectedVideoController(localPath)
           : VideoPlayerController.networkUrl(url!);
       _controller = c;
       _expiresAt = expiresAt;
@@ -227,7 +234,9 @@ class _SwingVideoState extends State<SwingVideo>
   }
 
   String get _playbackError => _local
-      ? '로컬 영상을 재생할 수 없습니다. 다시 시도해주세요.'
+      ? kIsWeb
+            ? '선택한 영상을 재생할 수 없습니다. 파일 형식과 코덱을 확인해주세요.'
+            : '로컬 영상을 재생할 수 없습니다. 파일 형식과 코덱을 확인해주세요.'
       : '영상을 재생할 수 없습니다. 연결을 확인하고 다시 시도해주세요.';
 
   void _playerError(VideoPlayerController c) {
@@ -334,7 +343,21 @@ class _SwingVideoState extends State<SwingVideo>
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 11),
                   ),
-                  TextButton(onPressed: _toggle, child: const Text('다시 시도')),
+                  TextButton(
+                    onPressed: () {
+                      // 웹 Blob이 사라졌거나 재생에 실패하면 저장된 원본으로
+                      // 사용자가 명시적으로 재시도한다. 자동 재시도는 하지 않는다.
+                      if (kIsWeb && _local && widget.analysisId.isNotEmpty) {
+                        _useStoredVideo = true;
+                      }
+                      _toggle();
+                    },
+                    child: Text(
+                      kIsWeb && _local && widget.analysisId.isNotEmpty
+                          ? '저장된 영상으로 재시도'
+                          : '다시 시도',
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -376,7 +399,7 @@ class _SwingVideoState extends State<SwingVideo>
         fit: StackFit.expand,
         children: [
           FittedBox(
-            fit: BoxFit.cover,
+            fit: widget.fit,
             clipBehavior: Clip.hardEdge,
             child: SizedBox(
               width: c.value.size.width,
