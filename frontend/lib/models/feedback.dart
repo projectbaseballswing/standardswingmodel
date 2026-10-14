@@ -6,9 +6,9 @@
 /// 세부 항목([FeatureAnalysis]: 팔꿈치 각도, 손 높이 등)이 여러 개 들어 있다.
 ///
 /// 한 화면이 두 상태를 모두 표현한다.
-///  - 첫 피드백   : 비교할 이전 스윙이 없다. [previousScore] 가 null.
+///  - 비교 없음  : [previousScore] 가 null. 첫 스윙이라는 의미는 아니다.
 ///                  부위는 프로 기준 대비 점수로 "잘함 / 개선 필요" 를 나눈다.
-///  - 반복 피드백 : 이전 스윙과 비교한다(아직 샘플). [previousScore] 로 증감을
+///  - 비교 있음  : 실제 이전 스윙과 비교한 경우만 [previousScore] 로 증감을
 ///                  보여주고 "개선 / 개선 필요 / 유지" 로 나눈다.
 library;
 
@@ -30,6 +30,7 @@ class FeedbackItem {
     this.level = 'good',
     this.reliability = 'high',
     this.features = const [],
+    this.available = true,
   });
 
   /// 서버 그룹 키. 예) 'lead_arm'.
@@ -42,13 +43,16 @@ class FeedbackItem {
   final BodyPart part;
 
   /// 이번 부위 점수(0~100). 서버 group_scores.score 실제값.
-  final int currentScore;
+  final double? currentScore;
+  final bool available;
+  bool get limited =>
+      !available || currentScore == null || reliability == 'low';
 
   /// 설명 문구(2줄 내외).
   final String description;
 
-  /// 이전 점수. 첫 피드백이면 null → 증감 화살표를 숨긴다.
-  final int? previousScore;
+  /// 실제 비교한 이전 점수. 비교하지 않았으면 null → 증감 화살표를 숨긴다.
+  final double? previousScore;
 
   /// 부위 수준. 'good' | 'caution' | 'warning'.
   /// 부위 점수로 판정한다(점수와 배지가 어긋나지 않게).
@@ -60,9 +64,10 @@ class FeedbackItem {
   /// 이 부위를 이루는 세부 항목(피처) 목록.
   final List<FeatureAnalysis> features;
 
-  /// 이전 대비 증감. 첫 피드백이면 null.
-  int? get delta =>
-      previousScore == null ? null : currentScore - previousScore!;
+  /// 이전 대비 증감. 비교하지 않았으면 null.
+  double? get delta => previousScore == null || currentScore == null
+      ? null
+      : currentScore! - previousScore!;
 }
 
 /// 부위를 이루는 세부 항목(피처) 하나. 예) 앞팔 팔꿈치 각도, 손 높이.
@@ -80,6 +85,8 @@ class FeatureAnalysis {
     this.rangeOfMotion,
     this.series,
     this.phaseScores,
+    this.reliability = 'medium',
+    this.eventBasedSeries = false,
   });
 
   /// 서버 피처 키. 예) 'lead_elbow_angle'.
@@ -99,6 +106,8 @@ class FeatureAnalysis {
 
   /// 피처 설명(각도 정의 등).
   final String description;
+  final String reliability;
+  final bool eventBasedSeries;
 
   /// 임팩트 순간의 내 값 vs 기준.
   final Measure? impact;
@@ -106,14 +115,12 @@ class FeatureAnalysis {
   /// 움직임 폭(최대-최소)의 내 값 vs 기준.
   final Measure? rangeOfMotion;
 
-  /// 스윙 전체(구간 4개 × 20등분 = 80점) 각도 시계열. 그래프용.
+  /// 스윙 시계열. 0.2는 구간 4개 × 20등분, 0.1은 기준 프레임 시간축을 쓴다.
   /// `?include_series=true` 로 받았을 때만 채워진다.
   final List<SeriesSample>? series;
 
-  /// 스윙 4구간(SwingPhase 순서)의 0~100 점수.
-  /// 서버가 구간별 피처 점수를 직접 주지 않아, 구간 z_score 를 환산한 값이다.
-  /// 4구간이 모두 측정됐을 때만 채워진다.
-  final List<int>? phaseScores;
+  /// 관절 z-score 환산 참고 점수. 서버의 구간 종합 점수와 별개이며 결측은 null.
+  final List<JointPhaseScore>? phaseScores;
 
   /// 비교할 만한 수치가 하나라도 있으면 true.
   bool get hasDetail => series != null || impact != null;
@@ -173,74 +180,12 @@ enum SwingPhase {
 ///  - [improved]  : 점수가 올라 개선됨(초록).
 ///  - [worsened]  : 점수가 내려 개선 필요(빨강).
 ///  - [unchanged] : 변화가 거의 없음(회색).
-///  - [limited]   : 비교할 이전 스윙이 없어 평가 제한(연한 회색).
+///  - [limited]   : 점수·세부 정보 부족 또는 낮은 신뢰도로 평가 제한(연한 회색).
 ///
-/// 첫 피드백(비교 대상 없음)에서는 프로 기준 대비로:
+/// 이전 스윙과 비교하지 않았으면 프로 기준 대비로:
 ///  - [proGood]   : 프로 기준에 잘 맞음 → "잘함"(초록).
 ///  - [proBad]    : 프로 기준과 차이 있음 → "개선 필요"(빨강).
 enum JointStatus { improved, worsened, unchanged, limited, proGood, proBad }
-
-/// 스윙 구간(SwingPhase) 하나의 분석. 종합 피드백([OverallFeedback])에서 만든다.
-///
-/// 관절별 분석이 "어느 부위(공간)가 문제인가" 라면, 구간별 분석은 "스윙의
-/// 어느 타이밍(시간)이 문제인가" 를 본다. 같은 피처 데이터를 시간 축으로 자른다.
-///
-/// 점수([score])는 그 구간에 속한 피처 점수들의 평균이다.
-/// 다만 평균에 약한 고리가 묻히지 않도록, 수준([level])은 평균과 함께
-/// 그 구간의 최저 피처 점수도 본다(=하나라도 많이 낮으면 '개선 필요').
-/// 코치 문장·팁은 아직 규칙 기반 임시(백엔드 LLM 문장이 생기면 교체).
-///
-/// 첫 피드백([previousScore] == null)은 비교 없이 현재 점수만,
-/// 반복 피드백은 이전 대비 증감([delta])을 함께 보여준다.
-///
-/// ⚠️ 이전 스윙 비교값과 포즈 오버레이 이미지는 아직 프론트가 만들 수 없다.
-///    (백엔드 조회 API·포즈 이미지가 생기면 채운다. 그 전까지 반복 피드백은 샘플.)
-class PhaseAnalysis {
-  const PhaseAnalysis({
-    required this.phase,
-    required this.number,
-    required this.score,
-    required this.level,
-    required this.shortComment,
-    required this.detailComment,
-    required this.tip,
-    this.worstFeatureName,
-    this.previousScore,
-  });
-
-  /// 어떤 구간인지.
-  final SwingPhase phase;
-
-  /// 화면에 보이는 순번(1부터). 스텝퍼·카드 번호.
-  final int number;
-
-  /// 이 구간 점수(0~100). 구간 내 피처 점수 평균.
-  final int score;
-
-  /// 구간 수준. 'good' | 'caution'. 평균·최저 피처를 함께 보고 정한다.
-  final String level;
-
-  /// 카드에 들어가는 한 줄 설명. 예) "자세가 안정적이에요."
-  final String shortComment;
-
-  /// 상세 카드 본문(2~3줄).
-  final String detailComment;
-
-  /// 코칭 팁 문구.
-  final String tip;
-
-  /// 이 구간에서 기준과 가장 차이가 큰 세부 항목 이름(없으면 null).
-  final String? worstFeatureName;
-
-  /// 이전 스윙의 이 구간 점수. 첫 피드백이면 null → 증감을 숨긴다.
-  final int? previousScore;
-
-  /// 이전 대비 증감. 첫 피드백이면 null.
-  int? get delta => previousScore == null ? null : score - previousScore!;
-
-  /// 개선이 필요한 구간인지(점수가 기준 미만).
-  bool get needWork => level != 'good';
-}
 
 /// 부위 하나의 상세 분석. 종합 피드백([OverallFeedback.items])에서 만든다.
 ///
@@ -278,7 +223,7 @@ class PartAnalysis {
   final JointStatus status;
 
   /// 이번 부위 점수.
-  final int currentScore;
+  final double? currentScore;
 
   /// 검출 신뢰도. 'low' | 'medium' | 'high'.
   final String reliability;
@@ -299,11 +244,12 @@ class PartAnalysis {
   final List<String> points;
 
   /// 이전 점수. 비교 대상이 없으면 null.
-  final int? previousScore;
+  final double? previousScore;
 
   /// 이전 대비 증감. 비교 대상이 없으면 null.
-  int? get delta =>
-      previousScore == null ? null : currentScore - previousScore!;
+  double? get delta => previousScore == null || currentScore == null
+      ? null
+      : currentScore! - previousScore!;
 }
 
 /// 종합 피드백 1건.
@@ -315,13 +261,27 @@ class OverallFeedback {
     required this.coachComment,
     required this.items,
     this.previousTotalScore,
+    this.modelVersion = 'unknown',
+    this.available = true,
+    this.reliability = 'medium',
+    this.warnings = const [],
+    this.phases = const [],
+    this.speedMetrics = const [],
+    this.events = const [],
   });
 
   /// 촬영/분석 시각.
   final DateTime recordedAt;
 
   /// 전체 스윙 점수(0~100).
-  final int totalScore;
+  final double? totalScore;
+  final String modelVersion;
+  final bool available;
+  final String reliability;
+  final List<String> warnings;
+  final List<AnalysisPhase> phases;
+  final List<SpeedMetric> speedMetrics;
+  final List<SwingEvent> events;
 
   /// 점수 옆 분홍 박스에 들어가는 한 줄 요약.
   final String summary;
@@ -332,13 +292,112 @@ class OverallFeedback {
   /// 부위별 피드백 목록.
   final List<FeedbackItem> items;
 
-  /// 이전 전체 점수. 첫 피드백이면 null.
-  final int? previousTotalScore;
+  /// 실제 비교한 이전 전체 점수. 비교하지 않았으면 null.
+  final double? previousTotalScore;
 
-  /// 비교할 이전 스윙이 없으면(=첫 피드백) true.
-  bool get isFirst => previousTotalScore == null;
+  /// 실제 이전 스윙과 비교한 점수가 있는지 여부. 촬영 순서와는 무관하다.
+  bool get hasComparison => previousTotalScore != null && totalScore != null;
 
-  /// 전체 점수 증감. 첫 피드백이면 null.
-  int? get totalDelta =>
-      previousTotalScore == null ? null : totalScore - previousTotalScore!;
+  /// 전체 점수 증감. 비교하지 않았으면 null.
+  double? get totalDelta =>
+      !hasComparison ? null : totalScore! - previousTotalScore!;
+}
+
+/// 사용자에게 보여줄 수치는 소수 첫째 자리까지 표시하고 null은 '-'로 둔다.
+String feedbackNumber(num? value) => value == null
+    ? '-'
+    : value == value.roundToDouble()
+    ? value.toInt().toString()
+    : value.toStringAsFixed(1);
+
+String reliabilityLabel(String value) => switch (value) {
+  'high' => '신뢰도 높음',
+  'medium' => '신뢰도 보통 · 참고해서 확인하세요',
+  'low' => '신뢰도 낮음 · 참고용',
+  _ => '신뢰도 정보 없음',
+};
+
+class JointPhaseScore {
+  const JointPhaseScore({required this.key, required this.name, this.score});
+  final String key;
+  final String name;
+  final int? score;
+}
+
+class PhaseDeviation {
+  const PhaseDeviation({
+    required this.joint,
+    required this.name,
+    required this.direction,
+    required this.level,
+    this.diff,
+    this.zScore,
+  });
+  final String joint;
+  final String name;
+  final String direction;
+  final String level;
+  final double? diff;
+  final double? zScore;
+}
+
+class AnalysisPhase {
+  const AnalysisPhase({
+    required this.key,
+    required this.name,
+    required this.available,
+    required this.reliability,
+    this.score,
+    this.unavailableReason,
+    this.userDurationMs,
+    this.referenceDurationMs,
+    this.tempoRatio,
+    this.tempoLevel,
+    this.warnings = const [],
+    this.deviations = const [],
+  });
+  final String key;
+  final String name;
+  final bool available;
+  final String reliability;
+  final double? score;
+  final String? unavailableReason;
+  final double? userDurationMs;
+  final double? referenceDurationMs;
+  final double? tempoRatio;
+  final String? tempoLevel;
+  final List<String> warnings;
+  final List<PhaseDeviation> deviations;
+}
+
+class SpeedMetric {
+  const SpeedMetric({
+    required this.key,
+    required this.name,
+    required this.unit,
+    required this.available,
+    required this.reliability,
+    this.user,
+    this.reference,
+  });
+  final String key;
+  final String name;
+  final String unit;
+  final bool available;
+  final String reliability;
+  final double? user;
+  final double? reference;
+}
+
+class SwingEvent {
+  const SwingEvent({
+    required this.key,
+    required this.name,
+    required this.frame,
+    this.msFromImpact,
+  });
+  final String key;
+  final String name;
+  final int frame;
+  final double? msFromImpact;
 }

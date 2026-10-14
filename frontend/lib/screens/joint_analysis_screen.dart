@@ -26,7 +26,9 @@ class _JointAnalysisScreenState extends State<JointAnalysisScreen> {
   @override
   void initState() {
     super.initState();
-    _parts = FeedbackRepository().buildPartAnalyses(widget.feedback);
+    final repository = FeedbackRepository();
+    _parts = repository.buildPartAnalyses(widget.feedback);
+    repository.dispose();
     // 처음 들어오면 목록 맨 위 부위를 보여준다. (선택하면 그 부위로 바뀐다)
   }
 
@@ -103,12 +105,14 @@ class _SelectorCard extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: const [
-                        Text('왼쪽',
-                            style: TextStyle(
-                                fontSize: 11, color: AppColors.hint)),
-                        Text('오른쪽',
-                            style: TextStyle(
-                                fontSize: 11, color: AppColors.hint)),
+                        Text(
+                          '왼쪽',
+                          style: TextStyle(fontSize: 11, color: AppColors.hint),
+                        ),
+                        Text(
+                          '오른쪽',
+                          style: TextStyle(fontSize: 11, color: AppColors.hint),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -154,13 +158,17 @@ class _SelectorCard extends StatelessWidget {
   static Map<String, Color> _regionColors(List<PartAnalysis> parts) {
     final map = <String, Color>{};
     for (final p in parts) {
-      map[_regionKeyOf(p)] = _statusStyle(p.status).color;
+      final region = _regionKeyOf(p);
+      if (region != null) map[region] = _statusStyle(p.status).color;
     }
     return map;
   }
 
   /// 부위 → 인체 그림 영역 키. 몸통은 통째로 하나의 영역으로 본다.
-  static String _regionKeyOf(PartAnalysis p) {
+  static String? _regionKeyOf(PartAnalysis p) {
+    // 0.1의 pose/velocity 그룹이나 좌우 정보 없는 팔·다리를 특정 부위로 추정하지 않는다.
+    if (p.key == 'torso') return 'torso';
+    if (!p.label.contains('왼') && !p.label.contains('오른')) return null;
     switch (p.part) {
       case BodyPart.arm:
         return p.isLeft ? 'leftArm' : 'rightArm';
@@ -221,7 +229,7 @@ class _PartRow extends StatelessWidget {
               ),
             ),
             Text(
-              '${part.currentScore}',
+              feedbackNumber(part.currentScore),
               style: TextStyle(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w800,
@@ -267,18 +275,20 @@ class _Legend extends StatelessWidget {
     final shown = order.where(present.contains);
 
     Widget dot(Color c, String label) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 7,
-              height: 7,
-              decoration: BoxDecoration(color: c, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 4),
-            Text(label,
-                style: const TextStyle(fontSize: 11, color: AppColors.hint)),
-          ],
-        );
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 11, color: AppColors.hint),
+        ),
+      ],
+    );
     return Wrap(
       alignment: WrapAlignment.center,
       spacing: 14,
@@ -320,9 +330,13 @@ class _ScoreCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text('${part.label} 분석',
-                  style: const TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w700)),
+              Text(
+                '${part.label} 분석',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const Spacer(),
               if (hasComparison)
                 GestureDetector(
@@ -335,11 +349,15 @@ class _ScoreCard extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: const [
-                      Text('비교 기간 선택',
-                          style:
-                              TextStyle(fontSize: 12, color: AppColors.hint)),
-                      Icon(Icons.chevron_right,
-                          size: 16, color: AppColors.hint),
+                      Text(
+                        '비교 기간 선택',
+                        style: TextStyle(fontSize: 12, color: AppColors.hint),
+                      ),
+                      Icon(
+                        Icons.chevron_right,
+                        size: 16,
+                        color: AppColors.hint,
+                      ),
                     ],
                   ),
                 ),
@@ -350,22 +368,27 @@ class _ScoreCard extends StatelessWidget {
             Row(
               children: [
                 _StatBox(
-                    label: '이전 점수',
-                    value: part.previousScore?.toString() ?? '-'),
+                  label: '이전 점수',
+                  value: part.previousScore?.toString() ?? '-',
+                ),
                 const SizedBox(width: 10),
                 _StatBox(
-                    label: '현재 점수',
-                    value: '${part.currentScore}',
-                    valueColor: style.color),
+                  label: '현재 점수',
+                  value: feedbackNumber(part.currentScore),
+                  valueColor: style.color,
+                ),
                 const SizedBox(width: 10),
                 _StatBox(
                   label: '점수 변화',
                   child: delta == null
-                      ? const Text('-',
+                      ? const Text(
+                          '-',
                           style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.hint))
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.hint,
+                          ),
+                        )
                       : Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -373,16 +396,19 @@ class _ScoreCard extends StatelessWidget {
                               delta > 0
                                   ? Icons.arrow_drop_up
                                   : (delta < 0
-                                      ? Icons.arrow_drop_down
-                                      : Icons.remove),
+                                        ? Icons.arrow_drop_down
+                                        : Icons.remove),
                               size: 22,
                               color: style.color,
                             ),
-                            Text('${delta.abs()}',
-                                style: TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w800,
-                                    color: style.color)),
+                            Text(
+                              feedbackNumber(delta.abs()),
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                color: style.color,
+                              ),
+                            ),
                           ],
                         ),
                 ),
@@ -413,7 +439,10 @@ class _ScoreCard extends StatelessWidget {
                   child: Text(
                     part.summary,
                     style: TextStyle(
-                        fontSize: 12.5, height: 1.5, color: style.textOnSoft),
+                      fontSize: 12.5,
+                      height: 1.5,
+                      color: style.textOnSoft,
+                    ),
                   ),
                 ),
               ],
@@ -433,17 +462,17 @@ class _ReliabilityNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final text = reliability == 'low'
-        ? '이 부위는 가려지기 쉬워 분석 신뢰도가 낮은 편이에요. 참고용으로 봐주세요.'
-        : '이 부위는 분석 신뢰도가 보통이에요. 참고용으로 봐주세요.';
+    final text = reliabilityLabel(reliability);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Icon(Icons.info_outline, size: 14, color: AppColors.hint),
         const SizedBox(width: 6),
         Expanded(
-          child: Text(text,
-              style: const TextStyle(fontSize: 11.5, color: AppColors.hint)),
+          child: Text(
+            text,
+            style: const TextStyle(fontSize: 11.5, color: AppColors.hint),
+          ),
         ),
       ],
     );
@@ -475,15 +504,20 @@ class _StatBox extends StatelessWidget {
         ),
         child: Column(
           children: [
-            Text(label,
-                style: const TextStyle(fontSize: 11, color: AppColors.hint)),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 11, color: AppColors.hint),
+            ),
             const SizedBox(height: 6),
             child ??
-                Text(value ?? '-',
-                    style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: valueColor ?? Colors.black87)),
+                Text(
+                  value ?? '-',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: valueColor ?? Colors.black87,
+                  ),
+                ),
           ],
         ),
       ),
@@ -508,32 +542,45 @@ class _CurrentScoreOnly extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('현재 점수',
-                  style: TextStyle(fontSize: 11, color: AppColors.hint)),
-              const SizedBox(height: 4),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.baseline,
-                textBaseline: TextBaseline.alphabetic,
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${part.currentScore}',
-                      style: TextStyle(
+                  const Text(
+                    '현재 점수',
+                    style: TextStyle(fontSize: 11, color: AppColors.hint),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(
+                        feedbackNumber(part.currentScore),
+                        style: TextStyle(
                           fontSize: 40,
                           height: 1.0,
                           fontWeight: FontWeight.w800,
-                          color: style.color)),
-                  const Padding(
-                    padding: EdgeInsets.only(left: 2),
-                    child: Text('/ 100',
-                        style: TextStyle(fontSize: 13, color: AppColors.hint)),
+                          color: style.color,
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.only(left: 2),
+                        child: Text(
+                          '/ 100',
+                          style: TextStyle(fontSize: 13, color: AppColors.hint),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
           ),
-          const Spacer(),
+          const SizedBox(width: 8),
           // 프로 기준 대비 상태 배지(잘함 / 개선 필요).
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
@@ -546,11 +593,14 @@ class _CurrentScoreOnly extends StatelessWidget {
               children: [
                 Icon(style.messageIcon, size: 14, color: style.color),
                 const SizedBox(width: 5),
-                Text(style.badge,
-                    style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: style.color)),
+                Text(
+                  style.badge,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: style.color,
+                  ),
+                ),
               ],
             ),
           ),
@@ -593,20 +643,28 @@ class _FeatureListCardState extends State<_FeatureListCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('${widget.part.label} 세부 항목',
-              style:
-                  const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          Text(
+            '${widget.part.label} 세부 항목',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 4),
-          const Text('항목을 누르면 스윙 전체 변화를 볼 수 있어요.',
-              style: TextStyle(fontSize: 11.5, color: AppColors.hint)),
+          const Text(
+            '항목을 누르면 스윙 전체 변화를 볼 수 있어요.',
+            style: TextStyle(fontSize: 11.5, color: AppColors.hint),
+          ),
           const SizedBox(height: 8),
           for (var i = 0; i < features.length; i++) ...[
             if (i > 0)
-              const Divider(height: 1, thickness: 0.6, color: Color(0xFFEDEDED)),
+              const Divider(
+                height: 1,
+                thickness: 0.6,
+                color: Color(0xFFEDEDED),
+              ),
             _FeatureTile(
               feature: features[i],
               expanded: _expanded == i,
-              onTap: () => setState(() => _expanded = _expanded == i ? null : i),
+              onTap: () =>
+                  setState(() => _expanded = _expanded == i ? null : i),
             ),
           ],
         ],
@@ -643,32 +701,48 @@ class _FeatureTile extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(feature.name,
-                          style: const TextStyle(
-                              fontSize: 13.5, fontWeight: FontWeight.w700)),
+                      Text(
+                        feature.name,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                       const SizedBox(height: 2),
-                      Text(_directionText(feature.direction),
-                          style: const TextStyle(
-                              fontSize: 11.5, color: AppColors.hint)),
+                      Text(
+                        _directionText(feature.direction),
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: AppColors.hint,
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 // level 배지
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: fstyle.soft,
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text(fstyle.label,
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: fstyle.color)),
+                  child: Text(
+                    fstyle.label,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: fstyle.color,
+                    ),
+                  ),
                 ),
-                Icon(expanded ? Icons.expand_less : Icons.expand_more,
-                    size: 18, color: AppColors.hint),
+                Icon(
+                  expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 18,
+                  color: AppColors.hint,
+                ),
               ],
             ),
           ),
@@ -695,12 +769,20 @@ class _FeatureDetail extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ① 스윙 단계별 실제 값 변화 (내 스윙 vs 기준 ±편차)
+          Text(
+            reliabilityLabel(feature.reliability),
+            style: const TextStyle(fontSize: 11, color: AppColors.hint),
+          ),
           if (series != null && series.isNotEmpty) ...[
             Row(
               children: [
-                Text('스윙 단계별 ${feature.unit == 'deg' ? '각도' : '위치'} 변화',
-                    style: const TextStyle(
-                        fontSize: 12.5, fontWeight: FontWeight.w700)),
+                Text(
+                  '스윙 단계별 ${feature.unit == 'deg' ? '각도' : '위치'} 변화',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const Spacer(),
                 _LegendDot(color: const Color(0xFFBDBDBD), label: '기준 스윙'),
                 const SizedBox(width: 10),
@@ -711,9 +793,11 @@ class _FeatureDetail extends StatelessWidget {
             SizedBox(
               height: 140,
               child: CustomPaint(
+                key: ValueKey('feature-series-${feature.key}'),
                 size: Size.infinite,
                 painter: _FeatureChartPainter(
                   series: series,
+                  eventBased: feature.eventBasedSeries,
                   unit: feature.unit,
                   userColor: AppColors.primary,
                 ),
@@ -723,13 +807,19 @@ class _FeatureDetail extends StatelessWidget {
           ],
           // ② 스윙 단계별 점수 (구간 z_score 환산)
           if (phaseScores != null) ...[
-            const Text('스윙 단계별 점수',
-                style:
-                    TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+            const Text(
+              '관절별 구간 참고 점수',
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 8),
+            const Text(
+              '관절 z-score 환산값이며 구간 종합 점수와 다릅니다. 빈 구간은 미측정입니다.',
+              style: TextStyle(fontSize: 11, color: AppColors.hint),
+            ),
             SizedBox(
               height: 130,
               child: CustomPaint(
+                key: ValueKey('feature-phase-scores-${feature.key}'),
                 size: Size.infinite,
                 painter: _PhaseScoreChartPainter(
                   scores: phaseScores,
@@ -744,23 +834,30 @@ class _FeatureDetail extends StatelessWidget {
             children: [
               if (feature.impact != null)
                 _MeasureBox(
-                    label: '임팩트 순간',
-                    measure: feature.impact!,
-                    unit: feature.unit),
+                  label: '임팩트 순간',
+                  measure: feature.impact!,
+                  unit: feature.unit,
+                ),
               if (feature.impact != null && feature.rangeOfMotion != null)
                 const SizedBox(width: 10),
               if (feature.rangeOfMotion != null)
                 _MeasureBox(
-                    label: '움직임 폭',
-                    measure: feature.rangeOfMotion!,
-                    unit: feature.unit),
+                  label: '움직임 폭',
+                  measure: feature.rangeOfMotion!,
+                  unit: feature.unit,
+                ),
             ],
           ),
           if (feature.description.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(feature.description,
-                style: const TextStyle(
-                    fontSize: 11.5, height: 1.4, color: AppColors.hint)),
+            Text(
+              feature.description,
+              style: const TextStyle(
+                fontSize: 11.5,
+                height: 1.4,
+                color: AppColors.hint,
+              ),
+            ),
           ],
         ],
       ),
@@ -793,14 +890,19 @@ class _MeasureBox extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label,
-                style: const TextStyle(fontSize: 11, color: AppColors.hint)),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 11, color: AppColors.hint),
+            ),
             const SizedBox(height: 6),
-            Text('내 ${fmt(measure.user)}',
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700)),
-            Text('기준 ${fmt(measure.reference)}',
-                style: const TextStyle(fontSize: 12, color: AppColors.subtitle)),
+            Text(
+              '내 ${fmt(measure.user)}',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+            ),
+            Text(
+              '기준 ${fmt(measure.reference)}',
+              style: const TextStyle(fontSize: 12, color: AppColors.subtitle),
+            ),
           ],
         ),
       ),
@@ -808,7 +910,7 @@ class _MeasureBox extends StatelessWidget {
   }
 
   /// 각도는 °, 그 외 단위는 그대로 붙인다.
-  String get _u => unit == 'deg' ? '°' : '';
+  String get _u => unit == 'deg' ? '°' : ' $unit';
 }
 
 // ---------------------------------------------------------------------------
@@ -830,15 +932,21 @@ class _CoachCard extends StatelessWidget {
             children: const [
               Icon(Icons.auto_awesome, size: 16, color: Color(0xFF8A6BEA)),
               SizedBox(width: 6),
-              Text('AI 코치의 피드백',
-                  style:
-                      TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+              Text(
+                'AI 코치의 피드백',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+              ),
             ],
           ),
           const SizedBox(height: 10),
-          Text(part.coachComment,
-              style: const TextStyle(
-                  fontSize: 12.5, height: 1.5, color: AppColors.subtitle)),
+          Text(
+            part.coachComment,
+            style: const TextStyle(
+              fontSize: 12.5,
+              height: 1.5,
+              color: AppColors.subtitle,
+            ),
+          ),
           const SizedBox(height: 12),
           Container(
             width: double.infinity,
@@ -854,11 +962,14 @@ class _CoachCard extends StatelessWidget {
                   children: [
                     Icon(Icons.lightbulb_outline, size: 15, color: style.color),
                     const SizedBox(width: 6),
-                    Text(part.pointsTitle,
-                        style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: style.color)),
+                    Text(
+                      part.pointsTitle,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: style.color,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -874,15 +985,20 @@ class _CoachCard extends StatelessWidget {
                             width: 4,
                             height: 4,
                             decoration: BoxDecoration(
-                                color: style.color, shape: BoxShape.circle),
+                              color: style.color,
+                              shape: BoxShape.circle,
+                            ),
                           ),
                         ),
                         Expanded(
-                          child: Text(p,
-                              style: TextStyle(
-                                  fontSize: 12.5,
-                                  height: 1.4,
-                                  color: style.textOnSoft)),
+                          child: Text(
+                            p,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              height: 1.4,
+                              color: style.textOnSoft,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -913,8 +1029,10 @@ class _LegendDot extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 4),
-        Text(label,
-            style: const TextStyle(fontSize: 11, color: AppColors.hint)),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 11, color: AppColors.hint),
+        ),
       ],
     );
   }
@@ -933,7 +1051,7 @@ class _BodyFigurePainter extends CustomPainter {
   final Map<String, Color> regionColors;
 
   /// 지금 선택된 영역 키. 이 부위만 진하게, 나머지는 흐리게 그린다.
-  final String selectedRegion;
+  final String? selectedRegion;
 
   static const _neutral = Color(0xFFCCD0D6);
 
@@ -974,33 +1092,50 @@ class _BodyFigurePainter extends CustomPainter {
     canvas.drawLine(Offset(cx, h * 0.27), Offset(cx, h * 0.50), limb);
     limb.strokeWidth = w * 0.085;
     canvas.drawLine(
-        Offset(cx - w * 0.13, h * 0.25), Offset(cx + w * 0.13, h * 0.25), limb);
+      Offset(cx - w * 0.13, h * 0.25),
+      Offset(cx + w * 0.13, h * 0.25),
+      limb,
+    );
     canvas.drawLine(
-        Offset(cx - w * 0.11, h * 0.52), Offset(cx + w * 0.11, h * 0.52), limb);
+      Offset(cx - w * 0.11, h * 0.52),
+      Offset(cx + w * 0.11, h * 0.52),
+      limb,
+    );
 
     // 팔
     limb.strokeWidth = w * 0.11;
     limb.color = _c('leftArm');
     canvas.drawLine(
-        Offset(cx - w * 0.16, h * 0.26), Offset(cx - w * 0.32, h * 0.55), limb);
+      Offset(cx - w * 0.16, h * 0.26),
+      Offset(cx - w * 0.32, h * 0.55),
+      limb,
+    );
     limb.color = _c('rightArm');
     canvas.drawLine(
-        Offset(cx + w * 0.16, h * 0.26), Offset(cx + w * 0.32, h * 0.55), limb);
+      Offset(cx + w * 0.16, h * 0.26),
+      Offset(cx + w * 0.32, h * 0.55),
+      limb,
+    );
 
     // 다리
     limb.strokeWidth = w * 0.13;
     limb.color = _c('leftLeg');
     canvas.drawLine(
-        Offset(cx - w * 0.08, h * 0.56), Offset(cx - w * 0.11, h * 0.92), limb);
+      Offset(cx - w * 0.08, h * 0.56),
+      Offset(cx - w * 0.11, h * 0.92),
+      limb,
+    );
     limb.color = _c('rightLeg');
     canvas.drawLine(
-        Offset(cx + w * 0.08, h * 0.56), Offset(cx + w * 0.11, h * 0.92), limb);
+      Offset(cx + w * 0.08, h * 0.56),
+      Offset(cx + w * 0.11, h * 0.92),
+      limb,
+    );
   }
 
   @override
   bool shouldRepaint(_BodyFigurePainter old) =>
-      old.regionColors != regionColors ||
-      old.selectedRegion != selectedRegion;
+      old.regionColors != regionColors || old.selectedRegion != selectedRegion;
 }
 
 // ---------------------------------------------------------------------------
@@ -1009,11 +1144,13 @@ class _BodyFigurePainter extends CustomPainter {
 class _FeatureChartPainter extends CustomPainter {
   _FeatureChartPainter({
     required this.series,
+    required this.eventBased,
     required this.unit,
     required this.userColor,
   });
 
   final List<SeriesSample> series;
+  final bool eventBased;
   final String unit;
   final Color userColor;
 
@@ -1029,7 +1166,11 @@ class _FeatureChartPainter extends CustomPainter {
     const topPad = 8.0;
     const rightPad = 6.0;
     final plot = Rect.fromLTRB(
-        leftPad, topPad, size.width - rightPad, size.height - bottomPad);
+      leftPad,
+      topPad,
+      size.width - rightPad,
+      size.height - bottomPad,
+    );
 
     // y 범위: user / reference / ±std 를 모두 담는다.
     double? lo, hi;
@@ -1065,62 +1206,111 @@ class _FeatureChartPainter extends CustomPainter {
       final v = lo! + (hi! - lo!) * k / 2;
       final y = yOf(v);
       canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), gridPaint);
-      _text(canvas, _fmtAxis(v), Offset(plot.left - 6, y),
-          align: _Align.right, color: _axisText);
+      _text(
+        canvas,
+        _fmtAxis(v),
+        Offset(plot.left - 6, y),
+        align: _Align.right,
+        color: _axisText,
+      );
     }
 
     // 구간(4개) 경계선 + 라벨
     final seg = series.length ~/ SwingPhase.values.length;
-    if (seg > 0) {
+    if (eventBased && seg > 0) {
       for (var s = 0; s < SwingPhase.values.length; s++) {
         final centerIdx = (s * seg + seg ~/ 2).clamp(0, series.length - 1);
         final x = xOf(centerIdx);
-        _text(canvas, SwingPhase.values[s].en, Offset(x, plot.bottom + 4),
-            align: _Align.center, color: _axisText, size: 7.5);
-        _text(canvas, SwingPhase.values[s].ko, Offset(x, plot.bottom + 14),
-            align: _Align.center, color: _axisText, size: 7.5);
+        _text(
+          canvas,
+          SwingPhase.values[s].en,
+          Offset(x, plot.bottom + 4),
+          align: _Align.center,
+          color: _axisText,
+          size: 7.5,
+        );
+        _text(
+          canvas,
+          SwingPhase.values[s].ko,
+          Offset(x, plot.bottom + 14),
+          align: _Align.center,
+          color: _axisText,
+          size: 7.5,
+        );
         if (s > 0) {
           final bx = xOf((s * seg).clamp(0, series.length - 1));
           canvas.drawLine(
-              Offset(bx, plot.top), Offset(bx, plot.bottom), gridPaint);
+            Offset(bx, plot.top),
+            Offset(bx, plot.bottom),
+            gridPaint,
+          );
         }
       }
     }
 
-    // 기준 ±편차 밴드 (reference 가 모두 있을 때만)
-    final allRef = series.every((s) => s.reference != null);
-    if (allRef) {
-      final band = Path();
-      for (var i = 0; i < series.length; i++) {
-        final r = series[i].reference!;
-        final sd = series[i].referenceStd ?? 0;
-        final p = Offset(xOf(i), yOf(r + sd));
-        i == 0 ? band.moveTo(p.dx, p.dy) : band.lineTo(p.dx, p.dy);
+    // 기준과 편차가 함께 있는 연속 구간만 밴드로 그린다. 결측 구간을 잇지 않는다.
+    var start = 0;
+    while (start < series.length) {
+      if (series[start].reference == null ||
+          series[start].referenceStd == null) {
+        start++;
+        continue;
       }
-      for (var i = series.length - 1; i >= 0; i--) {
-        final r = series[i].reference!;
-        final sd = series[i].referenceStd ?? 0;
-        band.lineTo(xOf(i), yOf(r - sd));
+      var end = start + 1;
+      while (end < series.length &&
+          series[end].reference != null &&
+          series[end].referenceStd != null) {
+        end++;
       }
-      band.close();
-      canvas.drawPath(
+      if (end - start >= 2) {
+        final band = Path();
+        for (var i = start; i < end; i++) {
+          final y = yOf(series[i].reference! + series[i].referenceStd!);
+          i == start ? band.moveTo(xOf(i), y) : band.lineTo(xOf(i), y);
+        }
+        for (var i = end - 1; i >= start; i--) {
+          band.lineTo(
+            xOf(i),
+            yOf(series[i].reference! - series[i].referenceStd!),
+          );
+        }
+        band.close();
+        canvas.drawPath(
           band,
-          Paint()
-            ..color = _refColor.withValues(alpha: 0.18)
-            ..style = PaintingStyle.fill);
+          Paint()..color = _refColor.withValues(alpha: 0.18),
+        );
+      }
+      start = end;
     }
 
     // 기준 선 → 내 스윙 선 순서로.
-    _drawCurve(canvas, [for (final s in series) s.reference], _refColor, xOf,
-        yOf, width: 1.6);
-    _drawCurve(canvas, [for (final s in series) s.user], userColor, xOf, yOf,
-        width: 2.2);
+    _drawCurve(
+      canvas,
+      [for (final s in series) s.reference],
+      _refColor,
+      xOf,
+      yOf,
+      width: 1.6,
+    );
+    _drawCurve(
+      canvas,
+      [for (final s in series) s.user],
+      userColor,
+      xOf,
+      yOf,
+      width: 2.2,
+    );
   }
 
   /// null 지점에서는 선을 끊어 그린다(영상에 없는 구간).
-  void _drawCurve(Canvas canvas, List<double?> ys, Color color,
-      double Function(int) xOf, double Function(double) yOf,
-      {required double width}) {
+  void _drawCurve(
+    Canvas canvas,
+    List<double?> ys,
+    Color color,
+    double Function(int) xOf,
+    double Function(double) yOf, {
+    required double width,
+  }) {
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
@@ -1138,6 +1328,10 @@ class _FeatureChartPainter extends CustomPainter {
         continue;
       }
       final p = Offset(xOf(i), yOf(v));
+      if ((i == 0 || ys[i - 1] == null) &&
+          (i == ys.length - 1 || ys[i + 1] == null)) {
+        canvas.drawCircle(p, width / 2, Paint()..color = color);
+      }
       if (path == null) {
         path = Path()..moveTo(p.dx, p.dy);
       } else {
@@ -1150,10 +1344,19 @@ class _FeatureChartPainter extends CustomPainter {
   String _fmtAxis(double v) =>
       unit == 'deg' ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
 
-  void _text(Canvas canvas, String s, Offset at,
-      {required _Align align, required Color color, double size = 10}) {
+  void _text(
+    Canvas canvas,
+    String s,
+    Offset at, {
+    required _Align align,
+    required Color color,
+    double size = 10,
+  }) {
     final tp = TextPainter(
-      text: TextSpan(text: s, style: TextStyle(color: color, fontSize: size)),
+      text: TextSpan(
+        text: s,
+        style: TextStyle(color: color, fontSize: size),
+      ),
       textDirection: TextDirection.ltr,
     )..layout();
     double dx;
@@ -1176,18 +1379,19 @@ class _FeatureChartPainter extends CustomPainter {
   @override
   bool shouldRepaint(_FeatureChartPainter old) =>
       old.series != series ||
+      old.eventBased != eventBased ||
       old.unit != unit ||
       old.userColor != userColor;
 }
 
 // ---------------------------------------------------------------------------
-// 스윙 단계별 점수 꺾은선 Painter (4구간 × 0~100 점수)
+// 관절별 구간 참고 점수 Painter (z-score 환산값, 결측은 선·점 생략)
 // ---------------------------------------------------------------------------
 class _PhaseScoreChartPainter extends CustomPainter {
   _PhaseScoreChartPainter({required this.scores, required this.color});
 
-  /// SwingPhase 순서(4개)의 0~100 점수.
-  final List<int> scores;
+  /// 0.2는 SwingPhase 순서, 0.1은 서버 구간 순서의 참고 점수.
+  final List<JointPhaseScore> scores;
   final Color color;
 
   static const _grid = Color(0xFFEDEDED);
@@ -1195,16 +1399,21 @@ class _PhaseScoreChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (scores.length < 2) return;
+    if (scores.isEmpty) return;
     const leftPad = 26.0;
     const bottomPad = 26.0;
     const topPad = 6.0;
-    final plot =
-        Rect.fromLTRB(leftPad, topPad, size.width, size.height - bottomPad);
+    final plot = Rect.fromLTRB(
+      leftPad,
+      topPad,
+      size.width,
+      size.height - bottomPad,
+    );
 
-    double yOf(num s) =>
-        plot.bottom - (s.clamp(0, 100) / 100) * plot.height;
-    double xOf(int i) => plot.left + plot.width * (i / (scores.length - 1));
+    double yOf(num s) => plot.bottom - (s.clamp(0, 100) / 100) * plot.height;
+    double xOf(int i) =>
+        plot.left +
+        plot.width * (scores.length == 1 ? 0.5 : i / (scores.length - 1));
 
     final gridPaint = Paint()
       ..color = _grid
@@ -1214,18 +1423,35 @@ class _PhaseScoreChartPainter extends CustomPainter {
     for (final v in [0, 50, 100]) {
       final y = yOf(v);
       canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), gridPaint);
-      _text(canvas, '$v', Offset(plot.left - 6, y),
-          align: _Align.right, color: _axisText);
+      _text(
+        canvas,
+        '$v',
+        Offset(plot.left - 6, y),
+        align: _Align.right,
+        color: _axisText,
+      );
     }
 
     // x 라벨(영문 + 국문)
-    for (var i = 0; i < SwingPhase.values.length && i < scores.length; i++) {
-      final phase = SwingPhase.values[i];
+    for (var i = 0; i < scores.length; i++) {
+      final phase = scores[i];
       final x = xOf(i);
-      _text(canvas, phase.en, Offset(x, plot.bottom + 4),
-          align: _Align.center, color: _axisText, size: 7.5);
-      _text(canvas, phase.ko, Offset(x, plot.bottom + 14),
-          align: _Align.center, color: _axisText, size: 7.5);
+      _text(
+        canvas,
+        phase.key,
+        Offset(x, plot.bottom + 4),
+        align: _Align.center,
+        color: _axisText,
+        size: 7.5,
+      );
+      _text(
+        canvas,
+        phase.name,
+        Offset(x, plot.bottom + 14),
+        align: _Align.center,
+        color: _axisText,
+        size: 7.5,
+      );
     }
 
     // 점수 선 + 점
@@ -1239,21 +1465,38 @@ class _PhaseScoreChartPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.fill;
 
-    final path = Path();
+    Path? path;
     for (var i = 0; i < scores.length; i++) {
-      final p = Offset(xOf(i), yOf(scores[i]));
-      i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+      final score = scores[i].score;
+      if (score == null) {
+        if (path != null) canvas.drawPath(path, linePaint);
+        path = null;
+        continue;
+      }
+      final point = Offset(xOf(i), yOf(score));
+      if (path == null) {
+        path = Path()..moveTo(point.dx, point.dy);
+      } else {
+        path.lineTo(point.dx, point.dy);
+      }
+      canvas.drawCircle(point, 2.6, dotPaint);
     }
-    canvas.drawPath(path, linePaint);
-    for (var i = 0; i < scores.length; i++) {
-      canvas.drawCircle(Offset(xOf(i), yOf(scores[i])), 2.6, dotPaint);
-    }
+    if (path != null) canvas.drawPath(path, linePaint);
   }
 
-  void _text(Canvas canvas, String s, Offset at,
-      {required _Align align, required Color color, double size = 10}) {
+  void _text(
+    Canvas canvas,
+    String s,
+    Offset at, {
+    required _Align align,
+    required Color color,
+    double size = 10,
+  }) {
     final tp = TextPainter(
-      text: TextSpan(text: s, style: TextStyle(color: color, fontSize: size)),
+      text: TextSpan(
+        text: s,
+        style: TextStyle(color: color, fontSize: size),
+      ),
       textDirection: TextDirection.ltr,
     )..layout();
     double dx;
@@ -1315,8 +1558,11 @@ String _directionText(String direction) {
 
 /// 세부 항목 level(양호/주의/개선 필요) 스타일.
 class _FeatureStyle {
-  const _FeatureStyle(
-      {required this.color, required this.soft, required this.label});
+  const _FeatureStyle({
+    required this.color,
+    required this.soft,
+    required this.label,
+  });
   final Color color;
   final Color soft;
   final String label;
@@ -1326,13 +1572,22 @@ _FeatureStyle _featureStyle(String level) {
   switch (level) {
     case 'warning':
       return const _FeatureStyle(
-          color: AppColors.primary, soft: Color(0xFFFDECEC), label: '개선 필요');
+        color: AppColors.primary,
+        soft: Color(0xFFFDECEC),
+        label: '개선 필요',
+      );
     case 'caution':
       return const _FeatureStyle(
-          color: Color(0xFFD9892B), soft: Color(0xFFFBF0DE), label: '주의');
+        color: Color(0xFFD9892B),
+        soft: Color(0xFFFBF0DE),
+        label: '주의',
+      );
     default:
       return const _FeatureStyle(
-          color: Color(0xFF2E9E5B), soft: Color(0xFFE7F5EC), label: '양호');
+        color: Color(0xFF2E9E5B),
+        soft: Color(0xFFE7F5EC),
+        label: '양호',
+      );
   }
 }
 

@@ -1,46 +1,85 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:video_player/video_player.dart';
 
+import '../api/auth_api.dart' show ApiException;
 import '../data/feedback_repository.dart';
 import '../models/feedback.dart';
 import '../theme/app_theme.dart';
+import '../video/selected_video.dart';
+import '../widgets/swing_video.dart';
+import '../widgets/feedback_metrics.dart';
 
 /// 종합 피드백 화면.
 ///
 /// 영상 분석이 끝나면 처음 보여주는 화면이다.
-/// 첫 피드백([OverallFeedback.isFirst])과 반복 피드백을 같은 화면에서 그린다.
+/// 새 업로드 및 과거 기록의 실제 분석 결과를 같은 화면에서 그린다.
 class OverallFeedbackScreen extends StatefulWidget {
   const OverallFeedbackScreen({
     super.key,
     required this.analysisId,
     this.firstTime = false,
     this.videoPath,
+    this.repository,
   });
 
   /// 조회할 분석 id.
   final String analysisId;
 
-  /// 비교 대상이 없는 첫 피드백이면 true.
+  /// 새 업로드의 분석 완료를 기다릴 때 true. 과거 기록 조회는 false.
   final bool firstTime;
 
-  /// 방금 촬영한 로컬 영상 경로. 있으면 "내 스윙 영상" 에 실제 영상을 보여준다.
+  /// 새 영상의 로컬 경로 또는 웹 Blob URL. 이 화면 종료 시 Blob을 해제한다.
   final String? videoPath;
+
+  final FeedbackRepository? repository;
 
   @override
   State<OverallFeedbackScreen> createState() => _OverallFeedbackScreenState();
 }
 
 class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
-  final _repo = FeedbackRepository();
+  late final FeedbackRepository _repo;
   late Future<OverallFeedback> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = _repo.fetchFeedback(widget.analysisId, firstTime: widget.firstTime);
+    _repo = widget.repository ?? FeedbackRepository();
+    _future = _repo.fetchFeedback(
+      widget.analysisId,
+      firstTime: widget.firstTime,
+    );
+  }
+
+  @override
+  void didUpdateWidget(OverallFeedbackScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoPath != widget.videoPath) {
+      releaseSelectedVideo(oldWidget.videoPath);
+    }
+    if (oldWidget.analysisId != widget.analysisId ||
+        oldWidget.firstTime != widget.firstTime) {
+      _future = _repo.fetchFeedback(
+        widget.analysisId,
+        firstTime: widget.firstTime,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    releaseSelectedVideo(widget.videoPath);
+    if (widget.repository == null) _repo.dispose();
+    super.dispose();
+  }
+
+  void _retry() {
+    setState(() {
+      _future = _repo.fetchFeedback(
+        widget.analysisId,
+        firstTime: widget.firstTime,
+      );
+    });
   }
 
   @override
@@ -58,12 +97,14 @@ class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16),
-            child: _ShareButton(onTap: () {
-              // TODO(next): 공유 기능 연결.
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('공유 기능은 준비 중이에요.')),
-              );
-            }),
+            child: _ShareButton(
+              onTap: () {
+                // TODO(next): 공유 기능 연결.
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('공유 기능은 준비 중이에요.')),
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -74,10 +115,26 @@ class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError || !snapshot.hasData) {
-            return const Center(child: Text('피드백을 불러오지 못했어요.'));
+            final error = snapshot.error;
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      error is ApiException ? error.message : '피드백을 불러오지 못했어요.',
+                      textAlign: TextAlign.center,
+                    ),
+                    TextButton(onPressed: _retry, child: const Text('다시 시도')),
+                  ],
+                ),
+              ),
+            );
           }
           return _FeedbackBody(
             feedback: snapshot.data!,
+            analysisId: widget.analysisId,
             videoPath: widget.videoPath,
           );
         },
@@ -88,9 +145,14 @@ class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
 
 /// 스크롤되는 본문 + 하단 고정 버튼.
 class _FeedbackBody extends StatelessWidget {
-  const _FeedbackBody({required this.feedback, this.videoPath});
+  const _FeedbackBody({
+    required this.feedback,
+    required this.analysisId,
+    this.videoPath,
+  });
 
   final OverallFeedback feedback;
+  final String analysisId;
   final String? videoPath;
 
   @override
@@ -98,19 +160,26 @@ class _FeedbackBody extends StatelessWidget {
     return Column(
       children: [
         Expanded(
-          child: ListView(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-            children: [
-              _dateLabel(feedback.recordedAt),
-              const SizedBox(height: 12),
-              _VideoRow(videoPath: videoPath),
-              const SizedBox(height: 16),
-              _ScoreCard(feedback: feedback),
-              const SizedBox(height: 12),
-              ..._buildCategorySections(feedback),
-              const SizedBox(height: 12),
-              _CoachCard(comment: feedback.coachComment),
-            ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _dateLabel(feedback.recordedAt),
+                const SizedBox(height: 12),
+                _VideoRow(analysisId: analysisId, videoPath: videoPath),
+                const SizedBox(height: 16),
+                _ScoreCard(feedback: feedback),
+                const SizedBox(height: 12),
+                ..._buildCategorySections(feedback),
+                const SizedBox(height: 12),
+                _CoachCard(comment: feedback.coachComment),
+                if (feedback.speedMetrics.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  SpeedFeedbackCard(metrics: feedback.speedMetrics),
+                ],
+              ],
+            ),
           ),
         ),
         _BottomBar(feedback: feedback),
@@ -128,51 +197,71 @@ class _FeedbackBody extends StatelessWidget {
     );
   }
 
-  /// 첫/반복 피드백에 따라 분류 카드를 만든다.
+  /// 실제 이전 스윙과의 비교 여부에 따라 분류 카드를 만든다.
   List<Widget> _buildCategorySections(OverallFeedback f) {
     final sections = <_CategorySpec>[];
-    if (f.isFirst) {
-      // 첫 피드백: 프로 기준 대비 level 로 나눈다.
-      sections.add(_CategorySpec(
-        title: '잘한 부분',
-        tone: _Tone.good,
-        items: f.items.where((i) => i.level == 'good').toList(),
-      ));
-      sections.add(_CategorySpec(
-        title: '개선이 필요한 부분',
-        tone: _Tone.bad,
-        items: f.items.where((i) => i.level != 'good').toList(),
-      ));
+    sections.add(
+      _CategorySpec(
+        title: '참고용 · 분석 제한',
+        tone: _Tone.neutral,
+        items: f.items.where((i) => i.limited).toList(),
+      ),
+    );
+    if (!f.hasComparison) {
+      // 이전 스윙과 비교하지 않은 결과: 프로 기준 대비 level로 나눈다.
+      sections.add(
+        _CategorySpec(
+          title: '잘한 부분',
+          tone: _Tone.good,
+          items: f.items.where((i) => !i.limited && i.level == 'good').toList(),
+        ),
+      );
+      sections.add(
+        _CategorySpec(
+          title: '개선이 필요한 부분',
+          tone: _Tone.bad,
+          items: f.items.where((i) => !i.limited && i.level != 'good').toList(),
+        ),
+      );
     } else {
       // 반복 피드백: 이전 대비 증감으로 나눈다.
       // |증감| 이 이 값 이하면 "큰 변화 없음" 으로 보고 유지로 분류한다.
       // TODO(backend): 기준 폭은 추후 실제 점수 분포에 맞춰 조정.
       const maintainBand = 2;
-      sections.add(_CategorySpec(
-        title: '개선된 부분',
-        tone: _Tone.good,
-        items: f.items.where((i) => (i.delta ?? 0) > maintainBand).toList(),
-      ));
-      sections.add(_CategorySpec(
-        title: '개선이 필요한 부분',
-        tone: _Tone.bad,
-        items: f.items.where((i) => (i.delta ?? 0) < -maintainBand).toList(),
-      ));
-      sections.add(_CategorySpec(
-        title: '유지된 부분',
-        tone: _Tone.neutral,
-        items:
-            f.items.where((i) => (i.delta ?? 0).abs() <= maintainBand).toList(),
-      ));
+      sections.add(
+        _CategorySpec(
+          title: '개선된 부분',
+          tone: _Tone.good,
+          items: f.items.where((i) => (i.delta ?? 0) > maintainBand).toList(),
+        ),
+      );
+      sections.add(
+        _CategorySpec(
+          title: '개선이 필요한 부분',
+          tone: _Tone.bad,
+          items: f.items.where((i) => (i.delta ?? 0) < -maintainBand).toList(),
+        ),
+      );
+      sections.add(
+        _CategorySpec(
+          title: '유지된 부분',
+          tone: _Tone.neutral,
+          items: f.items
+              .where((i) => (i.delta ?? 0).abs() <= maintainBand)
+              .toList(),
+        ),
+      );
     }
 
     final widgets = <Widget>[];
     for (final spec in sections) {
       if (spec.items.isEmpty) continue;
-      widgets.add(Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: _CategoryCard(spec: spec),
-      ));
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _CategoryCard(spec: spec),
+        ),
+      );
     }
     return widgets;
   }
@@ -182,7 +271,9 @@ class _FeedbackBody extends StatelessWidget {
 // 상단: 날짜 아래 영상 2개
 // ---------------------------------------------------------------------------
 class _VideoRow extends StatelessWidget {
-  const _VideoRow({this.videoPath});
+  const _VideoRow({required this.analysisId, this.videoPath});
+
+  final String analysisId;
 
   final String? videoPath;
 
@@ -194,9 +285,11 @@ class _VideoRow extends StatelessWidget {
         Expanded(
           child: _ThumbFrame(
             label: '내 스윙 영상',
-            child: videoPath != null
-                ? _MySwingVideo(videoPath: videoPath!)
-                : const _PlaceholderThumb(icon: Icons.sports_baseball),
+            child: SwingVideo(
+              key: ValueKey((analysisId, videoPath)),
+              analysisId: analysisId,
+              videoPath: videoPath,
+            ),
           ),
         ),
         const SizedBox(width: 12),
@@ -231,8 +324,10 @@ class _ThumbFrame extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        Text(label,
-            style: const TextStyle(fontSize: 12, color: AppColors.subtitle)),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 12, color: AppColors.subtitle),
+        ),
       ],
     );
   }
@@ -254,123 +349,6 @@ class _PlaceholderThumb extends StatelessWidget {
   }
 }
 
-/// 실제 촬영한 스윙 영상. 탭하면 재생/일시정지한다.
-class _MySwingVideo extends StatefulWidget {
-  const _MySwingVideo({required this.videoPath});
-
-  final String videoPath;
-
-  @override
-  State<_MySwingVideo> createState() => _MySwingVideoState();
-}
-
-class _MySwingVideoState extends State<_MySwingVideo> {
-  VideoPlayerController? _controller;
-  bool _ready = false;
-
-  @override
-  void initState() {
-    super.initState();
-    final controller = VideoPlayerController.file(File(widget.videoPath));
-    _controller = controller;
-    controller.initialize().then((_) {
-      if (!mounted) return;
-      controller.setLooping(true);
-      setState(() => _ready = true);
-    }).catchError((_) {
-      // 초기화 실패 시 자리표시자로 둔다.
-    });
-    controller.addListener(_onTick);
-  }
-
-  void _onTick() {
-    if (mounted) setState(() {});
-  }
-
-  @override
-  void dispose() {
-    _controller?.removeListener(_onTick);
-    _controller?.dispose();
-    super.dispose();
-  }
-
-  void _toggle() {
-    final c = _controller;
-    if (c == null || !_ready) return;
-    setState(() => c.value.isPlaying ? c.pause() : c.play());
-  }
-
-  String _fmt(Duration d) {
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = _controller;
-    if (c == null || !_ready) {
-      return const _PlaceholderThumb(icon: Icons.sports_baseball);
-    }
-    final playing = c.value.isPlaying;
-    return GestureDetector(
-      onTap: _toggle,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          FittedBox(
-            fit: BoxFit.cover,
-            clipBehavior: Clip.hardEdge,
-            child: SizedBox(
-              width: c.value.size.width,
-              height: c.value.size.height,
-              child: VideoPlayer(c),
-            ),
-          ),
-          if (!playing)
-            Container(
-              width: 44,
-              height: 44,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.35),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.play_arrow, color: Colors.white, size: 28),
-            ),
-          Positioned(
-            left: 8,
-            right: 8,
-            bottom: 8,
-            child: Row(
-              children: [
-                Text(_fmt(c.value.position),
-                    style: const TextStyle(color: Colors.white, fontSize: 10)),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: VideoProgressIndicator(
-                    c,
-                    allowScrubbing: true,
-                    padding: EdgeInsets.zero,
-                    colors: const VideoProgressColors(
-                      playedColor: Colors.white,
-                      bufferedColor: Colors.white30,
-                      backgroundColor: Colors.white24,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(_fmt(c.value.duration),
-                    style: const TextStyle(color: Colors.white, fontSize: 10)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
 // 전체 스윙 점수 카드
 // ---------------------------------------------------------------------------
@@ -386,8 +364,26 @@ class _ScoreCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('전체 스윙 점수',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          const Text(
+            '전체 스윙 점수',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            reliabilityLabel(feedback.reliability),
+            style: const TextStyle(fontSize: 11.5, color: AppColors.hint),
+          ),
+          for (final warning in feedback.warnings)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                warning,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: AppColors.subtitle,
+                ),
+              ),
+            ),
           const SizedBox(height: 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -398,30 +394,46 @@ class _ScoreCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text('${feedback.totalScore}',
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            feedbackNumber(feedback.totalScore),
                             style: const TextStyle(
-                                fontSize: 44,
-                                height: 1.0,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.primary)),
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 6, left: 2),
-                          child: Text('/ 100',
+                              fontSize: 44,
+                              height: 1.0,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 6, left: 2),
+                            child: Text(
+                              '/ 100',
                               style: TextStyle(
-                                  fontSize: 14, color: AppColors.hint)),
-                        ),
-                      ],
+                                fontSize: 14,
+                                color: AppColors.hint,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     if (delta != null) ...[
                       const SizedBox(height: 6),
                       _DeltaBadge(delta: delta),
                       const SizedBox(height: 2),
-                      Text('(이전 ${feedback.previousTotalScore}점)',
-                          style: const TextStyle(
-                              fontSize: 11, color: AppColors.hint)),
+                      Text(
+                        '(이전 ${feedback.previousTotalScore}점)',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.hint,
+                        ),
+                      ),
                     ],
                   ],
                 ),
@@ -439,9 +451,10 @@ class _ScoreCard extends StatelessWidget {
                   child: Text(
                     feedback.summary,
                     style: const TextStyle(
-                        fontSize: 12.5,
-                        height: 1.4,
-                        color: Color(0xFFC0514F)),
+                      fontSize: 12.5,
+                      height: 1.4,
+                      color: Color(0xFFC0514F),
+                    ),
                   ),
                 ),
               ),
@@ -457,7 +470,7 @@ class _ScoreCard extends StatelessWidget {
 class _DeltaBadge extends StatelessWidget {
   const _DeltaBadge({required this.delta});
 
-  final int delta;
+  final double delta;
 
   @override
   Widget build(BuildContext context) {
@@ -466,11 +479,19 @@ class _DeltaBadge extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(up ? Icons.arrow_drop_up : Icons.arrow_drop_down,
-            size: 18, color: color),
-        Text('${delta.abs()}',
-            style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w700, color: color)),
+        Icon(
+          up ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+          size: 18,
+          color: color,
+        ),
+        Text(
+          feedbackNumber(delta.abs()),
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
       ],
     );
   }
@@ -506,8 +527,9 @@ class _CategoryCardState extends State<_CategoryCard> {
     final spec = widget.spec;
     final tone = _toneStyle(spec.tone);
     final hasMore = spec.items.length > 1;
-    final visible =
-        (_expanded || !hasMore) ? spec.items : spec.items.take(1).toList();
+    final visible = (_expanded || !hasMore)
+        ? spec.items
+        : spec.items.take(1).toList();
 
     return _Card(
       child: Column(
@@ -518,26 +540,34 @@ class _CategoryCardState extends State<_CategoryCard> {
             children: [
               Icon(tone.icon, size: 18, color: tone.color),
               const SizedBox(width: 6),
-              Text(spec.title,
-                  style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: tone.color)),
+              Text(
+                spec.title,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: tone.color,
+                ),
+              ),
               const Spacer(),
               if (hasMore)
                 GestureDetector(
                   onTap: () => setState(() => _expanded = !_expanded),
                   child: Row(
                     children: [
-                      Text('${spec.items.length}곳',
-                          style: const TextStyle(
-                              fontSize: 12, color: AppColors.hint)),
+                      Text(
+                        '${spec.items.length}곳',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.hint,
+                        ),
+                      ),
                       Icon(
-                          _expanded
-                              ? Icons.keyboard_arrow_up
-                              : Icons.keyboard_arrow_down,
-                          size: 18,
-                          color: AppColors.hint),
+                        _expanded
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                        size: 18,
+                        color: AppColors.hint,
+                      ),
                     ],
                   ),
                 ),
@@ -546,7 +576,11 @@ class _CategoryCardState extends State<_CategoryCard> {
           const SizedBox(height: 4),
           for (var i = 0; i < visible.length; i++) ...[
             if (i > 0)
-              const Divider(height: 20, thickness: 0.6, color: Color(0xFFEDEDED)),
+              const Divider(
+                height: 20,
+                thickness: 0.6,
+                color: Color(0xFFEDEDED),
+              ),
             _ItemRow(item: visible[i], tone: spec.tone),
           ],
         ],
@@ -580,47 +614,67 @@ class _ItemRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.baseline,
                   textBaseline: TextBaseline.alphabetic,
                   children: [
-                    Text(item.label,
-                        style: const TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w700)),
+                    Text(
+                      item.label,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const SizedBox(width: 6),
-                    Text('${item.previousScore} → ${item.currentScore}점',
-                        style: const TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600)),
+                    Text(
+                      '${item.previousScore} → ${feedbackNumber(item.currentScore)}점',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       '(${delta > 0 ? '+' : ''}$delta)',
                       style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: delta > 0
-                              ? const Color(0xFF2E9E5B)
-                              : (delta < 0
-                                  ? AppColors.primary
-                                  : AppColors.hint)),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: delta > 0
+                            ? const Color(0xFF2E9E5B)
+                            : (delta < 0 ? AppColors.primary : AppColors.hint),
+                      ),
                     ),
                   ],
                 )
               else
-                // 첫 피드백: 이름 - 81점 (길면 줄바꿈)
+                // 이전 비교 없음: 이름 - 81점 (길면 줄바꿈)
                 Text.rich(
                   TextSpan(
                     style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w700),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
                     children: [
                       TextSpan(text: item.label),
                       TextSpan(
-                        text: '  -  ${item.currentScore}점',
+                        text: '  -  ${feedbackNumber(item.currentScore)}점',
                         style: const TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
                 ),
               const SizedBox(height: 3),
-              Text(item.description,
-                  style: const TextStyle(
-                      fontSize: 12, height: 1.4, color: AppColors.subtitle)),
+              Text(
+                reliabilityLabel(item.reliability),
+                style: const TextStyle(fontSize: 11, color: AppColors.hint),
+              ),
+              Text(
+                item.description,
+                style: const TextStyle(
+                  fontSize: 12,
+                  height: 1.4,
+                  color: AppColors.subtitle,
+                ),
+              ),
             ],
           ),
         ),
@@ -685,15 +739,21 @@ class _CoachCard extends StatelessWidget {
             children: const [
               Icon(Icons.auto_awesome, size: 16, color: Color(0xFF8A6BEA)),
               SizedBox(width: 6),
-              Text('AI 코치의 한마디',
-                  style:
-                      TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+              Text(
+                'AI 코치의 한마디',
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+              ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(comment,
-              style: const TextStyle(
-                  fontSize: 12.5, height: 1.5, color: AppColors.subtitle)),
+          Text(
+            comment,
+            style: const TextStyle(
+              fontSize: 12.5,
+              height: 1.5,
+              color: AppColors.subtitle,
+            ),
+          ),
         ],
       ),
     );
@@ -729,11 +789,13 @@ class _BottomBar extends StatelessWidget {
                     backgroundColor: const Color(0xFFFDECEC),
                     side: BorderSide.none,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
-                  child: const Text('상세 피드백 보기',
-                      style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w700)),
+                  child: const Text(
+                    '상세 피드백 보기',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                  ),
                 ),
               ),
             ),
@@ -751,11 +813,13 @@ class _BottomBar extends StatelessWidget {
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
-                  child: const Text('구간별 피드백 보기',
-                      style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w700)),
+                  child: const Text(
+                    '구간별 피드백 보기',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                  ),
                 ),
               ),
             ),
@@ -810,8 +874,7 @@ class _ShareButton extends StatelessWidget {
           children: const [
             Icon(Icons.ios_share, size: 14, color: Colors.black87),
             SizedBox(width: 4),
-            Text('공유하기',
-                style: TextStyle(fontSize: 12, color: Colors.black87)),
+            Text('공유하기', style: TextStyle(fontSize: 12, color: Colors.black87)),
           ],
         ),
       ),
@@ -820,7 +883,11 @@ class _ShareButton extends StatelessWidget {
 }
 
 class _ToneStyle {
-  const _ToneStyle({required this.color, required this.soft, required this.icon});
+  const _ToneStyle({
+    required this.color,
+    required this.soft,
+    required this.icon,
+  });
   final Color color;
   final Color soft;
   final IconData icon;
@@ -830,18 +897,21 @@ _ToneStyle _toneStyle(_Tone tone) {
   switch (tone) {
     case _Tone.good:
       return const _ToneStyle(
-          color: Color(0xFF2E9E5B),
-          soft: Color(0xFFE7F5EC),
-          icon: Icons.trending_up);
+        color: Color(0xFF2E9E5B),
+        soft: Color(0xFFE7F5EC),
+        icon: Icons.trending_up,
+      );
     case _Tone.bad:
       return const _ToneStyle(
-          color: AppColors.primary,
-          soft: Color(0xFFFDECEC),
-          icon: Icons.trending_down);
+        color: AppColors.primary,
+        soft: Color(0xFFFDECEC),
+        icon: Icons.trending_down,
+      );
     case _Tone.neutral:
       return const _ToneStyle(
-          color: Color(0xFF9E9E9E),
-          soft: Color(0xFFEFEFEF),
-          icon: Icons.remove);
+        color: Color(0xFF9E9E9E),
+        soft: Color(0xFFEFEFEF),
+        icon: Icons.remove,
+      );
   }
 }

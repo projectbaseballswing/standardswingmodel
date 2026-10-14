@@ -41,12 +41,58 @@ SWING_MOCK=1 uvicorn api.main:app --reload
 | GET | `/api/health` | 서버 상태, 모델 버전, 목업 여부 |
 | POST | `/api/analyses` | 영상 업로드 → 분석 작업 등록 (202) |
 | ~~POST~~ | ~~`/api/analyses/features`~~ | 개발 전용(문서·Swagger 비공개). 사용자는 영상만 올립니다 |
+| GET | `/api/users/{user_id}/swings` | 회원별 스윙 목록 조회. `year`, `month` 선택 필터 |
 | GET | `/api/analyses/{id}` | 작업 상태 + 전체 결과 |
 | GET | `/api/analyses/{id}/video` | 원본 영상 signed URL (`analysis_id`, `url`, `expires_in`) |
 | GET | `/api/analyses/{id}/overall` | 종합 피드백 |
 | GET | `/api/analyses/{id}/joints` | 관절별 피드백 |
 | GET | `/api/analyses/{id}/phases` | 구간별 피드백 |
 | GET | `/api/analyses/{id}/speed` | 속도 피드백 (현재 비어 있음) |
+
+## 회원별 스윙 목록 조회 (Flutter 달력/기록 화면)
+
+```http
+GET /api/users/testuser01/swings?year=2026&month=10
+```
+
+- `user_id`: 목록을 조회할 회원 ID (없는 회원은 404)
+- `year` + `month`: 둘 다 입력하면 해당 월만 반환. 둘 다 생략하면 전체 기록
+- 하나만 입력하거나 범위를 벗어나면 422 (`year`: 1900~9998, `month`: 1~12)
+- `tz_offset_minutes`: 선택, 기본 `540`(한국시간 +09:00). 월 경계는 이 시간대 기준
+- 오프셋 범위는 -720~840이며, 월 시작은 포함하고 다음 달 시작은 제외
+- 정렬: 표시 날짜 최신순 (`recorded_at` 없으면 `created_at` 기준)
+- 결과가 없으면 200과 `count: 0`, `items: []`
+
+응답 예시 (예시 데이터):
+
+```json
+{
+  "user_id": "testuser01",
+  "year_month": "2026-10",
+  "count": 1,
+  "items": [
+    {
+      "analysis_id": "1234abcd1234abcd1234abcd1234abcd",
+      "recorded_at": "2026-10-09T09:30:00Z",
+      "status": "done",
+      "score": 77.3,
+      "thumbnail_url": null
+    }
+  ]
+}
+```
+
+`score`는 분석 결과의 `overall.score`이며 분석이 끝나지 않았거나 실패한 경우에는 `null`입니다.
+`thumbnail_url`은 아직 썸네일 생성이 없어 `null`이며, 원본 영상은
+`GET /api/analyses/{analysis_id}/video`에서 별도로 조회합니다.
+`recorded_at`이 누락된 과거 분석은 목록 표시용으로 DB의 `created_at`(등록 시각)을 사용합니다.
+반환 시각은 UTC ISO 8601 형식이므로 Flutter에서 `.toLocal()`로 표시해야 합니다.
+전체 조회는 `GET /api/users/testuser01/swings`이며 `year_month`는 `null`입니다.
+페이지 나누기는 아직 없으며 `count`는 반환된 `items` 개수입니다.
+
+**보안 주의:** 현재는 JWT 인증이나 사용자별 소유권 검사가 없어 `user_id`는
+조회 필터일 뿐 실제 로그인한 사용자임을 증명하지 않습니다.
+서비스 외부 공개 전에 인증 및 본인 기록만 조회하도록 접근 제어를 추가해야 합니다.
 
 ## 3. 분석 흐름
 

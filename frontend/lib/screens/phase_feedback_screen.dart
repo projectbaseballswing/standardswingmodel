@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 
-import '../data/feedback_repository.dart';
 import '../models/feedback.dart';
 import '../theme/app_theme.dart';
+import '../widgets/feedback_metrics.dart';
 
 /// 구간별 피드백 화면.
 ///
 /// 종합 피드백에서 "구간별 피드백 보기" 를 누르면 들어온다.
 /// 관절별 분석이 "어느 부위" 라면, 이 화면은 "스윙의 어느 타이밍(구간)" 이
-/// 좋고 나쁜지를 보여준다. 들어오면 1번 구간이 기본 선택되고, 구간 카드를
+/// 어떻게 측정했는지 보여준다. 들어오면 첫 구간이 기본 선택되고, 구간 카드를
 /// 누르면 그 구간의 상세가 아래에 나온다.
 ///
-/// 첫 피드백은 비교 없이 현재 점수만, 반복 피드백은 이전 대비 증감을 함께
-/// 보여준다(이전 스윙·포즈 이미지는 아직 백엔드 전이라 샘플/자리표시자).
+/// 새 업로드와 과거 기록 모두 서버 구간 점수를 사용한다. 이전 비교는 만들지 않는다.
+/// 포즈 이미지는 서버가 제공하지 않아 기존 자리표시자를 유지한다.
 class PhaseFeedbackScreen extends StatefulWidget {
   const PhaseFeedbackScreen({super.key, required this.feedback});
 
@@ -24,14 +24,14 @@ class PhaseFeedbackScreen extends StatefulWidget {
 }
 
 class _PhaseFeedbackScreenState extends State<PhaseFeedbackScreen> {
-  late final List<PhaseAnalysis> _phases;
-  int _selected = 0; // 처음엔 1번 구간 고정.
-
-  @override
-  void initState() {
-    super.initState();
-    _phases = FeedbackRepository().buildPhaseAnalyses(widget.feedback);
+  List<AnalysisPhase> get _phases => widget.feedback.phases;
+  String? _selectedKey;
+  int get _selected {
+    final index = _phases.indexWhere((p) => p.key == _selectedKey);
+    return index < 0 ? 0 : index;
   }
+
+  void _select(int index) => setState(() => _selectedKey = _phases[index].key);
 
   @override
   Widget build(BuildContext context) {
@@ -57,21 +57,29 @@ class _PhaseFeedbackScreenState extends State<PhaseFeedbackScreen> {
                   style: TextStyle(fontSize: 13, color: AppColors.hint),
                 ),
                 const SizedBox(height: 14),
-                _AverageScoreCard(phases: _phases),
+                _OverallScoreCard(feedback: widget.feedback),
                 const SizedBox(height: 14),
                 _PhaseStepper(
                   phases: _phases,
                   selected: _selected,
-                  onSelect: (i) => setState(() => _selected = i),
+                  onSelect: _select,
                 ),
                 const SizedBox(height: 14),
                 _PhaseGrid(
                   phases: _phases,
                   selected: _selected,
-                  onSelect: (i) => setState(() => _selected = i),
+                  onSelect: _select,
                 ),
                 const SizedBox(height: 14),
-                _PhaseDetailCard(phase: _phases[_selected]),
+                _PhaseDetailCard(
+                  key: ValueKey('phase-detail-${_phases[_selected].key}'),
+                  phase: _phases[_selected],
+                  number: _selected + 1,
+                ),
+                if (widget.feedback.events.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  SwingEventsCard(events: widget.feedback.events),
+                ],
               ],
             ),
     );
@@ -79,27 +87,27 @@ class _PhaseFeedbackScreenState extends State<PhaseFeedbackScreen> {
 }
 
 // ---------------------------------------------------------------------------
-// 전체 평균 점수 카드
+// 서버가 제공한 전체 스윙 점수 카드 (구간 점수를 평균 내지 않는다)
 // ---------------------------------------------------------------------------
-class _AverageScoreCard extends StatelessWidget {
-  const _AverageScoreCard({required this.phases});
+class _OverallScoreCard extends StatelessWidget {
+  const _OverallScoreCard({required this.feedback});
 
-  final List<PhaseAnalysis> phases;
+  final OverallFeedback feedback;
 
   @override
   Widget build(BuildContext context) {
-    final avg = _avg(phases.map((p) => p.score));
-    // 반복 피드백이면(이전 점수가 다 있으면) 평균 증감을 보여준다.
-    final hasPrev = phases.every((p) => p.previousScore != null);
-    final prevAvg = hasPrev ? _avg(phases.map((p) => p.previousScore!)) : null;
-    final delta = prevAvg == null ? null : avg - prevAvg;
+    final measured = feedback.phases
+        .where((p) => p.available && p.score != null)
+        .length;
 
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('전체 평균 점수',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          const Text(
+            '전체 스윙 점수',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -109,27 +117,44 @@ class _AverageScoreCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text('$avg',
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            feedbackNumber(
+                              feedback.available ? feedback.totalScore : null,
+                            ),
                             style: const TextStyle(
-                                fontSize: 44,
-                                height: 1.0,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.primary)),
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 6, left: 2),
-                          child: Text('/ 100',
+                              fontSize: 44,
+                              height: 1.0,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 6, left: 2),
+                            child: Text(
+                              '/ 100',
                               style: TextStyle(
-                                  fontSize: 14, color: AppColors.hint)),
-                        ),
-                      ],
+                                fontSize: 14,
+                                color: AppColors.hint,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    if (delta != null) ...[
-                      const SizedBox(height: 6),
-                      _DeltaText(delta: delta, suffix: ' 이전 스윙 대비'),
-                    ],
+                    const SizedBox(height: 6),
+                    Text(
+                      reliabilityLabel(feedback.reliability),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.hint,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -143,9 +168,13 @@ class _AverageScoreCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    _summary(phases, avg, delta),
+                    '점수 제공 구간 $measured / ${feedback.phases.length}\n'
+                    '구간을 선택해 실제 점수와 소요 시간을 확인하세요.',
                     style: const TextStyle(
-                        fontSize: 12.5, height: 1.4, color: Color(0xFFC0514F)),
+                      fontSize: 12.5,
+                      height: 1.4,
+                      color: Color(0xFFC0514F),
+                    ),
                   ),
                 ),
               ),
@@ -154,21 +183,6 @@ class _AverageScoreCard extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  int _avg(Iterable<int> xs) {
-    final l = xs.toList();
-    if (l.isEmpty) return 0;
-    return (l.reduce((a, b) => a + b) / l.length).round();
-  }
-
-  String _summary(List<PhaseAnalysis> phases, int avg, int? delta) {
-    final worst = phases.reduce((a, b) => a.score <= b.score ? a : b);
-    if (delta != null) {
-      final dir = delta > 0 ? '소폭 올랐어요' : (delta < 0 ? '소폭 하락했어요' : '비슷해요');
-      return '지난 스윙보다 전체 점수가 $dir.\n특히 ${worst.phase.ko} 구간을 더 살펴보세요.';
-    }
-    return '프로 기준과 비교한 구간별 점수예요.\n특히 ${worst.phase.ko} 구간을 더 살펴보면 좋아요.';
   }
 }
 
@@ -182,7 +196,7 @@ class _PhaseStepper extends StatelessWidget {
     required this.onSelect,
   });
 
-  final List<PhaseAnalysis> phases;
+  final List<AnalysisPhase> phases;
   final int selected;
   final ValueChanged<int> onSelect;
 
@@ -212,7 +226,9 @@ class _PhaseStepper extends StatelessWidget {
                       SizedBox(
                         width: nodeW,
                         child: _StepNode(
+                          key: ValueKey('phase-step-${phases[i].key}'),
                           phase: phases[i],
+                          number: i + 1,
                           selected: selected == i,
                           onTap: () => onSelect(i),
                         ),
@@ -230,12 +246,15 @@ class _PhaseStepper extends StatelessWidget {
 
 class _StepNode extends StatelessWidget {
   const _StepNode({
+    super.key,
     required this.phase,
+    required this.number,
     required this.selected,
     required this.onTap,
   });
 
-  final PhaseAnalysis phase;
+  final AnalysisPhase phase;
+  final int number;
   final bool selected;
   final VoidCallback onTap;
 
@@ -258,23 +277,27 @@ class _StepNode extends StatelessWidget {
                   ? Border.all(color: AppColors.primary, width: 2.5)
                   : null,
             ),
-            child: Text('${phase.number}',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700)),
+            child: Text(
+              '$number',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
           const SizedBox(height: 4),
           Text(
-            phase.phase.en,
+            phase.name,
             textAlign: TextAlign.center,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-                fontSize: 9,
-                height: 1.1,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: selected ? AppColors.primary : AppColors.hint),
+              fontSize: 9,
+              height: 1.1,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected ? AppColors.primary : AppColors.hint,
+            ),
           ),
         ],
       ),
@@ -292,7 +315,7 @@ class _PhaseGrid extends StatelessWidget {
     required this.onSelect,
   });
 
-  final List<PhaseAnalysis> phases;
+  final List<AnalysisPhase> phases;
   final int selected;
   final ValueChanged<int> onSelect;
 
@@ -300,30 +323,36 @@ class _PhaseGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final rows = <Widget>[];
     for (var i = 0; i < phases.length; i += 2) {
-      rows.add(IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: _PhaseCard(
-                phase: phases[i],
-                selected: selected == i,
-                onTap: () => onSelect(i),
+      rows.add(
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _PhaseCard(
+                  key: ValueKey('phase-card-${phases[i].key}'),
+                  phase: phases[i],
+                  number: i + 1,
+                  selected: selected == i,
+                  onTap: () => onSelect(i),
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: i + 1 < phases.length
-                  ? _PhaseCard(
-                      phase: phases[i + 1],
-                      selected: selected == i + 1,
-                      onTap: () => onSelect(i + 1),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: i + 1 < phases.length
+                    ? _PhaseCard(
+                        key: ValueKey('phase-card-${phases[i + 1].key}'),
+                        phase: phases[i + 1],
+                        number: i + 2,
+                        selected: selected == i + 1,
+                        onTap: () => onSelect(i + 1),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
         ),
-      ));
+      );
       if (i + 2 < phases.length) rows.add(const SizedBox(height: 12));
     }
     return Column(children: rows);
@@ -332,12 +361,15 @@ class _PhaseGrid extends StatelessWidget {
 
 class _PhaseCard extends StatelessWidget {
   const _PhaseCard({
+    super.key,
     required this.phase,
+    required this.number,
     required this.selected,
     required this.onTap,
   });
 
-  final PhaseAnalysis phase;
+  final AnalysisPhase phase;
+  final int number;
   final bool selected;
   final VoidCallback onTap;
 
@@ -362,19 +394,23 @@ class _PhaseCard extends StatelessWidget {
             // 번호 + 구간명
             Row(
               children: [
-                _NumberBadge(number: phase.number, color: accent),
+                _NumberBadge(number: number, color: accent),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(phase.phase.en,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 13.5, fontWeight: FontWeight.w700)),
+                  child: Text(
+                    phase.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            // 포즈 자리표시자 + 점수/증감
+            // 포즈 자리표시자 + 실제 구간 점수
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -384,24 +420,32 @@ class _PhaseCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('${phase.score}',
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _scoreText(phase),
                           style: const TextStyle(
-                              fontSize: 30,
-                              height: 1.0,
-                              fontWeight: FontWeight.w800)),
-                      if (phase.delta != null) ...[
-                        const SizedBox(height: 4),
-                        _DeltaText(delta: phase.delta!),
-                      ],
+                            fontSize: 30,
+                            height: 1.0,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
-            Text(phase.shortComment,
-                style: const TextStyle(
-                    fontSize: 11.5, height: 1.35, color: AppColors.hint)),
+            Text(
+              _statusText(phase),
+              style: const TextStyle(
+                fontSize: 11.5,
+                height: 1.35,
+                color: AppColors.hint,
+              ),
+            ),
           ],
         ),
       ),
@@ -413,9 +457,14 @@ class _PhaseCard extends StatelessWidget {
 // 선택 구간 상세 카드
 // ---------------------------------------------------------------------------
 class _PhaseDetailCard extends StatelessWidget {
-  const _PhaseDetailCard({required this.phase});
+  const _PhaseDetailCard({
+    super.key,
+    required this.phase,
+    required this.number,
+  });
 
-  final PhaseAnalysis phase;
+  final AnalysisPhase phase;
+  final int number;
 
   @override
   Widget build(BuildContext context) {
@@ -427,14 +476,18 @@ class _PhaseDetailCard extends StatelessWidget {
           // 헤더: 번호 + "구간 분석" + 수준 배지
           Row(
             children: [
-              _NumberBadge(number: phase.number, color: accent),
+              _NumberBadge(number: number, color: accent),
               const SizedBox(width: 8),
               Expanded(
-                child: Text('${phase.phase.en} 구간 분석',
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w700)),
+                child: Text(
+                  '${phase.name} 구간 분석',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
-              _LevelBadge(needWork: phase.needWork),
+              _MeasurementBadge(phase: phase),
             ],
           ),
           const SizedBox(height: 14),
@@ -448,74 +501,50 @@ class _PhaseDetailCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          Text(phase.detailComment,
-              style: const TextStyle(
-                  fontSize: 12.5, height: 1.5, color: AppColors.subtitle)),
+          PhaseMetrics(phase: phase),
           const SizedBox(height: 14),
-          _TipBox(tip: phase.tip),
+          _TipBox(
+            tip: !phase.available
+                ? '분석되지 않은 구간의 자세는 판정하지 않습니다.'
+                : phase.reliability == 'low'
+                ? '검출 신뢰도가 낮습니다. 측정값은 참고용으로 확인하세요.'
+                : '구간 점수와 소요 시간은 서로 다른 지표입니다. 템포 판정이 보류된 구간은 수치만 참고하세요.',
+          ),
         ],
       ),
     );
   }
 }
 
-/// 상세 점수 블록. 반복이면 이전→현재, 첫 피드백이면 현재만.
+/// 실제 서버 구간 점수. 비교 데이터가 없으므로 이전 점수나 증감을 만들지 않는다.
 class _ScoreBlock extends StatelessWidget {
   const _ScoreBlock({required this.phase});
-
-  final PhaseAnalysis phase;
+  final AnalysisPhase phase;
 
   @override
-  Widget build(BuildContext context) {
-    final prev = phase.previousScore;
-    if (prev == null) {
-      // 첫 피드백: 현재 점수만.
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('${phase.score}',
-              style: const TextStyle(
-                  fontSize: 40,
-                  height: 1.0,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.primary)),
-          const SizedBox(height: 4),
-          const Text('현재 점수',
-              style: TextStyle(fontSize: 12, color: AppColors.hint)),
-        ],
-      );
-    }
-    // 반복 피드백: 이전 → 현재 (+증감).
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text('$prev',
-                style: const TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.w700)),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 6),
-              child: Icon(Icons.arrow_forward, size: 16, color: AppColors.hint),
-            ),
-            Text('${phase.score}',
-                style: const TextStyle(
-                    fontSize: 34,
-                    height: 1.0,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.primary)),
-            const SizedBox(width: 6),
-            _DeltaText(delta: phase.delta!),
-          ],
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text(
+          _scoreText(phase),
+          style: const TextStyle(
+            fontSize: 40,
+            height: 1.0,
+            fontWeight: FontWeight.w800,
+            color: AppColors.primary,
+          ),
         ),
-        const SizedBox(height: 4),
-        const Text('이전 점수      현재 점수',
-            style: TextStyle(fontSize: 11, color: AppColors.hint)),
-      ],
-    );
-  }
+      ),
+      const SizedBox(height: 4),
+      const Text(
+        '구간 점수',
+        style: TextStyle(fontSize: 12, color: AppColors.hint),
+      ),
+    ],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -542,15 +571,21 @@ class _TipBox extends StatelessWidget {
             children: const [
               Text('💡', style: TextStyle(fontSize: 14)),
               SizedBox(width: 6),
-              Text('코칭 팁',
-                  style:
-                      TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              Text(
+                '확인 안내',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(tip,
-              style: const TextStyle(
-                  fontSize: 12.5, height: 1.5, color: AppColors.subtitle)),
+          Text(
+            tip,
+            style: const TextStyle(
+              fontSize: 12.5,
+              height: 1.5,
+              color: AppColors.subtitle,
+            ),
+          ),
         ],
       ),
     );
@@ -575,68 +610,45 @@ class _NumberBadge extends StatelessWidget {
       height: 24,
       alignment: Alignment.center,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      child: Text('$number',
-          style: const TextStyle(
-              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+      child: Text(
+        '$number',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 }
 
-/// 수준 배지. 개선 필요(빨강) / 안정적(초록).
-class _LevelBadge extends StatelessWidget {
-  const _LevelBadge({required this.needWork});
+/// 점수의 좋고 나쁨 대신 실제 측정 상태를 표시한다.
+class _MeasurementBadge extends StatelessWidget {
+  const _MeasurementBadge({required this.phase});
 
-  final bool needWork;
+  final AnalysisPhase phase;
 
   @override
   Widget build(BuildContext context) {
-    final color = needWork ? AppColors.primary : const Color(0xFF2E9E5B);
-    final soft = needWork ? const Color(0xFFFDECEC) : const Color(0xFFE7F5EC);
-    final text = needWork ? '주요 개선 필요' : '안정적';
+    final color = _accentColor(phase);
+    final soft = color == AppColors.hint
+        ? const Color(0xFFF4F4F4)
+        : const Color(0xFFE7F5EC);
+    final text = _statusText(phase);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: soft,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(text,
-          style: TextStyle(
-              fontSize: 11, fontWeight: FontWeight.w700, color: color)),
-    );
-  }
-}
-
-/// 증감 텍스트. ▲+5(초록) / ▼5(빨강) / – 0(회색). 뒤에 [suffix] 를 붙일 수 있다.
-class _DeltaText extends StatelessWidget {
-  const _DeltaText({required this.delta, this.suffix});
-
-  final int delta;
-  final String? suffix;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color color;
-    final String mark;
-    if (delta > 0) {
-      color = const Color(0xFF2E9E5B);
-      mark = '▲ $delta';
-    } else if (delta < 0) {
-      color = AppColors.primary;
-      mark = '▼ ${delta.abs()}';
-    } else {
-      color = AppColors.hint;
-      mark = '– 0';
-    }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(mark,
-            style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w700, color: color)),
-        if (suffix != null)
-          Text(suffix!,
-              style: const TextStyle(fontSize: 11, color: AppColors.hint)),
-      ],
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
     );
   }
 }
@@ -667,23 +679,31 @@ class _PosePlaceholder extends StatelessWidget {
         child: Stack(
           alignment: Alignment.center,
           children: [
-            Icon(Icons.sports_baseball,
-                size: width * 0.42, color: Colors.grey.shade400),
+            Icon(
+              Icons.sports_baseball,
+              size: width * 0.42,
+              color: Colors.grey.shade400,
+            ),
             if (label != null)
               Positioned(
                 bottom: 6,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.primary,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(label!,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700)),
+                  child: Text(
+                    label!,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ),
           ],
@@ -713,15 +733,23 @@ class _Card extends StatelessWidget {
   }
 }
 
-/// 구간 상태 대표색.
-///  - 반복 피드백(증감 있음): ▲초록 / ▼빨강 / –회색
-///  - 첫 피드백: good 초록 / 개선 필요 빨강
-Color _accentColor(PhaseAnalysis p) {
-  final d = p.delta;
-  if (d != null) {
-    if (d > 2) return const Color(0xFF2E9E5B);
-    if (d < -2) return AppColors.primary;
-    return AppColors.hint;
-  }
-  return p.level == 'good' ? const Color(0xFF2E9E5B) : AppColors.primary;
-}
+/// 기존 색상은 측정 상태를 구분한다. 임의의 점수 기준이나 비교 증감으로 평가하지 않는다.
+Color _accentColor(AnalysisPhase p) =>
+    !p.available ||
+        p.score == null ||
+        !const ['high', 'medium'].contains(p.reliability)
+    ? AppColors.hint
+    : const Color(0xFF2E9E5B);
+
+String _scoreText(AnalysisPhase p) =>
+    feedbackNumber(p.available ? p.score : null);
+
+String _statusText(AnalysisPhase p) => !p.available
+    ? '분석 불가'
+    : p.score == null
+    ? '점수 미제공'
+    : p.reliability == 'low'
+    ? '참고용'
+    : const ['high', 'medium'].contains(p.reliability)
+    ? '측정 완료'
+    : '신뢰도 미제공';
