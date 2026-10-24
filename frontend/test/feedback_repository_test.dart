@@ -231,4 +231,52 @@ void main() {
       },
     );
   }
+
+  test('LLM coaching overrides rule-based summary/coach and part points', () async {
+    final body = storedAnalysis();
+    (body['result'] as Map<String, dynamic>)['coaching'] = {
+      'overall_summary': 'LLM 종합 요약입니다.',
+      'overall_coach': 'LLM 코치 한마디입니다.',
+      'parts': [
+        {
+          'key': 'lead_arm',
+          'summary': 'LLM 앞팔 요약.',
+          'keep_points': <String>[],
+          'improve_points': ['앞팔 팔꿈치를 더 펴 보세요.'],
+        },
+      ],
+    };
+    final repo = repositoryFor((_) async => response(body));
+
+    final feedback = await repo.fetchFeedback('saved-analysis');
+    expect(feedback.summary, 'LLM 종합 요약입니다.');
+    expect(feedback.coachComment, 'LLM 코치 한마디입니다.');
+    expect(feedback.coaching, isNotNull);
+
+    final part = repo.buildPartAnalyses(feedback).single;
+    expect(part.summary, 'LLM 앞팔 요약.');
+    expect(part.points, ['앞팔 팔꿈치를 더 펴 보세요.']);
+  });
+
+  test('missing coaching falls back to rule-based text', () async {
+    // 픽스처엔 coaching 키가 없다 → 규칙 기반 문구 유지.
+    final repo = repositoryFor((_) async => response(storedAnalysis()));
+    final feedback = await repo.fetchFeedback('saved-analysis');
+    expect(feedback.coaching, isNull);
+    expect(feedback.summary, contains('스윙 분석 결과')); // _buildSummary 문구.
+  });
+
+  test('malformed coaching (missing overall fields) is ignored', () async {
+    final body = storedAnalysis();
+    (body['result'] as Map<String, dynamic>)['coaching'] = {
+      'parts': [
+        {'key': 'lead_arm', 'summary': 'x'},
+      ],
+    };
+    final repo = repositoryFor((_) async => response(body));
+    final feedback = await repo.fetchFeedback('saved-analysis');
+    // overall_summary/overall_coach 가 없으면 통째로 무시 → 규칙 기반.
+    expect(feedback.coaching, isNull);
+    expect(feedback.summary, contains('스윙 분석 결과'));
+  });
 }

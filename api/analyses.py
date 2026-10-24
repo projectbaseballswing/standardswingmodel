@@ -57,6 +57,9 @@ async def lifespan(app: FastAPI):
         ),
         reference_fps=settings.reference_fps,
         worker_id=settings.worker_id,
+        gemini_api_key=settings.gemini_api_key,
+        gemini_model=settings.gemini_model,
+        coaching_scope=settings.coaching_scope,
     )
     app.state.jobs = jobs
     try:
@@ -309,3 +312,15 @@ def get_speed(request: Request, analysis_id: str):
     현재 모델(0.1)에서는 값이 비어 있고 available=false 입니다. 다음 버전에서 채워집니다.
     """
     return _finished_result(request, analysis_id)["speed"]
+
+
+@router.get("/analyses/{analysis_id}/coaching", response_model=schemas.Coaching, tags=["feedback"])
+def get_coaching(request: Request, analysis_id: str):
+    """LLM(Gemini) 코칭 문장: 전체 요약·핵심 코칭·부위별 유지/개선 포인트.
+
+    생성에 실패했거나 Gemini 키가 없으면 404 입니다. 프론트는 이때 규칙 기반 문장을 씁니다.
+    """
+    coaching = _finished_result(request, analysis_id).get("coaching")
+    if coaching is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "LLM 코칭 문장이 없습니다.")
+    return coaching
