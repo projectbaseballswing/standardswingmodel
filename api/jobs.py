@@ -23,6 +23,7 @@ from api import database
 from api.database import Swing
 from feedback.compare import MODEL_VERSION, SwingComparison
 from feedback.compare_v2 import SwingComparisonV2
+from feedback.llm_coach import generate_coaching
 from feedback.pipeline import PipelineError, SwingPipeline
 from feedback.reference import ReferenceStore
 from feedback.reference_model import load_reference_model
@@ -80,10 +81,17 @@ class JobManager:
         pipeline_factory: Callable[[], SwingPipeline],
         reference_fps: float,
         worker_id: str,
+        gemini_api_key: str = "",
+        gemini_model: str = "",
+        coaching_scope: str = "overall",
     ):
         self.store = store
         self.reference_fps = reference_fps
         self.worker_id = worker_id
+        # LLM(Gemini) 코칭 문장. 키가 비어 있으면 호출하지 않고 프론트 규칙 기반 폴백을 둔다.
+        self.gemini_api_key = gemini_api_key
+        self.gemini_model = gemini_model
+        self.coaching_scope = coaching_scope
         self._pipeline_factory = pipeline_factory
         self._pipeline: Optional[SwingPipeline] = None
         # 이벤트 기반 기준 모델(0.2). 파일이 없으면 기존 0.1 비교를 쓴다.
@@ -197,6 +205,23 @@ class JobManager:
         self._executor.submit(self._run_video, job, video_path, is_left)
         return job
 
+    def _attach_coaching(self, job: Job) -> None:
+        """리포트에 LLM 코칭 문장을 붙인다. 키가 없거나 실패하면 조용히 넘어간다.
+
+        실패해도 분석 자체는 성공으로 둔다. 프론트는 ``coaching`` 이 없으면
+        기존 규칙 기반 문장을 그대로 쓴다.
+        """
+        if not self.gemini_api_key or not isinstance(job.result, dict):
+            return
+        coaching = generate_coaching(
+            job.result,
+            api_key=self.gemini_api_key,
+            model=self.gemini_model,
+            scope=self.coaching_scope,
+        )
+        if coaching is not None:
+            job.result["coaching"] = coaching
+
     def _run_video(self, job: Job, video_path: str, is_left: bool) -> None:
         job.status = "processing"
 
@@ -233,6 +258,9 @@ class JobManager:
                     reference_fps=self.reference_fps,
                     quality=result.quality,
                 ).report(include_series=True)
+            # LLM 코칭은 분석의 선택 단계. 실패해도 분석 결과는 그대로 둔다.
+            on_stage("coaching")
+            self._attach_coaching(job)
             job.status = "done"
         except PipelineError as exc:
             job.status, job.error = "failed", {"code": exc.code, "message": exc.message}

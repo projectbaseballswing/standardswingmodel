@@ -212,12 +212,43 @@ class SpeedFeedback(BaseModel):
 # ----------------------------------------------------------------------
 # 분석 작업
 # ----------------------------------------------------------------------
+class PartCoaching(BaseModel):
+    key: str = Field(description="부위 key (예: front_arm)")
+    summary: str
+    keep_points: List[str] = Field(default_factory=list)
+    improve_points: List[str] = Field(default_factory=list)
+
+
+class JointCoaching(BaseModel):
+    key: str = Field(description="관절(피처) key (예: lead_elbow_angle)")
+    comment: str
+
+
+class PhaseCoaching(BaseModel):
+    key: str = Field(description="구간 key (예: stride/load/swing/follow_through)")
+    comment: str
+
+
+class Coaching(BaseModel):
+    """LLM(Gemini)이 만든 코칭 문장. 생성에 실패하면 응답에서 통째로 빠진다."""
+
+    overall_summary: str
+    overall_coach: str
+    parts: List[PartCoaching] = Field(default_factory=list)
+    # coaching_scope='full' 일 때만 채워진다. overall 이면 빈 리스트.
+    joints: List[JointCoaching] = Field(default_factory=list)
+    phases: List[PhaseCoaching] = Field(default_factory=list)
+
+
 class AnalysisReport(BaseModel):
     model_version: str
     overall: OverallFeedback
     joints: List[JointFeedback]
     phases: PhasesFeedback
     speed: SpeedFeedback
+    coaching: Optional[Coaching] = Field(
+        None, description="LLM 코칭 문장. 없으면 프론트가 규칙 기반으로 채운다."
+    )
 
 
 class AnalysisError(BaseModel):

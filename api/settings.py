@@ -33,6 +33,14 @@ class Settings:
     worker_id: str = os.getenv("SWING_WORKER_ID") or socket.gethostname()
     # SWING_MOCK=1 이면 모델을 불러오지 않고 고정된 샘플 응답을 돌려준다 (프론트/백엔드 개발용)
     mock: bool = os.getenv("SWING_MOCK", "") == "1"
+    # LLM(Gemini) 코칭 문장 생성. 키가 없으면 규칙 기반 폴백을 쓴다.
+    gemini_api_key: str = field(default=os.getenv("GEMINI_API_KEY", ""), repr=False)
+    # gemini-flash-lite-latest: 코칭 생성은 짧은 JSON 이라 lite 로 충분하다.
+    # flash(-latest)는 내부 추론 때문에 45~90초가 걸려 504 가 잦지만, lite 는 ~7초로 끝난다.
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
+    # 코칭 범위: 'overall'(종합+부위) 또는 'full'(관절·구간까지). 기본은 overall.
+    # 유료 등급 전환 후 GEMINI_COACHING_SCOPE=full 로 켜면 관절/구간 서술도 생성된다.
+    coaching_scope: str = os.getenv("GEMINI_COACHING_SCOPE", "overall")
 
 
 settings = Settings()

@@ -252,6 +252,43 @@ class PartAnalysis {
       : currentScore! - previousScore!;
 }
 
+/// LLM(백엔드)이 만든 부위별 코칭. 없으면 규칙 기반 문구를 쓴다.
+class PartCoaching {
+  const PartCoaching({
+    required this.summary,
+    this.keepPoints = const [],
+    this.improvePoints = const [],
+  });
+
+  final String summary;
+  final List<String> keepPoints;
+  final List<String> improvePoints;
+
+  /// 유지/개선 포인트를 합친 목록. (개선 포인트를 먼저 보여준다)
+  List<String> get points => [...improvePoints, ...keepPoints];
+}
+
+/// LLM(백엔드)이 만든 코칭 묶음. 서버 응답 result.coaching 을 담는다.
+///
+/// 생성에 실패했거나(키 없음·504·할당량 초과 등) 서버가 안 주면 null 이고,
+/// 그때는 기존 규칙 기반 문구로 자동 폴백한다.
+class Coaching {
+  const Coaching({
+    required this.overallSummary,
+    required this.overallCoach,
+    this.parts = const {},
+  });
+
+  /// 종합 요약 (점수 옆 분홍 박스).
+  final String overallSummary;
+
+  /// 종합 코칭 한마디 (AI 코치의 한마디).
+  final String overallCoach;
+
+  /// 부위 key → 부위별 코칭.
+  final Map<String, PartCoaching> parts;
+}
+
 /// 종합 피드백 1건.
 class OverallFeedback {
   const OverallFeedback({
@@ -268,10 +305,14 @@ class OverallFeedback {
     this.phases = const [],
     this.speedMetrics = const [],
     this.events = const [],
+    this.coaching,
   });
 
   /// 촬영/분석 시각.
   final DateTime recordedAt;
+
+  /// 백엔드 LLM 코칭. 없으면 null (규칙 기반 문구로 폴백).
+  final Coaching? coaching;
 
   /// 전체 스윙 점수(0~100).
   final double? totalScore;

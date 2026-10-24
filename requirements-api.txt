@@ -12,3 +12,5 @@ python-dotenv>=1,<2
 # HTTP transport for Supabase Storage and TestClient
 httpx
 pytest
+# LLM 코칭 문장 생성 (Gemini)
+google-genai

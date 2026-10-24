@@ -81,6 +81,9 @@ class FeedbackRepository {
     final totalScore = available ? _number(overall['score']) : null;
     final reliability = _reliability(overall['reliability']);
 
+    // 백엔드 LLM 코칭. 없거나 형식이 틀리면 null → 규칙 기반 폴백.
+    final coaching = _mapCoaching(result['coaching']);
+
     // 부위별 세부 항목(피처)을 모은다.
     // 신뢰도 낮음(뒷팔 팔꿈치 등)과 미측정 세부 항목은 제외하되 부위 점수는 보존한다.
     final featuresByPart = <String, List<FeatureAnalysis>>{};
@@ -167,14 +170,49 @@ class FeedbackRepository {
           ? '종합 점수가 제공되지 않았습니다. 측정된 항목만 확인하세요.'
           : reliability == 'low'
           ? '분석 신뢰도가 낮습니다. 점수는 참고용으로 확인하세요.'
+          // LLM 코칭이 있으면 그 문장을, 없으면 규칙 기반 문구를 쓴다.
+          : (coaching != null && coaching.overallSummary.isNotEmpty)
+          ? coaching.overallSummary
           : _buildSummary(totalScore, items),
       coachComment: !available || reliability == 'low'
           ? '분석 정보가 부족하거나 신뢰도가 낮아 자세에 대한 판단을 보류합니다.'
+          : (coaching != null && coaching.overallCoach.isNotEmpty)
+          ? coaching.overallCoach
           : _buildCoach(
               items.where((i) => !i.limited && i.features.isNotEmpty).toList(),
             ),
       items: items,
+      coaching: coaching,
       // 실제 이전 기록과 비교하지 않았으므로 previousTotalScore는 주지 않는다.
+    );
+  }
+
+  /// 서버 result.coaching 을 모델로 변환한다. 없거나 형식이 틀리면 null.
+  ///
+  /// 종합 요약/코칭(overall_summary/overall_coach)이 둘 다 문자열일 때만 유효로 본다.
+  /// 그래야 부분적으로 깨진 응답에 섞이지 않는다.
+  Coaching? _mapCoaching(dynamic raw) {
+    if (raw is! Map<String, dynamic>) return null;
+    final summary = raw['overall_summary'];
+    final coach = raw['overall_coach'];
+    if (summary is! String || coach is! String) return null;
+
+    final parts = <String, PartCoaching>{};
+    for (final p in (raw['parts'] as List?) ?? const []) {
+      if (p is! Map<String, dynamic>) continue;
+      final key = p['key'];
+      if (key is! String || key.isEmpty) continue;
+      parts[key] = PartCoaching(
+        summary: (p['summary'] as String?) ?? '',
+        keepPoints: _strings(p['keep_points']),
+        improvePoints: _strings(p['improve_points']),
+      );
+    }
+
+    return Coaching(
+      overallSummary: summary,
+      overallCoach: coach,
+      parts: parts,
     );
   }
 
@@ -440,6 +478,16 @@ class FeedbackRepository {
       final status = _statusOf(item, hasComparison: feedback.hasComparison);
       final needWork =
           status == JointStatus.worsened || status == JointStatus.proBad;
+      // LLM 부위 코칭이 있으면 요약/포인트를 그걸로 대체(없으면 규칙 기반).
+      // - 측정 불가(limited) 부위는 안내 문구를 써야 하므로 LLM 로 덮지 않는다.
+      // - 반복 피드백(이전 대비 비교)은 LLM 이 "프로 기준" 문장이라 맞지 않는다.
+      //   이땐 delta 기반 규칙 문구(_jointSummary/_jointPoints)를 유지한다.
+      //   (이전 대비 LLM 은 백엔드 반복-피드백 API 가 생기면 별도로 추가.)
+      final partCoaching =
+          (status == JointStatus.limited || feedback.hasComparison)
+          ? null
+          : feedback.coaching?.parts[item.key];
+      final llmPoints = partCoaching?.points ?? const <String>[];
       list.add(
         PartAnalysis(
           key: item.key,
@@ -451,14 +499,16 @@ class FeedbackRepository {
           previousScore: item.previousScore,
           reliability: item.reliability,
           features: item.features,
-          summary: _jointSummary(item, status),
+          summary: partCoaching != null && partCoaching.summary.isNotEmpty
+              ? partCoaching.summary
+              : _jointSummary(item, status),
           coachComment: _jointCoach(item, status),
           pointsTitle: status == JointStatus.limited
               ? '분석 안내'
               : needWork
               ? '개선 포인트'
               : '유지 포인트',
-          points: _jointPoints(item, status),
+          points: llmPoints.isNotEmpty ? llmPoints : _jointPoints(item, status),
         ),
       );
     }
