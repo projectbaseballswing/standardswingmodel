@@ -6,6 +6,7 @@ user_id 경로 파라미터는 개발용 필터일 뿐 소유자 인증 수단�
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,6 +20,10 @@ from api.schemas import (
     SwingListItem,
     SwingListResponse,
 )
+from api.settings import settings
+from feedback.llm_coach import generate_comparison_coaching
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["swings"])
 
@@ -117,6 +122,47 @@ def list_user_swings(
     )
 
 
+def _comparison_coaching(db: Session, current: Swing, previous: Swing) -> dict | None:
+    """이전 대비 LLM 코칭. 성공분은 current.result['comparison']에 캐시해 재호출을 막는다.
+
+    키가 없거나 생성 실패하면 None → 프론트는 규칙 기반으로 폴백한다.
+    """
+    if not settings.gemini_api_key:
+        return None
+    if not isinstance(current.result, dict) or not isinstance(previous.result, dict):
+        return None
+
+    cache = current.result.get("comparison")
+    if (
+        isinstance(cache, dict)
+        and cache.get("previous_analysis_id") == previous.analysis_id
+        and isinstance(cache.get("coaching"), dict)
+    ):
+        return cache["coaching"]  # 같은 직전 분석에 대해 이미 생성됨
+
+    coaching = generate_comparison_coaching(
+        current.result,
+        previous.result,
+        api_key=settings.gemini_api_key,
+        model=settings.gemini_model,
+        scope=settings.coaching_scope,
+    )
+    if coaching is not None:
+        # JSON 컬럼이라 전체 dict를 재할당해야 변경이 감지된다.
+        new_result = dict(current.result)
+        new_result["comparison"] = {
+            "previous_analysis_id": previous.analysis_id,
+            "coaching": coaching,
+        }
+        current.result = new_result
+        try:
+            db.commit()
+        except Exception:
+            logger.exception("비교 코칭 캐시 저장 실패 — 응답은 그대로 반환한다.")
+            db.rollback()
+    return coaching
+
+
 @router.get(
     "/users/{user_id}/analyses/{analysis_id}/comparison",
     response_model=ComparisonResponse,
@@ -184,4 +230,5 @@ def compare_with_previous(
         overall_previous_score=prev_overall,
         overall_delta=overall_delta,
         parts=parts,
+        coaching=_comparison_coaching(db, current, previous),
     )
