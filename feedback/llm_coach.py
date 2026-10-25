@@ -289,3 +289,235 @@ def generate_coaching(
     except Exception:
         logger.exception("Gemini 코칭 생성 실패 — 규칙 기반 폴백으로 넘어갑니다.")
         return None
+
+
+# ===========================================================================
+# 이전 스윙 대비 비교 코칭 (2번째+ 피드백)
+# ===========================================================================
+# 분석 자체는 항상 프로 기준이지만(점수가 프로 대비로 매겨짐), 2번째 스윙부터는
+# "지난 스윙 대비 개선/악화" 관점으로 코칭한다. 근거는 점수 변화 + 기준과의 차이 변화.
+# 프론트는 종합+부위만 소비하고, 관절/구간 비교는 scope='full' 일 때만 생성(휴면).
+
+# |delta| 가 이 값 이하면 "유지"로 본다 (프론트 maintainBand=2 와 맞춤).
+_MAINTAIN_BAND = 2
+
+
+def _status_ko(delta: Optional[float]) -> str:
+    if delta is None:
+        return "비교불가"
+    if delta > _MAINTAIN_BAND:
+        return "개선"
+    if delta < -_MAINTAIN_BAND:
+        return "악화"
+    return "유지"
+
+
+def _num(value: Any) -> Optional[float]:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _groups_by_key(report: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    overall = report.get("overall") or {}
+    return {
+        g["key"]: g
+        for g in (overall.get("group_scores") or [])
+        if isinstance(g, dict) and isinstance(g.get("key"), str) and g.get("key")
+    }
+
+
+def _joints_by_key(report: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return {
+        j["key"]: j
+        for j in (report.get("joints") or [])
+        if isinstance(j, dict) and isinstance(j.get("key"), str) and j.get("key")
+    }
+
+
+def _compare_joints(
+    current: Dict[str, Any], previous: Dict[str, Any], part_keys: set
+) -> List[Dict[str, Any]]:
+    """관절별 '기준과의 차이' 변화. 차이 절대값이 줄면(gap_narrowed>0) 프로에 가까워진 것."""
+    prev = _joints_by_key(previous)
+    out = []
+    for key, j in _joints_by_key(current).items():
+        if j.get("reliability") == "low" or not j.get("available") or j.get("body_part") not in part_keys:
+            continue
+        cur_diff = _num((j.get("impact") or {}).get("diff"))
+        p = prev.get(key)
+        prev_diff = _num((p.get("impact") or {}).get("diff")) if p else None
+        gap_narrowed = (
+            round(abs(prev_diff) - abs(cur_diff), 1)
+            if cur_diff is not None and prev_diff is not None
+            else None
+        )
+        out.append(
+            {
+                "key": key,
+                "name": j.get("name"),
+                "body_part": j.get("body_part"),
+                "current_diff": cur_diff,
+                "previous_diff": prev_diff,
+                "gap_narrowed": gap_narrowed,  # +면 프로에 가까워짐=개선, −면 멀어짐=악화
+            }
+        )
+    return out
+
+
+def _compare_phases(current: Dict[str, Any], previous: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """구간 점수의 이전 대비 변화."""
+    prev = {
+        p["key"]: p
+        for p in ((previous.get("phases") or {}).get("phases") or [])
+        if isinstance(p, dict) and isinstance(p.get("key"), str) and p.get("key")
+    }
+    out = []
+    for p in ((current.get("phases") or {}).get("phases") or []):
+        if not isinstance(p, dict) or not p.get("key"):
+            continue
+        if not p.get("available") or p.get("reliability") == "low":
+            continue
+        cur_score = _num(p.get("score"))
+        pp = prev.get(p["key"])
+        prev_score = _num(pp.get("score")) if pp and pp.get("available") is not False else None
+        delta = round(cur_score - prev_score, 1) if cur_score is not None and prev_score is not None else None
+        out.append(
+            {
+                "key": p["key"],
+                "name": p.get("name"),
+                "current_score": cur_score,
+                "previous_score": prev_score,
+                "delta": delta,
+                "status": _status_ko(delta),
+            }
+        )
+    return out
+
+
+def build_comparison_input(
+    current: Dict[str, Any], previous: Dict[str, Any], *, scope: str = "overall"
+) -> Dict[str, Any]:
+    """현재 vs 직전 리포트 → 비교 코칭용 압축 구조.
+
+    부위 점수 delta(메인)와, scope='full' 이면 관절 diff 변화·구간 점수 delta(근거)를 담는다.
+    신뢰도 낮은 부위/관절은 뺀다(프론트와 동일 기준).
+    """
+    cur_overall = current.get("overall") or {}
+    prev_overall = previous.get("overall") or {}
+    prev_groups = _groups_by_key(previous)
+
+    parts = []
+    part_keys = set()
+    for key, g in _groups_by_key(current).items():
+        if not g.get("available") or g.get("reliability") == "low":
+            continue
+        part_keys.add(key)
+        cur_score = _num(g.get("score"))
+        pg = prev_groups.get(key)
+        prev_score = _num(pg.get("score")) if pg and pg.get("available") is not False else None
+        delta = round(cur_score - prev_score, 1) if cur_score is not None and prev_score is not None else None
+        parts.append(
+            {
+                "key": key,
+                "name": g.get("name"),
+                "current_score": cur_score,
+                "previous_score": prev_score,
+                "delta": delta,
+                "status": _status_ko(delta),
+            }
+        )
+
+    cur_total, prev_total = _num(cur_overall.get("score")), _num(prev_overall.get("score"))
+    payload: Dict[str, Any] = {
+        "overall": {
+            "current_score": cur_total,
+            "previous_score": prev_total,
+            "delta": round(cur_total - prev_total, 1) if cur_total is not None and prev_total is not None else None,
+        },
+        "parts": parts,
+    }
+    if scope == "full":
+        payload["joints"] = _compare_joints(current, previous, part_keys)
+        payload["phases"] = _compare_phases(current, previous)
+    return payload
+
+
+COMPARISON_SYSTEM_INSTRUCTION = """\
+너는 야구 타격 스윙을 지도하는 전문 코치다. 선수의 이번 스윙을 '지난 스윙'과 비교한
+데이터를 받아서, 무엇이 좋아지고 나빠졌는지 한국어 코칭을 만든다.
+
+규칙:
+- 반드시 한국어. 따뜻하지만 군더더기 없는 코치 말투(존댓말).
+- '잘함/개선필요'(프로 기준)가 아니라 **지난 스윙 대비** 관점으로 쓴다.
+- status 가 '개선'이면 좋아진 점을, '악화'면 나빠진 점을, '유지'면 비슷함을 말한다.
+  점수 변화(예: 60→64)와 수치를 근거로 구체적으로. 데이터에 없는 내용은 지어내지 않는다.
+- parts: status 가 '개선'인 부위는 keep_points(유지), '악화'/'유지'인 부위는 improve_points 를
+  1~2개. 각 point 는 한 문장, 부위당 합쳐 최대 3개. summary 는 그 부위의 이전 대비 변화 1~2문장.
+- overall_summary 는 전체가 지난 스윙 대비 어떻게 변했는지 2~3문장, overall_coach 는
+  지난번보다 특히 신경 쓰면 좋을 핵심 한 가지를 짧게.
+- 입력으로 받은 부위(key)에 대해서만 쓴다. 없는 부위를 만들지 않는다.
+"""
+
+
+COMPARISON_FULL_INSTRUCTION = """\
+
+추가로 joints, phases 도 채운다:
+- joints: 각 관절이 지난 스윙 대비 기준(프로)에 더 가까워졌는지 1~2문장.
+  gap_narrowed 가 +면 프로에 가까워짐(개선), −면 멀어짐(악화)이다.
+- phases: 각 구간 점수가 지난 스윙 대비 올랐/내렸는지(delta, status) 1~2문장.
+- 입력에 없는 관절·구간 key 는 만들지 않는다.
+"""
+
+
+def generate_comparison_coaching(
+    current: Dict[str, Any],
+    previous: Dict[str, Any],
+    *,
+    api_key: str,
+    model: str,
+    scope: str = "overall",
+    timeout_s: float = 30.0,
+) -> Optional[Dict[str, Any]]:
+    """현재 리포트를 직전 리포트와 비교한 '이전 대비' 코칭 dict. 실패하면 ``None``.
+
+    출력 형태는 `generate_coaching` 과 같다(overall + parts, scope='full' 이면 +joints/phases).
+    단 내용이 '지난 스윙 대비 개선/악화' 관점이다.
+    """
+    if not api_key:
+        return None
+
+    full = scope == "full"
+    payload = build_comparison_input(current, previous, scope=scope)
+    if not payload.get("parts"):
+        return None
+
+    schema = CoachingFull if full else Coaching
+    system_instruction = COMPARISON_SYSTEM_INSTRUCTION + (COMPARISON_FULL_INSTRUCTION if full else "")
+
+    try:
+        import json
+
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=int(timeout_s * 1000)),
+        )
+        response = client.models.generate_content(
+            model=model,
+            contents=json.dumps(payload, ensure_ascii=False),
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+                response_schema=schema,
+                temperature=0.4,
+            ),
+        )
+        parsed = response.parsed
+        if parsed is None:
+            logger.warning("Gemini 비교 코칭 응답을 파싱하지 못했습니다.")
+            return None
+        return parsed.model_dump()
+    except Exception:
+        logger.exception("Gemini 비교 코칭 생성 실패 — 폴백으로 넘어갑니다.")
+        return None

@@ -110,6 +110,62 @@ def test_comparison_missing_part_in_previous_gives_null(mock_client):
     assert torso["delta"] is None
 
 
+def test_comparison_endpoint_returns_and_caches_coaching(mock_client, monkeypatch):
+    import api.swings as swings
+
+    calls = {"n": 0}
+    fake = {
+        "overall_summary": "지난 스윙보다 전체적으로 좋아졌어요.",
+        "overall_coach": "뒷다리 무릎에 집중해 보세요.",
+        "parts": [
+            {"key": "lead_arm", "summary": "앞팔이 개선됐어요.",
+             "keep_points": ["팔꿈치 각도 유지"], "improve_points": []},
+        ],
+    }
+
+    def fake_gen(current, previous, **kwargs):
+        calls["n"] += 1
+        return fake
+
+    # 네트워크 대신 가짜 생성기 + 키가 있는 것처럼 (Settings는 frozen이라 통째 교체).
+    from dataclasses import replace
+
+    monkeypatch.setattr(swings, "settings", replace(swings.settings, gemini_api_key="test-key"))
+    monkeypatch.setattr(swings, "generate_comparison_coaching", fake_gen)
+
+    owner = f"cmp-{uuid.uuid4().hex}"
+    prev = _swing(owner, datetime(2026, 9, 20, 9, tzinfo=timezone.utc),
+                  result=_result(70.0, [_part("lead_arm", "왼쪽 팔", 60.0)]))
+    current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
+                     result=_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)]))
+    _seed([prev, current], user_ids=[owner])
+    url = f"/api/users/{owner}/analyses/{current.analysis_id}/comparison"
+
+    body1 = mock_client.get(url).json()
+    assert body1["coaching"]["overall_summary"] == fake["overall_summary"]
+    assert body1["coaching"]["parts"][0]["key"] == "lead_arm"
+    assert calls["n"] == 1
+
+    # 두 번째 호출 → 캐시 사용, 생성 함수 재호출 안 함.
+    body2 = mock_client.get(url).json()
+    assert body2["coaching"]["overall_coach"] == fake["overall_coach"]
+    assert calls["n"] == 1
+
+
+def test_comparison_no_key_returns_null_coaching(mock_client):
+    # 기본 테스트 환경은 키가 비어 있다 → coaching None (규칙 기반 폴백).
+    owner = f"cmp-{uuid.uuid4().hex}"
+    prev = _swing(owner, datetime(2026, 9, 20, 9, tzinfo=timezone.utc),
+                  result=_result(70.0, [_part("lead_arm", "왼쪽 팔", 60.0)]))
+    current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
+                     result=_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)]))
+    _seed([prev, current], user_ids=[owner])
+
+    body = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison").json()
+    assert body["has_previous"] is True
+    assert body["coaching"] is None
+
+
 def test_comparison_404_and_409(mock_client):
     owner = f"cmp-{uuid.uuid4().hex}"
     processing = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),

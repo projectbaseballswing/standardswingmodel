@@ -310,6 +310,10 @@ class ComparisonResponse(BaseModel):
     overall_previous_score: Optional[float] = None
     overall_delta: Optional[float] = None
     parts: List[ComparisonPart] = Field(default_factory=list)
+    coaching: Optional[Coaching] = Field(
+        None,
+        description="이전 대비 LLM 코칭. 키 없음/실패 시 null → 프론트는 규칙 기반 폴백.",
+    )
 
 
 class VideoURL(BaseModel):

@@ -23,6 +23,9 @@ atexit.register(_directory.cleanup)
 os.environ["DATABASE_URL"] = "sqlite:///" + str(Path(_directory.name) / "test.db")
 os.environ["SWING_MOCK"] = "0"
 os.environ["SWING_WORKER_ID"] = "test-worker"
+# 테스트는 외부 LLM(Gemini)을 절대 호출하지 않는다. load_dotenv(override=False)라
+# api.settings import 전에 비워두면 .env의 실제 키를 읽지 않는다.
+os.environ["GEMINI_API_KEY"] = ""
 for _name in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_STORAGE_BUCKET"):
     os.environ[_name] = ""
 

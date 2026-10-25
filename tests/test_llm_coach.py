@@ -5,13 +5,38 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from feedback.llm_coach import GOOD_SCORE, build_llm_input, generate_coaching
+import copy
+
+from feedback.llm_coach import (
+    GOOD_SCORE,
+    build_comparison_input,
+    build_llm_input,
+    generate_coaching,
+    generate_comparison_coaching,
+)
 
 FIXTURE = Path(__file__).resolve().parent.parent / "api" / "fixtures" / "analysis_sample.json"
 
 
 def _report() -> dict:
     return json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+
+def _worse_previous(current: dict) -> dict:
+    """현재보다 점수가 낮고 기준과 더 벌어진 '직전' 리포트를 만든다 → 현재가 '개선'으로 나와야 한다."""
+    prev = copy.deepcopy(current)
+    prev["overall"]["score"] = (current["overall"]["score"] or 0) - 10
+    for g in prev["overall"].get("group_scores") or []:
+        if isinstance(g.get("score"), (int, float)):
+            g["score"] = g["score"] - 8
+    for j in prev.get("joints") or []:
+        impact = j.get("impact") or {}
+        if isinstance(impact.get("diff"), (int, float)):
+            impact["diff"] = impact["diff"] * 2  # 기준과 더 벌어짐
+    for p in (prev.get("phases") or {}).get("phases") or []:
+        if isinstance(p.get("score"), (int, float)):
+            p["score"] = p["score"] - 10
+    return prev
 
 
 def test_build_llm_input_summarizes_parts():
@@ -96,3 +121,60 @@ def test_coaching_full_schema_shape():
     assert "joints" in fields
     assert "phases" in fields
     assert "overall_summary" in fields  # 기본 필드 상속
+
+
+# ---------------------------------------------------------------------------
+# 비교(이전 대비) 코칭 — 네트워크 없이 입력/단락만 검증
+# ---------------------------------------------------------------------------
+def test_comparison_input_part_deltas_and_status():
+    current = _report()
+    prev = _worse_previous(current)
+    payload = build_comparison_input(current, prev, scope="overall")
+
+    assert payload["overall"]["delta"] == 10.0  # 현재가 10점 높음
+    assert payload["parts"], "비교할 부위가 있어야 한다"
+    for part in payload["parts"]:
+        assert part["previous_score"] is not None
+        assert part["delta"] == round(part["current_score"] - part["previous_score"], 1)
+        # 이전이 8점 낮으므로 전부 '개선'(delta>2).
+        assert part["status"] == "개선"
+    # overall scope 는 관절/구간을 넣지 않는다.
+    assert "joints" not in payload and "phases" not in payload
+
+
+def test_comparison_input_full_includes_joints_and_phases():
+    current = _report()
+    prev = _worse_previous(current)
+    payload = build_comparison_input(current, prev, scope="full")
+
+    assert payload["joints"], "관절 비교가 있어야 한다"
+    assert payload["phases"], "구간 비교가 있어야 한다"
+    # 이전 diff를 2배로 벌려놨으니 현재가 프로에 더 가까움 → gap_narrowed > 0.
+    narrowed = [j["gap_narrowed"] for j in payload["joints"] if j["gap_narrowed"] is not None]
+    assert narrowed and all(v > 0 for v in narrowed)
+    # 구간 점수는 이전이 10점 낮으므로 '개선'.
+    for ph in payload["phases"]:
+        if ph["delta"] is not None:
+            assert ph["status"] == "개선"
+
+
+def test_comparison_input_missing_previous_part_gives_null_delta():
+    current = _report()
+    prev = _worse_previous(current)
+    # 이전에서 한 부위를 통째로 제거 → 그 부위는 previous_score/delta null, status 비교불가.
+    prev["overall"]["group_scores"] = [
+        g for g in prev["overall"]["group_scores"] if g.get("key") != "torso"
+    ]
+    payload = build_comparison_input(current, prev, scope="overall")
+    torso = next((p for p in payload["parts"] if p["key"] == "torso"), None)
+    if torso is not None:  # torso 가 현재 신뢰도 ok일 때만 검증
+        assert torso["previous_score"] is None
+        assert torso["delta"] is None
+        assert torso["status"] == "비교불가"
+
+
+def test_generate_comparison_coaching_without_key_returns_none():
+    current = _report()
+    assert generate_comparison_coaching(
+        current, _worse_previous(current), api_key="", model="gemini-flash-lite-latest"
+    ) is None
