@@ -289,6 +289,29 @@ class SwingListResponse(BaseModel):
     items: List[SwingListItem]
 
 
+class ComparisonPart(BaseModel):
+    """부위별 이전 대비. 이전 리포트에 같은 부위가 없으면 previous_score/delta는 null."""
+
+    key: str
+    previous_score: Optional[float] = None
+    delta: Optional[float] = Field(None, description="이번 점수 − 이전 점수")
+
+
+class ComparisonResponse(BaseModel):
+    """현재 분석을 같은 회원의 직전 분석과 비교한 결과.
+
+    직전 분석이 없으면(첫 스윙) has_previous=false이고 나머지는 비어 있다.
+    delta는 참고용으로 내려주며, 프론트는 previous_score로 반복 피드백을 그린다.
+    """
+
+    has_previous: bool
+    previous_analysis_id: Optional[str] = None
+    previous_recorded_at: Optional[datetime] = None
+    overall_previous_score: Optional[float] = None
+    overall_delta: Optional[float] = None
+    parts: List[ComparisonPart] = Field(default_factory=list)
+
+
 class VideoURL(BaseModel):
     analysis_id: str
     url: str
