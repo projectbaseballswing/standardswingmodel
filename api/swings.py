@@ -13,7 +13,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from api.database import Swing, User, get_db
-from api.schemas import SwingListItem, SwingListResponse
+from api.schemas import (
+    ComparisonPart,
+    ComparisonResponse,
+    SwingListItem,
+    SwingListResponse,
+)
 
 router = APIRouter(prefix="/api", tags=["swings"])
 
@@ -35,6 +40,30 @@ def _overall_score(row: Swing) -> float | None:
     if isinstance(score, (int, float)) and not isinstance(score, bool):
         return float(score)
     return None
+
+
+def _part_scores(row: Swing) -> dict[str, float]:
+    """done 리포트의 부위(group)별 점수. available이고 숫자인 것만 key→score로 모은다."""
+    if row.status != "done" or not isinstance(row.result, dict):
+        return {}
+    overall = row.result.get("overall")
+    if not isinstance(overall, dict):
+        return {}
+    out: dict[str, float] = {}
+    for group in overall.get("group_scores") or []:
+        if not isinstance(group, dict):
+            continue
+        key = group.get("key")
+        score = group.get("score")
+        if (
+            isinstance(key, str)
+            and key
+            and group.get("available") is not False
+            and isinstance(score, (int, float))
+            and not isinstance(score, bool)
+        ):
+            out[key] = float(score)
+    return out
 
 
 @router.get("/users/{user_id}/swings", response_model=SwingListResponse)
@@ -85,4 +114,74 @@ def list_user_swings(
             )
             for row in rows
         ],
+    )
+
+
+@router.get(
+    "/users/{user_id}/analyses/{analysis_id}/comparison",
+    response_model=ComparisonResponse,
+)
+def compare_with_previous(
+    user_id: str,
+    analysis_id: str,
+    db: Session = Depends(get_db),
+):
+    """현재 분석을 같은 회원의 직전 분석과 비교한다(반복 피드백용).
+
+    "직전"은 같은 회원의 done 분석 중 표시 시각(recorded_at 우선, 없으면 created_at)이
+    현재보다 이전인 가장 최근 1건이다. 결과는 DB(Swing.result)에서 읽으므로 서버
+    재시작과 무관하게 조회된다. 직전 분석이 없으면 has_previous=false.
+
+    JWT 인증/소유권 검사는 없으며 user_id는 조회 필터일 뿐 인증 수단이 아니다.
+    """
+    if db.get(User, user_id) is None:
+        raise HTTPException(404, "사용자를 찾을 수 없습니다.")
+    current = db.get(Swing, analysis_id)
+    if current is None or current.user_id != user_id:
+        raise HTTPException(404, "분석 결과를 찾을 수 없습니다.")
+    if current.status != "done" or not isinstance(current.result, dict):
+        raise HTTPException(409, "아직 분석이 완료되지 않았습니다.")
+
+    display_time = func.coalesce(Swing.recorded_at, Swing.created_at)
+    current_time = current.recorded_at or current.created_at
+    previous = db.scalars(
+        select(Swing)
+        .where(
+            Swing.user_id == user_id,
+            Swing.status == "done",
+            Swing.analysis_id != analysis_id,
+            display_time < current_time,
+        )
+        .order_by(display_time.desc(), Swing.created_at.desc(), Swing.analysis_id.desc())
+        .limit(1)
+    ).first()
+
+    if previous is None or not isinstance(previous.result, dict):
+        return ComparisonResponse(has_previous=False)
+
+    cur_overall = _overall_score(current)
+    prev_overall = _overall_score(previous)
+    cur_parts = _part_scores(current)
+    prev_parts = _part_scores(previous)
+
+    parts = [
+        ComparisonPart(
+            key=key,
+            previous_score=prev_parts.get(key),
+            delta=round(cur - prev_parts[key], 1) if key in prev_parts else None,
+        )
+        for key, cur in cur_parts.items()
+    ]
+    overall_delta = (
+        round(cur_overall - prev_overall, 1)
+        if cur_overall is not None and prev_overall is not None
+        else None
+    )
+    return ComparisonResponse(
+        has_previous=True,
+        previous_analysis_id=previous.analysis_id,
+        previous_recorded_at=_utc_datetime(previous.recorded_at or previous.created_at),
+        overall_previous_score=prev_overall,
+        overall_delta=overall_delta,
+        parts=parts,
     )
