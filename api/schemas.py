@@ -297,6 +297,30 @@ class ComparisonPart(BaseModel):
     delta: Optional[float] = Field(None, description="이번 점수 − 이전 점수")
 
 
+class ComparisonPhase(BaseModel):
+    """구간별 이전 대비 점수. 이전에 같은 구간이 없으면 previous_score/delta는 null."""
+
+    key: str
+    previous_score: Optional[float] = None
+    current_score: Optional[float] = None
+    delta: Optional[float] = Field(None, description="이번 구간 점수 − 이전 구간 점수")
+
+
+class ComparisonJoint(BaseModel):
+    """관절별 '기준(프로)과의 차이' 이전 대비.
+
+    gap_narrowed = |이전 차이| − |이번 차이|. +면 프로에 더 가까워짐(개선), −면 멀어짐(악화).
+    그래프용 시계열은 무거우므로 이 응답에 넣지 않는다 — 프론트가 previous_analysis_id로
+    GET /analyses/{id}?include_series=true 를 불러 이전 series를 받아 겹쳐 그린다.
+    """
+
+    key: str
+    body_part: Optional[str] = None
+    previous_diff: Optional[float] = None
+    current_diff: Optional[float] = None
+    gap_narrowed: Optional[float] = None
+
+
 class ComparisonResponse(BaseModel):
     """현재 분석을 같은 회원의 직전 분석과 비교한 결과.
 
@@ -310,6 +334,8 @@ class ComparisonResponse(BaseModel):
     overall_previous_score: Optional[float] = None
     overall_delta: Optional[float] = None
     parts: List[ComparisonPart] = Field(default_factory=list)
+    phases: List[ComparisonPhase] = Field(default_factory=list)
+    joints: List[ComparisonJoint] = Field(default_factory=list)
     coaching: Optional[Coaching] = Field(
         None,
         description="이전 대비 LLM 코칭. 키 없음/실패 시 null → 프론트는 규칙 기반 폴백.",

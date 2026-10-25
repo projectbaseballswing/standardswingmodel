@@ -15,7 +15,9 @@ from sqlalchemy.orm import Session
 
 from api.database import Swing, User, get_db
 from api.schemas import (
+    ComparisonJoint,
     ComparisonPart,
+    ComparisonPhase,
     ComparisonResponse,
     SwingListItem,
     SwingListResponse,
@@ -68,6 +70,53 @@ def _part_scores(row: Swing) -> dict[str, float]:
             and not isinstance(score, bool)
         ):
             out[key] = float(score)
+    return out
+
+
+def _phase_scores(row: Swing) -> dict[str, float]:
+    """done 리포트의 구간(phase)별 점수. available이고 신뢰도 ok인 것만 key→score."""
+    if row.status != "done" or not isinstance(row.result, dict):
+        return {}
+    block = row.result.get("phases")
+    if not isinstance(block, dict):
+        return {}
+    out: dict[str, float] = {}
+    for p in block.get("phases") or []:
+        if not isinstance(p, dict):
+            continue
+        key = p.get("key")
+        score = p.get("score")
+        if (
+            isinstance(key, str)
+            and key
+            and p.get("available") is not False
+            and p.get("reliability") != "low"
+            and isinstance(score, (int, float))
+            and not isinstance(score, bool)
+        ):
+            out[key] = float(score)
+    return out
+
+
+def _joint_diffs(row: Swing) -> dict[str, dict]:
+    """done 리포트의 관절별 '기준(프로)과의 차이'(impact.diff). available+신뢰도 ok만.
+
+    key → {"body_part", "diff"}. 그래프용 시계열은 무거워서 넣지 않는다.
+    """
+    if row.status != "done" or not isinstance(row.result, dict):
+        return {}
+    out: dict[str, dict] = {}
+    for j in row.result.get("joints") or []:
+        if not isinstance(j, dict):
+            continue
+        key = j.get("key")
+        if not (isinstance(key, str) and key):
+            continue
+        if j.get("available") is False or j.get("reliability") == "low":
+            continue
+        diff = (j.get("impact") or {}).get("diff")
+        if isinstance(diff, (int, float)) and not isinstance(diff, bool):
+            out[key] = {"body_part": j.get("body_part"), "diff": float(diff)}
     return out
 
 
@@ -223,6 +272,36 @@ def compare_with_previous(
         if cur_overall is not None and prev_overall is not None
         else None
     )
+
+    # 구간별 점수 이전 대비.
+    cur_phase, prev_phase = _phase_scores(current), _phase_scores(previous)
+    phases = [
+        ComparisonPhase(
+            key=key,
+            current_score=cur,
+            previous_score=prev_phase.get(key),
+            delta=round(cur - prev_phase[key], 1) if key in prev_phase else None,
+        )
+        for key, cur in cur_phase.items()
+    ]
+
+    # 관절별 '기준과의 차이' 이전 대비. gap_narrowed = |이전| − |이번| (+면 프로에 가까워짐).
+    cur_joint, prev_joint = _joint_diffs(current), _joint_diffs(previous)
+    joints = []
+    for key, j in cur_joint.items():
+        pj = prev_joint.get(key)
+        prev_diff = pj["diff"] if pj else None
+        gap = round(abs(prev_diff) - abs(j["diff"]), 1) if prev_diff is not None else None
+        joints.append(
+            ComparisonJoint(
+                key=key,
+                body_part=j["body_part"],
+                previous_diff=prev_diff,
+                current_diff=j["diff"],
+                gap_narrowed=gap,
+            )
+        )
+
     return ComparisonResponse(
         has_previous=True,
         previous_analysis_id=previous.analysis_id,
@@ -230,5 +309,7 @@ def compare_with_previous(
         overall_previous_score=prev_overall,
         overall_delta=overall_delta,
         parts=parts,
+        phases=phases,
+        joints=joints,
         coaching=_comparison_coaching(db, current, previous),
     )

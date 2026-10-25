@@ -17,6 +17,26 @@ def _result(overall_score, parts: list[dict]) -> dict:
     return {"overall": {"score": overall_score, "group_scores": parts}}
 
 
+def _phase(key: str, name: str, score, *, available=True, reliability="high") -> dict:
+    return {"key": key, "name": name, "available": available, "reliability": reliability, "score": score}
+
+
+def _joint(key: str, name: str, body_part: str, diff, *, available=True, reliability="high") -> dict:
+    return {
+        "key": key, "name": name, "body_part": body_part,
+        "available": available, "reliability": reliability, "impact": {"diff": diff},
+    }
+
+
+def _rich_result(overall_score, parts, phases=None, joints=None) -> dict:
+    r = _result(overall_score, parts)
+    if phases is not None:
+        r["phases"] = {"phases": phases}
+    if joints is not None:
+        r["joints"] = joints
+    return r
+
+
 def _swing(owner: str, when: datetime, *, status="done", result=None) -> Swing:
     return Swing(
         analysis_id=uuid.uuid4().hex,
@@ -150,6 +170,66 @@ def test_comparison_endpoint_returns_and_caches_coaching(mock_client, monkeypatc
     body2 = mock_client.get(url).json()
     assert body2["coaching"]["overall_coach"] == fake["overall_coach"]
     assert calls["n"] == 1
+
+
+def test_comparison_includes_phase_and_joint_deltas(mock_client):
+    owner = f"cmp-{uuid.uuid4().hex}"
+    prev = _swing(owner, datetime(2026, 9, 20, 9, tzinfo=timezone.utc),
+                  result=_rich_result(70.0, [_part("lead_arm", "왼쪽 팔", 60.0)],
+                                      phases=[_phase("stride", "스트라이드", 65.0)],
+                                      joints=[_joint("lead_elbow_angle", "앞팔 팔꿈치 각도", "lead_arm", 12.0)]))
+    current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
+                     result=_rich_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)],
+                                         phases=[_phase("stride", "스트라이드", 73.0)],
+                                         joints=[_joint("lead_elbow_angle", "앞팔 팔꿈치 각도", "lead_arm", 5.0)]))
+    _seed([prev, current], user_ids=[owner])
+
+    body = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison").json()
+
+    # 구간: 65 → 73, delta +8
+    ph = next(p for p in body["phases"] if p["key"] == "stride")
+    assert ph["previous_score"] == 65.0
+    assert ph["current_score"] == 73.0
+    assert ph["delta"] == 8.0
+
+    # 관절: 기준과의 차이 12 → 5 → gap_narrowed = 12 − 5 = 7 (프로에 더 가까워짐)
+    jt = next(j for j in body["joints"] if j["key"] == "lead_elbow_angle")
+    assert jt["previous_diff"] == 12.0
+    assert jt["current_diff"] == 5.0
+    assert jt["gap_narrowed"] == 7.0
+    assert jt["body_part"] == "lead_arm"
+
+
+def test_comparison_missing_previous_phase_joint_gives_null(mock_client):
+    owner = f"cmp-{uuid.uuid4().hex}"
+    # 이전엔 구간/관절이 없음 → previous null, delta/gap null.
+    prev = _swing(owner, datetime(2026, 9, 20, 9, tzinfo=timezone.utc),
+                  result=_result(70.0, [_part("lead_arm", "왼쪽 팔", 60.0)]))
+    current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
+                     result=_rich_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)],
+                                         phases=[_phase("stride", "스트라이드", 73.0)],
+                                         joints=[_joint("lead_elbow_angle", "앞팔 팔꿈치 각도", "lead_arm", 5.0)]))
+    _seed([prev, current], user_ids=[owner])
+
+    body = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison").json()
+    assert body["phases"][0]["previous_score"] is None
+    assert body["phases"][0]["delta"] is None
+    assert body["joints"][0]["previous_diff"] is None
+    assert body["joints"][0]["gap_narrowed"] is None
+
+
+def test_comparison_no_phases_joints_returns_empty_lists(mock_client):
+    # 리포트에 phases/joints가 없으면 빈 리스트(기존 동작 유지).
+    owner = f"cmp-{uuid.uuid4().hex}"
+    prev = _swing(owner, datetime(2026, 9, 20, 9, tzinfo=timezone.utc),
+                  result=_result(70.0, [_part("lead_arm", "왼쪽 팔", 60.0)]))
+    current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
+                     result=_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)]))
+    _seed([prev, current], user_ids=[owner])
+
+    body = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison").json()
+    assert body["phases"] == []
+    assert body["joints"] == []
 
 
 def test_comparison_no_key_returns_null_coaching(mock_client):
