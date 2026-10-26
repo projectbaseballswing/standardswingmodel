@@ -225,8 +225,10 @@ class JointCoaching(BaseModel):
 
 
 class PhaseCoaching(BaseModel):
-    key: str = Field(description="구간 key (예: stride/load/swing/follow_through)")
-    comment: str
+    key: str = Field(description="구간 key (예: stride/transition/swing/follow)")
+    card_line: str = Field(description="구간 카드용 짧은 한 줄(상태 중심)")
+    comment: str = Field(description="구간 상세 서술(수치·top_deviation 근거)")
+    tip: str = Field(description="구간 개선 실천 팁 한 문장")
 
 
 class Coaching(BaseModel):

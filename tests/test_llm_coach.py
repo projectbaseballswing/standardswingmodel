@@ -123,6 +123,14 @@ def test_coaching_full_schema_shape():
     assert "overall_summary" in fields  # 기본 필드 상속
 
 
+def test_phase_coaching_has_card_line_comment_tip():
+    # 구간 코칭은 카드 짧은 줄 + 상세 서술 + 실천 팁 3종을 요구한다(목업 1:1).
+    from feedback.llm_coach import PhaseCoaching
+
+    fields = PhaseCoaching.model_fields
+    assert {"key", "card_line", "comment", "tip"} <= set(fields)
+
+
 # ---------------------------------------------------------------------------
 # 비교(이전 대비) 코칭 — 네트워크 없이 입력/단락만 검증
 # ---------------------------------------------------------------------------
@@ -156,6 +164,12 @@ def test_comparison_input_full_includes_joints_and_phases():
     for ph in payload["phases"]:
         if ph["delta"] is not None:
             assert ph["status"] == "개선"
+    # 구간마다 '가장 벌어진 관절'(top_deviation)이 입력에 실려야 부위를 콕 집어 말할 수 있다.
+    assert any(ph.get("top_deviation") for ph in payload["phases"])
+    for ph in payload["phases"]:
+        top = ph.get("top_deviation")
+        if top is not None:
+            assert top["name"] and "diff" in top and "direction" in top
 
 
 def test_comparison_input_missing_previous_part_gives_null_delta():
