@@ -41,8 +41,10 @@ class JointCoaching(BaseModel):
 
 
 class PhaseCoaching(BaseModel):
-    key: str  # 구간 key (예: stride/load/swing/follow_through). 입력으로 준 것 중 하나.
-    comment: str  # 그 구간의 타이밍·문제를 1~2문장
+    key: str  # 구간 key (예: stride/transition/swing/follow). 입력으로 준 것 중 하나.
+    card_line: str  # 구간 카드용 짧은 한 줄 요약(상태 중심, "~해요" 말투)
+    comment: str  # 그 구간의 타이밍·문제를 1~2문장 (수치·top_deviation 근거)
+    tip: str  # 그 구간을 개선할 실천 팁 한 문장
 
 
 class Coaching(BaseModel):
@@ -215,7 +217,12 @@ FULL_SCOPE_INSTRUCTION = """\
 
 추가로 joints, phases 도 채운다:
 - joints: 입력으로 받은 관절(key)마다 그 각도가 기준과 어떻게 다른지 1~2문장. 수치를 근거로.
-- phases: 입력으로 받은 구간(key)마다 타이밍(템포)과 그 구간에서 가장 벌어진 관절을 묶어 1~2문장.
+- phases: 입력으로 받은 구간(key)마다 아래 3가지를 모두 채운다. 근거는 템포와
+  그 구간에서 가장 벌어진 관절(top_deviation). top_deviation 의 관절 이름으로 어느
+  부위가 문제인지 말하고, 입력에 없는 부위는 지어내지 않는다.
+  - card_line: 구간 카드에 들어갈 짧은 한 줄. 상태 중심, 부드러운 "~해요" 말투.
+  - comment: 왜 그런지(템포·가장 벌어진 관절) 1~2문장으로 설명.
+  - tip: 그 구간을 개선할 실천 팁 한 문장.
 - 입력에 없는 관절·구간 key 는 만들지 않는다. 받은 key 에 대해서만 쓴다.
 """
 
@@ -246,7 +253,7 @@ def generate_coaching(
           "parts": [{"key", "summary", "keep_points": [...], "improve_points": [...]}],
           # scope='full' 일 때만:
           "joints": [{"key", "comment"}],
-          "phases": [{"key", "comment"}],
+          "phases": [{"key", "card_line", "comment", "tip"}],
         }
     """
     if not api_key:
@@ -380,6 +387,9 @@ def _compare_phases(current: Dict[str, Any], previous: Dict[str, Any]) -> List[D
         pp = prev.get(p["key"])
         prev_score = _num(pp.get("score")) if pp and pp.get("available") is not False else None
         delta = round(cur_score - prev_score, 1) if cur_score is not None and prev_score is not None else None
+        # 그 구간에서 기준과 가장 벌어진 관절(현재 스윙 기준) → "팔/하체 중 뭐가 문제"의 근거.
+        devs = p.get("top_deviations") or []
+        top = devs[0] if devs else None
         out.append(
             {
                 "key": p["key"],
@@ -388,6 +398,15 @@ def _compare_phases(current: Dict[str, Any], previous: Dict[str, Any]) -> List[D
                 "previous_score": prev_score,
                 "delta": delta,
                 "status": _status_ko(delta),
+                "top_deviation": (
+                    {
+                        "name": top.get("joint_name"),
+                        "diff": top.get("diff"),
+                        "direction": _direction_ko(top.get("direction", "")),
+                    }
+                    if top
+                    else None
+                ),
             }
         )
     return out
@@ -463,7 +482,13 @@ COMPARISON_FULL_INSTRUCTION = """\
 추가로 joints, phases 도 채운다:
 - joints: 각 관절이 지난 스윙 대비 기준(프로)에 더 가까워졌는지 1~2문장.
   gap_narrowed 가 +면 프로에 가까워짐(개선), −면 멀어짐(악화)이다.
-- phases: 각 구간 점수가 지난 스윙 대비 올랐/내렸는지(delta, status) 1~2문장.
+- phases: 입력으로 받은 구간(key)마다 아래 3가지를 '지난 스윙 대비' 관점으로 모두 채운다.
+  근거는 delta(점수 변화)·status 와 그 구간에서 가장 벌어진 관절(top_deviation).
+  top_deviation 의 관절 이름으로 어느 부위(예: 팔/하체)가 불안정한지 말하고,
+  입력에 없는 부위는 지어내지 않는다.
+  - card_line: 구간 카드용 짧은 한 줄. 개선/악화/유지 상태 중심, 부드러운 "~해요" 말투.
+  - comment: 지난 스윙 대비 무엇이 좋아지거나 나빠졌는지(delta·top_deviation 근거) 1~2문장.
+  - tip: 그 구간을 위한 실천 팁 한 문장.
 - 입력에 없는 관절·구간 key 는 만들지 않는다.
 """
 
