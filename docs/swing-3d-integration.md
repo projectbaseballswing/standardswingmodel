@@ -60,6 +60,8 @@ Chrome에서는 세 실제 업로드의 timestamp 재생, 원본/P0/개선 전�
 
 GitHub Actions는 API/합성 기하 테스트와 Flutter analyze/VM/Chrome/Web build를 실행하도록 추가했다. CI의 데이터 의존 5개와 원격 opt-in 1개 제외는 로컬의 별도 실제 데이터·Supabase 검증과 구분한다. 실제 원격 CI 상태는 PR의 Checks를 기준으로 확인한다.
 
+첫 Linux CI에서 MediaPipe의 native image 의존 라이브러리 누락 2건, Windows 경로를 가정한 로컬 저장소 테스트 1건, 갱신된 Swagger 설명의 기존 문자열 검사 1건이 실패했다. CI runner에 libegl1/libgles2를 명시하고, 경로 검사를 실제 플랫폼 절대 루트로 바꾸며, user_id 자체로는 인증할 수 없다는 설명을 유지했다. 검사 제거·skip 추가·운영 알고리즘 변경으로 통과시키지 않는다.
+
 ## 배포와 한계
 
 - 본 통합은 단일 추론 worker 구조를 유지한다. 같은 DB에 동일 worker ID의 서버를 중복 실행하지 않는다.

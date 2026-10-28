@@ -134,6 +134,7 @@ def list_user_swings(
     UI 표시 시각은 recorded_at이 우선이고 없으면 created_at(업로드 시각)을 사용한다.
     분석 전체 JSON과 Storage 객체 경로는 목록 응답에 포함하지 않는다.
     라우터의 Bearer 세션·소유권 검사를 통과한 본인의 기록만 조회한다.
+    user_id 자체는 인증 수단이 아니다.
     """
     if (year is None) != (month is None):
         raise HTTPException(422, "월별 조회에는 year와 month가 모두 필요합니다.")
@@ -229,6 +230,7 @@ def compare_with_previous(
     재시작과 무관하게 조회된다. 직전 분석이 없으면 has_previous=false.
 
     라우터의 Bearer 세션·소유권 검사를 통과한 본인의 기록만 비교한다.
+    user_id 자체는 인증 수단이 아니다.
     """
     if db.get(User, user_id) is None:
         raise HTTPException(404, "사용자를 찾을 수 없습니다.")

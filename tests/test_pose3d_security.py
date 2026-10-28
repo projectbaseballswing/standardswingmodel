@@ -109,7 +109,9 @@ def test_local_storage_is_private_bounded_and_traversal_safe(tmp_path):
     with pytest.raises(StorageError):s.download(s.bucket,'../original.mp4')
     with pytest.raises(StorageError):s.download(s.bucket,'swings/abc/original.mp4',max_bytes=1)
     with pytest.raises(StorageError):s.capability_path('pose3d/a/data.gz',9999999999,'forged')
-    with pytest.raises(StorageError):LocalPrivateStorage('C:/Windows')
+    # Use this platform's absolute filesystem root. A Windows literal is a
+    # relative project subdirectory on Linux and is therefore not invalid.
+    with pytest.raises(StorageError):LocalPrivateStorage(tmp_path.anchor)
 
 
 @pytest.mark.parametrize('code,expected', [

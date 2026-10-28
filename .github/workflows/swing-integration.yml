@@ -26,6 +26,10 @@ jobs:
           cache-dependency-path: requirements-api.txt
       - name: Install API and synthetic pose test dependencies
         run: python -m pip install -r requirements-api.txt pandas scipy 'mediapipe<1'
+      - name: Install MediaPipe native image runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libegl1 libgles2
       - name: API, authorization, migration and synthetic geometry tests
         run: python -m pytest -q tests
         env:
