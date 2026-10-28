@@ -157,8 +157,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.white, width: 2),
               ),
-              child: const Icon(Icons.photo_camera,
-                  size: 16, color: Colors.white),
+              child: const Icon(
+                Icons.photo_camera,
+                size: 16,
+                color: Colors.white,
+              ),
             ),
           ),
         ],
@@ -196,8 +199,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   // 로그아웃 → 세션 비우고 로그인 화면으로. 뒤로가기로 못 돌아오게 go 사용.
-  void _logout() {
-    Session.instance.clear();
-    context.go('/login');
+  Future<void> _logout() async {
+    final api = AuthApi();
+    try {
+      await api.logout();
+    } on ApiException {
+      // A network failure must not retain local access to an account.
+    } finally {
+      api.dispose();
+      Session.instance.clear();
+      if (mounted) context.go('/login');
+    }
   }
 }

@@ -449,10 +449,14 @@ void main() {
     final api = AnalysisApi(client: UploadClient());
     addTearDown(api.dispose);
     await showReview(tester, api, video: file);
-    expect(await XFile(path).readAsBytes(), [1, 2, 3]);
+    // Browser Blob reads complete through real DOM tasks, outside the widget
+    // fake clock. Keep the fixture bytes and actual object-URL lifetime check.
+    expect(await tester.runAsync(() => XFile(path).readAsBytes()), [1, 2, 3]);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
-    await expectLater(XFile(path).readAsBytes(), throwsException);
+    await tester.runAsync(
+      () => expectLater(XFile(path).readAsBytes(), throwsException),
+    );
   }, skip: !kIsWeb);
 
   testWidgets('result error still releases its Blob on exit', (tester) async {
@@ -478,9 +482,11 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(await XFile(path).readAsBytes(), [1, 2, 3]);
+    expect(await tester.runAsync(() => XFile(path).readAsBytes()), [1, 2, 3]);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
-    await expectLater(XFile(path).readAsBytes(), throwsException);
+    await tester.runAsync(
+      () => expectLater(XFile(path).readAsBytes(), throwsException),
+    );
   }, skip: !kIsWeb);
 }
