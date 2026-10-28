@@ -35,6 +35,7 @@ def _extract_raw_dataframe(
     roi_frames: List[Optional[np.ndarray]],
     roi_infos: List[Optional[dict]],
     fps: float,
+    world_capture=None,
 ) -> pd.DataFrame:
     """
     ROI 프레임들에 대해 MediaPipe raw landmark dataframe 생성.
@@ -43,6 +44,9 @@ def _extract_raw_dataframe(
 
     for frame_idx, (frame, roi_info) in enumerate(zip(roi_frames, roi_infos)):
         if frame is None or roi_info is None:
+            if world_capture is not None:
+                from feedback.pose3d import observe
+                observe(world_capture, 'record', frame_idx, None, roi_info, None)
             rows.append(_empty_row(frame_idx))
             continue
 
@@ -54,6 +58,9 @@ def _extract_raw_dataframe(
             data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
         )
         result = landmarker.detect_for_video(mp_image, timestamp_ms)
+        if world_capture is not None:
+            from feedback.pose3d import observe
+            observe(world_capture, 'record', frame_idx, result, roi_info, (width, height))
 
         row = {
             "frame_idx": frame_idx,
@@ -93,6 +100,8 @@ def extract_pose_with_roi(
     roi_infos: List[Optional[dict]],
     fps: float,
     model_path: Optional[str] = None,
+    *,
+    world_capture=None,
 ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
     ROI 프레임 시퀀스에서 pose landmark를 추출한 뒤 원본 프레임 좌표계로 복원합니다.
@@ -116,10 +125,13 @@ def extract_pose_with_roi(
         model_path = DEFAULT_MEDIAPIPE_MODEL_PATH
 
     with create_landmarker(model_path) as local_landmarker:
-        raw_df = _extract_raw_dataframe(local_landmarker, roi_frames, roi_infos, fps)
+        raw_df = _extract_raw_dataframe(local_landmarker, roi_frames, roi_infos, fps, world_capture)
 
     pre_df = apply_preprocessing(raw_df, fps)
     if pre_df is None:
         return None
+    if world_capture is not None:
+        from feedback.pose3d import observe
+        observe(world_capture, 'quality', raw_df, pre_df)
 
     return pack_output_arrays(pre_df, roi_infos)

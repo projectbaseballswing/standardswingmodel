@@ -1,0 +1,41 @@
+{
+  "version": "motion-smoothing-2026-10-26-v1",
+  "frozen_before_full_cohort_analysis": true,
+  "coordinate_contract": "source_view_hip_centered_xright_yup_zcamera",
+  "missing_policy": "preserve exact null mask; never cross missing segments",
+  "p2_policy": "unchanged original masks and warnings in all conditions",
+  "time_policy": "all S0/S1/S2 use decoded_pts_s minus first decoded PTS as timestamp_s; preserve NPZ nominal timestamp in npz_timestamp_s and keep nominal fps metadata unchanged",
+  "scale_policy": "mean median torso side lengths + mean median thigh lengths + mean median calf lengths; prefer >=5 P2-visible warning-free observations per edge, otherwise finite raw observations; fallback 1 model unit only if unavailable",
+  "gap": {"absolute_s": 0.12, "median_dt_multiplier": 3.0},
+  "S1": {"min_cutoff_hz": 1.5, "beta": 4.0, "derivative_cutoff_hz": 1.0, "vector_adaptive_cutoff": "Euclidean filtered velocity / clip body scale; one alpha per 3D joint"},
+  "S2": {
+    "half_window_s": 0.067,
+    "polynomial_degree": 2,
+    "minimum_samples": 5,
+    "huber_iterations": 2,
+    "huber_c": 1.5,
+    "robust_scale_floor_fraction": 0.000001,
+    "speed_blend_scale_per_s": 4.0,
+    "speed_blend": "smooth fraction = 1/(1+(max adjacent raw normalized speed/4)^2)",
+    "length_correction_fraction": 0.25,
+    "length_correction_cap_scale_fraction": 0.015,
+    "length_ratio_min": 0.5,
+    "length_ratio_max": 1.5,
+    "minimum_reference_observations": 5,
+    "constrained_edges": [1,2,3,4,8,9,10,11],
+    "constraint_policy": "only original P2-visible edges with both endpoint warnings false; proximal-to-distal; cap each child displacement; translate available same-side heel/toe by ankle correction",
+    "boundary_policy": "if <5 same-segment samples, keep original coordinate"
+  },
+  "metrics": {
+    "raw_wrist_high_speed_quantile": 0.95,
+    "raw_fast_window_half_s": 0.05,
+    "peak_search_half_s": 0.1,
+    "jump_speed_scale_per_s": 10.0,
+    "impact_annotation": "absent: all fast-motion windows are raw wrist speed proxies, not impact truth",
+    "accuracy": "not measured"
+  },
+  "sources": [
+    "https://github.com/casiez/OneEuroFilter/blob/main/README.md",
+    "https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.savgol_filter.html"
+  ]
+}

@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.database import User, get_db
+from api.auth import current_user
 
 router = APIRouter()
 
@@ -28,7 +29,9 @@ class MyInfoResponse(BaseModel):
 
 
 @router.post("/api/me", response_model=MyInfoResponse)
-def my_info(req: MyInfoRequest, db: Session = Depends(get_db)):
+def my_info(req: MyInfoRequest, db: Session = Depends(get_db), authenticated=Depends(current_user)):
+    if req.user != authenticated.user_id:
+        raise HTTPException(403, '다른 사용자의 정보를 조회할 수 없습니다.')
     user = db.scalar(select(User).where(User.user_id == req.user))
     if user is None:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")

@@ -24,7 +24,9 @@ def test_member_contract_and_persistence(mock_client):
         assert verify_password(body["password"], row.password_hash)
     result = mock_client.post("/api/login", json={"id": body["id"], "password": body["password"]})
     assert result.status_code == 200
-    assert result.json() == {"success": True, "user": body["id"]}
+    assert result.json()['success'] is True and result.json()['user']==body['id']
+    assert result.json()['token_type']=='bearer' and result.json()['expires_in']>0
+    mock_client.headers['Authorization']='Bearer '+result.json()['access_token']
     result = mock_client.post("/api/me", json={"user": body["id"]})
     assert result.json() == {"id": body["id"], "email": body["email"]}
     assert mock_client.get("/api/check-email", params={"email": body["email"]}).json() == {"email-uniqueness": 0}
@@ -74,7 +76,7 @@ def test_login_errors_and_openapi(mock_client):
     for request in ({"password": "wrong"}, {"id": body["id"]},
                     {"id": None, "password": body["password"]}):
         assert mock_client.post("/api/login", json=request).status_code == 422
-    assert mock_client.post("/api/me", json={"user": "absent-user"}).status_code == 404
+    assert mock_client.post("/api/me", json={"user": "absent-user"}).status_code == 403
     schemas = mock_client.get("/openapi.json").json()["components"]["schemas"]
     for name, fields in (("RegisterRequest", {"id", "password", "email", "nickname"}),
                          ("LoginRequest", {"id", "password"})):

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +19,8 @@ from api.schemas import AnalysisReport
 from feedback.compare_v2 import SwingComparisonV2
 from feedback.reference_model import PHASE_EVENTS, load_reference_model
 
-SKELETON_DIR = Path("data/skeletons")
+# Independent experiment can read an existing dataset without copying or writing it.
+SKELETON_DIR = Path(os.getenv('SWING_TEST_SKELETON_DIR', 'data/skeletons'))
 
 
 @pytest.fixture(scope="module")

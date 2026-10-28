@@ -6,6 +6,7 @@ import uuid
 import pytest
 
 from api.database import SessionLocal, Swing, User
+from tests.auth_helpers import authenticate
 
 
 def _add_user_and_swings(*, other_user=False):
@@ -47,6 +48,7 @@ def _add_user_and_swings(*, other_user=False):
 
 def test_list_user_swings_filters_month_sorts_and_omits_private_metadata(mock_client):
     owner, foreign, swings = _add_user_and_swings(other_user=True)
+    authenticate(mock_client, owner)
     response = mock_client.get(f"/api/users/{owner}/swings", params={"year": 2026, "month": 10})
     assert response.status_code == 200, response.text
     body = response.json()
@@ -69,6 +71,7 @@ def test_list_user_swings_filters_month_sorts_and_omits_private_metadata(mock_cl
 
 def test_list_all_records_and_empty_month_and_unknown_user(mock_client):
     owner, _, swings = _add_user_and_swings(other_user=True)
+    authenticate(mock_client, owner)
     result = mock_client.get(f"/api/users/{owner}/swings").json()
     assert result["count"] == 4 and result["year_month"] is None
     assert [item["analysis_id"] for item in result["items"]] == [
@@ -77,11 +80,12 @@ def test_list_all_records_and_empty_month_and_unknown_user(mock_client):
     empty = mock_client.get(f"/api/users/{owner}/swings", params={"year": 2027, "month": 1})
     assert empty.status_code == 200 and empty.json()["items"] == [] and empty.json()["count"] == 0
     unknown = mock_client.get("/api/users/not-a-real-user/swings")
-    assert unknown.status_code == 404
+    assert unknown.status_code == 403
 
 
 def test_list_month_validation_and_offset(mock_client):
     owner, _, swings = _add_user_and_swings()
+    authenticate(mock_client, owner)
     for params in ({"year": 2026}, {"month": 10}, {"year": 100, "month": 10}, {"year": 2026, "month": 13},
                    {"year": 2026, "month": 0}, {"year": 2026, "month": 10, "tz_offset_minutes": 2000}):
         response = mock_client.get(f"/api/users/{owner}/swings", params=params)
@@ -103,6 +107,7 @@ def _add_empty_user():
 
 def test_user_without_swings_returns_empty_list(mock_client):
     owner = _add_empty_user()
+    authenticate(mock_client, owner)
     response = mock_client.get(f"/api/users/{owner}/swings")
     assert response.status_code == 200
     assert response.json() == {"user_id": owner, "year_month": None, "count": 0, "items": []}
@@ -115,6 +120,7 @@ def test_month_boundaries_include_start_and_exclude_next_month(
     mock_client, year, month, next_year, next_month,
 ):
     owner = _add_empty_user()
+    authenticate(mock_client, owner)
     kst = timezone(timedelta(hours=9))
     start = datetime(year, month, 1, tzinfo=kst).astimezone(timezone.utc)
     end = datetime(next_year, next_month, 1, tzinfo=kst).astimezone(timezone.utc)
@@ -147,6 +153,7 @@ def test_month_boundaries_include_start_and_exclude_next_month(
 ])
 def test_score_only_comes_from_completed_numeric_result(mock_client, status, result, expected):
     owner = _add_empty_user()
+    authenticate(mock_client, owner)
     with SessionLocal.begin() as db:
         db.add(Swing(analysis_id=uuid.uuid4().hex, user_id=owner, worker_id="list-test",
                      status=status, result=result))

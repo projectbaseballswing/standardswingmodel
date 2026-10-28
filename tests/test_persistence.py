@@ -18,6 +18,7 @@ from api.jobs import Job
 from api.main import app
 from api.storage import StorageError
 from tests.video_fixture import VIDEO_BYTES
+from tests.auth_helpers import authenticate
 
 
 def upload(client, **form):
@@ -36,6 +37,7 @@ def test_user_video_and_report_survive_new_process(mock_settings, fake_storage):
             "id": user_id, "password": "test-password", "email": email, "nickname": user_id,
         })
         assert registered.json()["registered"] is True
+        authenticate(client, user_id)
         created = upload(client, user_id=user_id, recorded_at="2026-10-03T10:00:00+09:00")
         assert created.status_code == 202, created.text
         analysis_id = created.json()["analysis_id"]
@@ -71,6 +73,7 @@ from api.main import app
 with TestClient(app) as client:
     login = client.post('/api/login', json={'id': sys.argv[1], 'password': 'test-password'})
     assert login.status_code == 200, login.text
+    client.headers['Authorization'] = 'Bearer '+login.json()['access_token']
     assert client.post('/api/me', json={'user': login.json()['user']}).status_code == 200
     analysis = client.get('/api/analyses/' + sys.argv[2]).json()
     assert analysis['status'] == 'done'
@@ -82,6 +85,7 @@ print('persisted')
     assert completed.returncode == 0, completed.stderr
     assert "persisted" in completed.stdout
     with TestClient(app) as client:
+        authenticate(client, user_id)
         assert client.get(f"/api/analyses/{analysis_id}/video").status_code == 200
 
 
@@ -114,7 +118,7 @@ def test_upload_validation_has_no_db_or_storage_side_effects(mock_client, fake_s
     monkeypatch.setattr(api.analyses, "settings", replace(api.analyses.settings, max_upload_mb=1))
     with database.SessionLocal() as db:
         before = db.scalar(select(func.count()).select_from(Swing))
-    assert upload(mock_client, user_id="missing-user").status_code == 404
+    assert upload(mock_client, user_id="missing-user").status_code == 403
     assert upload(mock_client, recorded_at="2026-10-03T10:00:00").status_code == 422
     for filename, body, expected in [("file.txt", b"test", 415), ("swing.mp4", b"", 422),
                                      ("swing.mp4", b"x" * (1024 * 1024 + 1), 413)]:
@@ -128,11 +132,13 @@ def test_upload_validation_has_no_db_or_storage_side_effects(mock_client, fake_s
 
 def test_restart_only_marks_own_unfinished_jobs(mock_settings, fake_storage):
     own_id, other_id = uuid.uuid4().hex, uuid.uuid4().hex
-    with TestClient(app):
-        app.state.jobs._add(Job(analysis_id=own_id, input={}, status="processing"))
+    with TestClient(app) as seed_client:
+        owner = authenticate(seed_client)
+        app.state.jobs._add(Job(analysis_id=own_id, input={}, status="processing", user_id=owner))
     with database.SessionLocal.begin() as db:
-        db.add(Swing(analysis_id=other_id, input={}, worker_id="another-pc", status="processing"))
+        db.add(Swing(analysis_id=other_id, input={}, worker_id="another-pc", status="processing", user_id=owner))
     with TestClient(app) as client:
+        authenticate(client, owner)
         own = client.get(f"/api/analyses/{own_id}").json()
         assert own["status"] == "failed"
         assert own["error"]["code"] == "SERVER_RESTARTED"
@@ -154,6 +160,7 @@ def test_nonmock_video_uses_existing_comparison_and_records_failures(fake_storag
     monkeypatch.setattr(api.analyses, "SwingPipeline", lambda *args, **kwargs: Pipeline())
     monkeypatch.setattr(api.analyses, "settings", replace(api.analyses.settings, mock=False))
     with TestClient(app) as client:
+        authenticate(client)
         for handedness, expected in [("right", "done"), ("left", "failed")]:
             created = upload(client, handedness=handedness)
             assert created.status_code == 202
@@ -245,6 +252,7 @@ def test_video_job_lifecycle_is_persisted(fake_storage, monkeypatch):
     monkeypatch.setattr(api.analyses, "SwingPipeline", lambda *args, **kwargs: Pipeline())
     monkeypatch.setattr(api.analyses, "settings", replace(api.analyses.settings, mock=False))
     with TestClient(app) as client:
+        authenticate(client)
         try:
             response = upload(client)
             assert response.status_code == 202 and response.json()["status"] == "queued"

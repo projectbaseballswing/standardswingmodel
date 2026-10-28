@@ -11,11 +11,13 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 from tests.video_fixture import VIDEO_BYTES
+from tests.auth_helpers import authenticate
 
 
 @pytest.fixture
 def client():
     with TestClient(app) as test_client:
+        authenticate(test_client)
         yield test_client
 
 

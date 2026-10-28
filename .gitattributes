@@ -1,0 +1,4 @@
+# Frozen numerical provenance hashes must survive Windows/Linux checkouts.
+feedback/pose3d_policy.py text eol=lf
+feedback/pose3d_display/vendor/tools/smoothing.py text eol=lf
+feedback/pose3d_display/vendor/config/smoothing.json text eol=lf

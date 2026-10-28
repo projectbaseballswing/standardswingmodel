@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import uuid
 
 from api.database import SessionLocal, Swing, User
+from tests.auth_helpers import authenticate
 
 
 def _part(key: str, name: str, score, *, available=True, reliability="high") -> dict:
@@ -66,6 +67,7 @@ def test_comparison_uses_most_recent_previous_done(mock_client):
     current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
                      result=_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)]))
     _seed([older, middle, current], user_ids=[owner])
+    authenticate(mock_client, owner)
 
     res = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison")
     assert res.status_code == 200, res.text
@@ -85,6 +87,7 @@ def test_comparison_first_swing_has_no_previous(mock_client):
     current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
                      result=_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)]))
     _seed([current], user_ids=[owner])
+    authenticate(mock_client, owner)
 
     body = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison").json()
     assert body["has_previous"] is False
@@ -107,6 +110,7 @@ def test_comparison_ignores_non_done_and_other_users(mock_client):
     current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
                      result=_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)]))
     _seed([other_recent, failed, queued, real_prev, current], user_ids=[owner, other])
+    authenticate(mock_client, owner)
 
     body = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison").json()
     assert body["has_previous"] is True
@@ -123,6 +127,7 @@ def test_comparison_missing_part_in_previous_gives_null(mock_client):
                      result=_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8),
                                            _part("torso", "몸통", 73.0)]))
     _seed([prev, current], user_ids=[owner])
+    authenticate(mock_client, owner)
 
     body = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison").json()
     torso = next(p for p in body["parts"] if p["key"] == "torso")
@@ -159,6 +164,7 @@ def test_comparison_endpoint_returns_and_caches_coaching(mock_client, monkeypatc
     current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
                      result=_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)]))
     _seed([prev, current], user_ids=[owner])
+    authenticate(mock_client, owner)
     url = f"/api/users/{owner}/analyses/{current.analysis_id}/comparison"
 
     body1 = mock_client.get(url).json()
@@ -183,6 +189,7 @@ def test_comparison_includes_phase_and_joint_deltas(mock_client):
                                          phases=[_phase("stride", "스트라이드", 73.0)],
                                          joints=[_joint("lead_elbow_angle", "앞팔 팔꿈치 각도", "lead_arm", 5.0)]))
     _seed([prev, current], user_ids=[owner])
+    authenticate(mock_client, owner)
 
     body = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison").json()
 
@@ -210,6 +217,7 @@ def test_comparison_missing_previous_phase_joint_gives_null(mock_client):
                                          phases=[_phase("stride", "스트라이드", 73.0)],
                                          joints=[_joint("lead_elbow_angle", "앞팔 팔꿈치 각도", "lead_arm", 5.0)]))
     _seed([prev, current], user_ids=[owner])
+    authenticate(mock_client, owner)
 
     body = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison").json()
     assert body["phases"][0]["previous_score"] is None
@@ -226,6 +234,7 @@ def test_comparison_no_phases_joints_returns_empty_lists(mock_client):
     current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
                      result=_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)]))
     _seed([prev, current], user_ids=[owner])
+    authenticate(mock_client, owner)
 
     body = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison").json()
     assert body["phases"] == []
@@ -240,6 +249,7 @@ def test_comparison_no_key_returns_null_coaching(mock_client):
     current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
                      result=_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)]))
     _seed([prev, current], user_ids=[owner])
+    authenticate(mock_client, owner)
 
     body = mock_client.get(f"/api/users/{owner}/analyses/{current.analysis_id}/comparison").json()
     assert body["has_previous"] is True
@@ -251,9 +261,10 @@ def test_comparison_404_and_409(mock_client):
     processing = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
                         status="processing", result=None)
     _seed([processing], user_ids=[owner])
+    authenticate(mock_client, owner)
 
-    # 없는 유저
-    assert mock_client.get(f"/api/users/nobody/analyses/{processing.analysis_id}/comparison").status_code == 404
+    # 인증된 소유자와 다른 경로 ID는 존재 여부에 앞서 거부한다.
+    assert mock_client.get(f"/api/users/nobody/analyses/{processing.analysis_id}/comparison").status_code == 403
     # 없는 분석
     assert mock_client.get(f"/api/users/{owner}/analyses/deadbeef/comparison").status_code == 404
     # 아직 완료 안 됨
