@@ -2,6 +2,8 @@
 
 프론트엔드·백엔드 작업용 문서입니다. 모든 경로는 `/api` 로 시작합니다.
 
+2026-10-28 통합: 기존 bcrypt 회원 로그인에 실제 Bearer 세션과 분석별 소유권 검사를 추가했습니다. 보호 API는 `Authorization: Bearer <access_token>`이 필요합니다. 아래 0.1 피드백 예시·모델 개선 계획은 과거 설명을 보존한 것이며 실제 모델은 응답의 `model_version`을 확인합니다. 3D 표시는 기존 모델 0.2 점수 입력을 바꾸지 않습니다.
+
 > **중요:** 현재 피드백 **수치는 임시값**입니다. 기준 스윙 모델을 다시 만드는 중이라
 > 점수와 각도 차이는 바뀝니다. 응답의 **형식(필드 이름·타입)은 고정**했으니 그대로 작업하시면 됩니다.
 > 무엇이 어떻게 바뀔지는 아래 "앞으로 바뀔 것"에 정리했습니다.
@@ -11,6 +13,7 @@
 ```bash
 pip install -r requirements.txt
 # .env 설정은 docs/backend-setup.md 참고
+# 운영 DB는 docs/swing-3d-migration.md의 영향·백업·롤백 검토와 승인 후에만 실행
 alembic upgrade head
 uvicorn api.main:app --port 8000     # http://127.0.0.1:8000/docs
 ```
@@ -28,6 +31,7 @@ SWING_MOCK=1 uvicorn api.main:app --reload
 - 실제 분석은 영상당 10~20초 걸리므로, 화면 개발에는 목업 모드가 편합니다.
 - 회원 기능(`/api/register` 등)은 목업 모드에서도 실제로 동작합니다.
 - **DB와 Storage는 mock 처리하지 않습니다.** 실제 업로드·영속 저장 후 고정된 분석 결과를 저장합니다.
+- mock도 실제 로그인 세션과 소유권 검사를 사용합니다. 실제 World가 없으므로 3D는 `MOCK_HAS_NO_WORLD` 실패이며 샘플로 대체하지 않습니다.
 - `GET /api/health` 의 `mock: true` 로 목업 여부를 확인할 수 있습니다.
 
 ## 2. 엔드포인트
@@ -36,6 +40,7 @@ SWING_MOCK=1 uvicorn api.main:app --reload
 |---|---|---|
 | POST | `/api/register` | 회원가입 (`id`, `password`, `email`, `nickname`) |
 | POST | `/api/login` | 로그인 (`id`, `password`) |
+| POST | `/api/logout` | 현재 Bearer 세션 폐기 |
 | POST | `/api/me` | 내 정보 (`user`) |
 | GET | `/api/check-email` | 이메일 중복 확인 (`email` query) |
 | GET | `/api/health` | 서버 상태, 모델 버전, 목업 여부 |
@@ -44,6 +49,7 @@ SWING_MOCK=1 uvicorn api.main:app --reload
 | GET | `/api/users/{user_id}/swings` | 회원별 스윙 목록 조회. `year`, `month` 선택 필터 |
 | GET | `/api/analyses/{id}` | 작업 상태 + 전체 결과 |
 | GET | `/api/analyses/{id}/video` | 원본 영상 signed URL (`analysis_id`, `url`, `expires_in`) |
+| GET | `/api/analyses/{id}/pose-3d` | 본인 분석의 비공개 3D 표시 좌표·품질·상태 |
 | GET | `/api/analyses/{id}/overall` | 종합 피드백 |
 | GET | `/api/analyses/{id}/joints` | 관절별 피드백 |
 | GET | `/api/analyses/{id}/phases` | 구간별 피드백 |
@@ -55,7 +61,7 @@ SWING_MOCK=1 uvicorn api.main:app --reload
 GET /api/users/testuser01/swings?year=2026&month=10
 ```
 
-- `user_id`: 목록을 조회할 회원 ID (없는 회원은 404)
+- `user_id`: 인증된 본인의 회원 ID. 다른 값이면 403이며 인증 없거나 만료됐으면 401
 - `year` + `month`: 둘 다 입력하면 해당 월만 반환. 둘 다 생략하면 전체 기록
 - 하나만 입력하거나 범위를 벗어나면 422 (`year`: 1900~9998, `month`: 1~12)
 - `tz_offset_minutes`: 선택, 기본 `540`(한국시간 +09:00). 월 경계는 이 시간대 기준
@@ -90,9 +96,7 @@ GET /api/users/testuser01/swings?year=2026&month=10
 전체 조회는 `GET /api/users/testuser01/swings`이며 `year_month`는 `null`입니다.
 페이지 나누기는 아직 없으며 `count`는 반환된 `items` 개수입니다.
 
-**보안 주의:** 현재는 JWT 인증이나 사용자별 소유권 검사가 없어 `user_id`는
-조회 필터일 뿐 실제 로그인한 사용자임을 증명하지 않습니다.
-서비스 외부 공개 전에 인증 및 본인 기록만 조회하도록 접근 제어를 추가해야 합니다.
+`user_id`만으로 인증하지 않습니다. 서버가 DB의 세션 해시·만료·폐기를 검증한 뒤 경로의 사용자와 비교합니다. 이 세션은 Supabase Auth JWT가 아니며 기존 `public.users`를 그대로 사용합니다.
 
 ## 3. 분석 흐름
 
@@ -110,14 +114,29 @@ GET /api/analyses/{id}   (1~2초 간격으로 폴링)
 `stage` 값: `uploading` → `loading_models` → `reading_video` → `tracking_player` → `extracting_pose` → `building_features` → `comparing`
 진행률 표시에 쓸 수 있습니다.
 
-선택 form 필드 `user_id`는 기존 회원 ID, `recorded_at`은 시간대가 포함된 ISO 8601 촬영 시각입니다.
-`user_id` 생략 시 DB의 사용자 관계는 null이고, `recorded_at` 생략 시 업로드 시각을 사용합니다.
-존재하지 않는 회원 ID는 404입니다. 전체 결과 조회에는 `user_id`, `recorded_at` 두 필드만 추가되었습니다.
+선택 form 필드 `user_id`는 호환용이며 인증된 회원과 같아야 합니다. 생략해도 세션 소유자가 저장되고, 다른 값은 403입니다.
+`recorded_at`은 시간대가 포함된 ISO 8601 촬영 시각이며 생략 시 업로드 시각을 사용합니다.
+기존 소유자 없는 분석을 현재 회원에게 임의 배정하지 않으며 접근은 403입니다.
 생성 응답은 `{analysis_id, status}`를 유지하며 `swing_id`로 바꾸지 않습니다.
 
 영상 URL은 `GET /api/analyses/{id}/video`에서 필요할 때 발급받습니다. `expires_in`은 발급 시점 기준 초이며
 기본 900초입니다. URL을 DB에 저장하지 않습니다. `.npy` 분석에는 원본 영상이 없으므로 영상 조회가 404입니다.
-이 엔드포인트는 기존 API와 마찬가지로 토큰 인증이 없습니다. `user_id`는 관계 정보이지 인증 수단이 아닙니다.
+영상 URL 발급에도 Bearer와 해당 분석의 소유권 검사가 필요합니다. 발급된 짧은 signed URL은 비밀 접근 권한이므로 로그·공유 문서에 남기지 않습니다.
+
+### 사용자별 3D 조회
+
+`GET /api/analyses/{id}/pose-3d`는 동일한 본인 분석 ID를 사용합니다. 점수의 `done` 이후에도 3D가 생성 중일 수 있습니다.
+
+| 상태 | 응답 |
+|---|---|
+| 200 | `status=ready`, `contract_version=EXP008-pose3d-v1`, `analysis_id`, `user_id`, `frame_count`, `handedness`, `warnings`, 실제 `clip` |
+| 202 | `pending/processing`, `Retry-After: 2`; Flutter는 최대 3분 폴링 후 재시도 안내 |
+| 401 / 403 | 인증 없음·만료·폐기 / 다른 소유자·소유권 불일치 |
+| 404 | 분석 또는 저장된 3D 없음. 과거 기록을 샘플로 대체하거나 자동 재추론하지 않음 |
+| 422 | 3D 생성 실패. 안전한 `error.code/message` 제공, 기존 점수는 유지 |
+| 502 | Storage·무결성·응답 크기 오류 |
+
+원본 world와 P2/S2 표시 좌표를 구분하고 좌우 복원과 S2는 서버에서 한 번 적용합니다. Flutter가 O1/F1/H4를 표시하며 실제 얼굴 추적이나 3D 정답 정확도로 주장하지 않습니다. clip JSON은 31 MiB, 메타데이터를 포함한 응답은 32 MiB 한도입니다. 초과하면 `POSE3D_TOO_LARGE`로 3D만 실패합니다. 자세한 계약은 [좌표 처리 문서](swing-3d-pipeline.md), 배포 승인은 [migration 문서](swing-3d-migration.md)를 참조합니다.
 
 ### 에러 코드
 
@@ -133,11 +152,11 @@ GET /api/analyses/{id}   (1~2초 간격으로 폴링)
 
 HTTP 상태: `404` 없는 분석 / `409` 아직 분석 중 / `415` 지원하지 않는 형식 / `413` 용량 초과(기본 200MB) / `422` 분석 실패
 
-추가: `502` Storage 실패 / `503` DB 실패 또는 Storage 환경 설정 누락.
+추가: `401` Bearer 인증 없음·만료·폐기 / `403` 다른 사용자 또는 소유자 없는 기록 / `502` Storage 실패 / `503` DB 실패 또는 Storage 환경 설정 누락.
 업로드 중 Storage 실패는 `detail: {analysis_id, code, message}`로 응답하며 해당 분석은 DB에 `failed`로 남습니다.
 파일이 이미 전송되었거나 분석만 실패한 경우에는 영상과 경로를 유지하여 원인을 추적합니다.
 기존 회원가입·로그인 요청은 계속 허용합니다. 로그인 ID 입력을 추가하고 Swagger의 이메일 이름을 `email`로 정리했습니다.
-회원 응답과 기존 피드백 결과 구조·임시 점수 계산은 그대로 유지합니다.
+가입 응답과 기존 피드백 결과 구조·점수 계산은 유지하며 로그인 응답에는 세션 필드가 추가됩니다.
 
 영상 확장자는 `.mp4`, `.mov`, `.avi`, `.mkv`, `.m4v`이며 대소문자를 구분하지 않습니다.
 파일명에 경로(`/`, `\\`)를 포함하거나 MIME·컨테이너 헤더가 명백히 맞지 않으면 415입니다.
@@ -216,8 +235,8 @@ Storage의 해당 파일이 없으면 `/video`는 404, Storage 장애·권한 �
 ## 7. 백엔드 쪽 남은 작업
 
 - 회원·분석 결과·원본 영상 영속 저장은 구현했습니다. 설정은 [backend-setup.md](backend-setup.md)를 따릅니다.
-- 로그인 토큰/소유자 권한 확인은 아직 없습니다. 공개 서비스 전에 회원 인증과 분석·영상 접근 제어가 필요합니다.
-- Flutter 업로드에 `user_id` 연결, 실제 회원별 목록 조회 및 화면 연결은 별도 작업입니다. 이번 변경은 Flutter를 수정하지 않습니다.
+- 로그인 Bearer·소유권 검사를 구현했습니다. 공개 배포 전 HTTPS·CORS·로그인 rate limiting·계정 복구 운영 검토가 남습니다.
+- Flutter 로그인·업로드·기록에 실제 세션을 연결하고 종합 피드백에서 해당 분석의 3D 화면으로 진입합니다. 앱 새로고침 후에는 다시 로그인합니다.
 - 분석 워커는 서버당 1개입니다. `SWING_WORKER_ID`당 uvicorn 프로세스 1개만 실행하세요.
   서버 재시작 시 그 서버의 미완료 작업만 실패로 기록합니다. 완료 결과는 유지하며 자동 재분석하지 않습니다.
 - 스윙 추이 계산, 새 점수 체계, LLM 텍스트 피드백은 구현하지 않았습니다. 속도 placeholder도 그대로입니다.
@@ -257,12 +276,12 @@ ID·이메일·닉네임 중복은 HTTP 200과 `registered:false`입니다. ID/�
 응답:
 
 ```json
-{"success":true,"user":"demo-user"}
+{"success":true,"user":"demo-user","access_token":"<실제 응답의 비밀 토큰>","token_type":"bearer","expires_in":28800}
 ```
 
 `id`, `password`는 모두 필수이며 이 두 필드만 받습니다. 이메일 로그인은 지원하지 않습니다.
 없는 회원/잘못된 비밀번호는 모두 401, 필수 필드 누락이나 명세에 없는 필드는 422입니다.
-로그인은 JWT·세션을 발급하지 않습니다. 응답의 `user`는 사용자 ID입니다.
+응답의 `user`는 기존 사용자 ID이고 `access_token`은 난수 Bearer 세션입니다. 기본 만료는 8시간이며 DB에는 SHA-256 해시만 저장합니다. Supabase Auth JWT가 아닙니다. 토큰은 로그·보고서에 저장하지 말고 이후 보호 요청의 Authorization 헤더에 사용합니다. `POST /api/logout`은 현재 세션을 폐기합니다.
 
 ### 내 정보
 
@@ -276,8 +295,7 @@ ID·이메일·닉네임 중복은 HTTP 200과 `registered:false`입니다. ID/�
 {"id":"demo-user","email":"demo@example.com"}
 ```
 
-기존 계약을 유지합니다. 사용자 ID만으로 조회하므로 인증된 '나'임을 검증하는 API는 아직 아닙니다.
-JWT 도입 때 소유자 접근 제어와 함께 개선할 항목입니다.
+요청/응답 본문은 유지하되 Bearer가 필요합니다. 요청의 `user`가 인증된 본인과 다르면 403입니다.
 
 ### 영상 업로드와 polling
 
@@ -287,7 +305,7 @@ JWT 도입 때 소유자 접근 제어와 함께 개선할 항목입니다.
 |---|---|---|
 | `video` | 실제 mp4 파일 | 필수 |
 | `handedness` | `right` 또는 `left` | 필수 |
-| `user_id` | 로그인 응답의 `user` | 선택, 생략 시 null |
+| `user_id` | 로그인 응답의 `user` | 선택, 생략 시 세션 소유자. 다른 값은 403 |
 | `recorded_at` | `2026-10-04T11:10:00+09:00` | 선택, 생략 시 업로드 시각 |
 
 촬영 시각은 UTC로 정규화합니다. 위 예시는 `2026-10-04T02:10:00Z`와 같습니다.
@@ -327,13 +345,13 @@ mock은 `queued → done`으로 바로 저장되므로 첫 조회부터 done일 
 
 `url`을 영상 플레이어에 전달합니다. 만료되면 이 API를 다시 호출하세요.
 DB에 저장되는 값은 bucket·object path이며 URL은 저장하지 않습니다.
-현재 모든 분석/영상 조회에는 토큰 기반 소유자 검증이 없으므로 공개 배포 전에 별도 보완이 필요합니다.
+분석·영상·3D 조회는 Bearer와 본인 소유권을 검사합니다. 원본 영상 재생과 3D 좌표는 별도 요청입니다.
 
 ### 호환성 정리
 
 회원 요청 명세를 단순화했습니다. 클라이언트는 가입 시 `email`, 로그인 시 `id`와 `password`만 사용해야 합니다.
-가입 시 `e-mail` alias와 이메일 로그인은 제거했으며, 회원 응답 형식은 유지합니다.
-사용자 ID 없는 업로드를 포함한 다른 API의 동작은 변경하지 않았습니다.
-의도적으로 강화한 동작은 잘못된 영상·파일명·MIME 거부와 bcrypt 길이 제한입니다.
+가입 시 `e-mail` alias와 이메일 로그인은 제거했으며, 가입 응답 형식은 유지합니다. 로그인 응답에는 Bearer 필드가 추가됩니다.
+무인증 업로드·분석·영상·기록 조회는 401입니다. Flutter와 백엔드를 함께 배포하고 기존 계정은 같은 users 테이블에서 인증합니다. 회원 복사나 비밀번호 초기화는 필요하지 않습니다.
+잘못된 영상·파일명·MIME 거부와 bcrypt 길이 제한도 유지합니다.
 빈 내용이나 텍스트를 `.mp4`로 바꾼 파일은 mock에서도 더 이상 성공하지 않습니다.
 LLM 텍스트·장기간 추이·새 구간 모델 API는 추가하지 않았습니다.

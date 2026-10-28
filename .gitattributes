@@ -2,3 +2,5 @@
 feedback/pose3d_policy.py text eol=lf
 feedback/pose3d_display/vendor/tools/smoothing.py text eol=lf
 feedback/pose3d_display/vendor/config/smoothing.json text eol=lf
+# Preserve the package-supplied WebGL bridge, including its existing whitespace.
+frontend/web/gles_bindings.js whitespace=-blank-at-eol

@@ -157,5 +157,3 @@ def package(raw, binding_id, reference_scale=None):
         'reference_scale': reference_scale,
         'presentation_end_s': end,
     }
-
-
