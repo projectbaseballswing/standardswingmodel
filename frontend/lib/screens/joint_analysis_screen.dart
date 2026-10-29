@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/feedback_repository.dart';
 import '../models/feedback.dart';
 import '../theme/app_theme.dart';
+import '../widgets/body_part_art.dart';
 
 /// 관절별 분석(상세 피드백) 화면.
 ///
@@ -99,7 +100,7 @@ class _SelectorCard extends StatelessWidget {
             children: [
               // 왼쪽: 인체 그림
               SizedBox(
-                width: 96,
+                width: 120,
                 child: Column(
                   children: [
                     Row(
@@ -116,20 +117,11 @@ class _SelectorCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    SizedBox(
-                      height: 180,
-                      child: CustomPaint(
-                        size: const Size(96, 180),
-                        painter: _BodyFigurePainter(
-                          regionColors: _regionColors(parts),
-                          selectedRegion: _regionKeyOf(parts[selected]),
-                        ),
-                      ),
-                    ),
+                    BodyMap(colors: _regionColors(parts)),
                   ],
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 10),
               // 오른쪽: 부위 목록
               Expanded(
                 child: Column(
@@ -155,32 +147,27 @@ class _SelectorCard extends StatelessWidget {
   }
 
   /// 인체 그림 영역별 색. 각 부위의 상태 색으로 칠한다.
-  static Map<String, Color> _regionColors(List<PartAnalysis> parts) {
-    final map = <String, Color>{};
+  /// 0.1의 pose/velocity 그룹이나 좌우 정보 없는 팔·다리는 칠하지 않는다.
+  static Map<BodyRegion, Color> _regionColors(List<PartAnalysis> parts) {
+    final map = <BodyRegion, Color>{};
     for (final p in parts) {
-      final region = _regionKeyOf(p);
-      if (region != null) map[region] = _statusStyle(p.status).color;
+      final region = _regionOf(p);
+      if (region != null) map[region] = bodyToneColor(_bodyTone(p.status));
     }
     return map;
   }
-
-  /// 부위 → 인체 그림 영역 키. 몸통은 통째로 하나의 영역으로 본다.
-  static String? _regionKeyOf(PartAnalysis p) {
-    // 0.1의 pose/velocity 그룹이나 좌우 정보 없는 팔·다리를 특정 부위로 추정하지 않는다.
-    if (p.key == 'torso') return 'torso';
-    if (!p.label.contains('왼') && !p.label.contains('오른')) return null;
-    switch (p.part) {
-      case BodyPart.arm:
-        return p.isLeft ? 'leftArm' : 'rightArm';
-      case BodyPart.leg:
-        return p.isLeft ? 'leftLeg' : 'rightLeg';
-      case BodyPart.torso:
-        return 'torso';
-    }
-  }
 }
 
-/// 목록의 부위 한 줄: 색 막대 + 이름 + 점수 + 상태 배지 + 화살표.
+BodyRegion? _regionOf(PartAnalysis p) =>
+    bodyRegionOf(key: p.key, label: p.label, part: p.part);
+
+BodyTone _bodyTone(JointStatus status) => switch (status) {
+  JointStatus.improved || JointStatus.proGood => BodyTone.good,
+  JointStatus.worsened || JointStatus.proBad => BodyTone.bad,
+  JointStatus.unchanged || JointStatus.limited => BodyTone.neutral,
+};
+
+/// 목록의 부위 한 줄: 부위 아이콘 + 이름 + 점수 + 상태 배지 + 화살표.
 class _PartRow extends StatelessWidget {
   const _PartRow({
     required this.part,
@@ -198,7 +185,7 @@ class _PartRow extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 11),
         decoration: BoxDecoration(
           color: selected ? style.soft : const Color(0xFFF7F7F7),
           borderRadius: BorderRadius.circular(10),
@@ -209,15 +196,12 @@ class _PartRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Container(
-              width: 4,
-              height: 18,
-              decoration: BoxDecoration(
-                color: style.color,
-                borderRadius: BorderRadius.circular(2),
-              ),
+            BodyPartGlyph(
+              part: part.part,
+              region: _regionOf(part),
+              color: bodyToneColor(_bodyTone(part.status)),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 7),
             Expanded(
               child: Text(
                 part.label,
@@ -1036,106 +1020,6 @@ class _LegendDot extends StatelessWidget {
       ],
     );
   }
-}
-
-// ---------------------------------------------------------------------------
-// 인체 그림 Painter
-// ---------------------------------------------------------------------------
-class _BodyFigurePainter extends CustomPainter {
-  _BodyFigurePainter({
-    required this.regionColors,
-    required this.selectedRegion,
-  });
-
-  /// 'leftArm','rightArm','torso','leftLeg','rightLeg' → 색.
-  final Map<String, Color> regionColors;
-
-  /// 지금 선택된 영역 키. 이 부위만 진하게, 나머지는 흐리게 그린다.
-  final String? selectedRegion;
-
-  static const _neutral = Color(0xFFCCD0D6);
-
-  /// 선택된 영역은 상태색 그대로, 나머지는 흐리게 표시한다.
-  Color _c(String key) {
-    final base = regionColors[key] ?? _neutral;
-    if (key == selectedRegion) return base;
-    return Color.lerp(base, Colors.white, 0.6)!;
-  }
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final cx = w / 2;
-
-    final fill = Paint()..style = PaintingStyle.fill;
-    final limb = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    // 머리
-    fill.color = _neutral;
-    canvas.drawCircle(Offset(cx, h * 0.10), w * 0.13, fill);
-
-    // 몸통 베이스(연한 회색 덩어리). 그 위에 어깨선·척추·골반선을 얹는다.
-    fill.color = Color.lerp(_neutral, Colors.white, 0.45)!;
-    final torso = RRect.fromRectAndRadius(
-      Rect.fromLTRB(cx - w * 0.17, h * 0.21, cx + w * 0.17, h * 0.56),
-      Radius.circular(w * 0.09),
-    );
-    canvas.drawRRect(torso, fill);
-
-    // 몸통(어깨선·척추·골반선)은 하나의 영역으로 같은 색을 쓴다.
-    final torsoColor = _c('torso');
-    limb.strokeWidth = w * 0.09;
-    limb.color = torsoColor;
-    canvas.drawLine(Offset(cx, h * 0.27), Offset(cx, h * 0.50), limb);
-    limb.strokeWidth = w * 0.085;
-    canvas.drawLine(
-      Offset(cx - w * 0.13, h * 0.25),
-      Offset(cx + w * 0.13, h * 0.25),
-      limb,
-    );
-    canvas.drawLine(
-      Offset(cx - w * 0.11, h * 0.52),
-      Offset(cx + w * 0.11, h * 0.52),
-      limb,
-    );
-
-    // 팔
-    limb.strokeWidth = w * 0.11;
-    limb.color = _c('leftArm');
-    canvas.drawLine(
-      Offset(cx - w * 0.16, h * 0.26),
-      Offset(cx - w * 0.32, h * 0.55),
-      limb,
-    );
-    limb.color = _c('rightArm');
-    canvas.drawLine(
-      Offset(cx + w * 0.16, h * 0.26),
-      Offset(cx + w * 0.32, h * 0.55),
-      limb,
-    );
-
-    // 다리
-    limb.strokeWidth = w * 0.13;
-    limb.color = _c('leftLeg');
-    canvas.drawLine(
-      Offset(cx - w * 0.08, h * 0.56),
-      Offset(cx - w * 0.11, h * 0.92),
-      limb,
-    );
-    limb.color = _c('rightLeg');
-    canvas.drawLine(
-      Offset(cx + w * 0.08, h * 0.56),
-      Offset(cx + w * 0.11, h * 0.92),
-      limb,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_BodyFigurePainter old) =>
-      old.regionColors != regionColors || old.selectedRegion != selectedRegion;
 }
 
 // ---------------------------------------------------------------------------

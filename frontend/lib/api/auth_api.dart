@@ -48,10 +48,9 @@ class AuthApi {
 
   final http.Client _client;
 
-  Uri _uri(String path, [Map<String, dynamic>? query]) =>
-      Uri.parse('${ApiConfig.baseUrl}$path').replace(
-        queryParameters: query?.map((k, v) => MapEntry(k, '$v')),
-      );
+  Uri _uri(String path, [Map<String, dynamic>? query]) => Uri.parse(
+    '${ApiConfig.baseUrl}$path',
+  ).replace(queryParameters: query?.map((k, v) => MapEntry(k, '$v')));
 
   /// 이메일 중복확인. true = 사용 가능, false = 중복.
   ///
@@ -94,10 +93,7 @@ class AuthApi {
     required String id,
     required String password,
   }) async {
-    final res = await _post('/api/login', {
-      'id': id,
-      'password': password,
-    });
+    final res = await _post('/api/login', {'id': id, 'password': password});
     final body = _decode(res);
     return LoginResult(userId: body['user'] as String);
   }
@@ -149,7 +145,9 @@ class AuthApi {
     }
     // FastAPI 는 오류를 {"detail": "..."} 로 준다.
     final detail = body['detail'];
-    throw ApiException(detail is String ? detail : '요청을 처리하지 못했습니다. (${res.statusCode})');
+    throw ApiException(
+      detail is String ? detail : '요청을 처리하지 못했습니다. (${res.statusCode})',
+    );
   }
 
   void dispose() => _client.close();
