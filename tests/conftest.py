@@ -15,7 +15,8 @@ _supabase_environment = {**dotenv_values(Path(__file__).resolve().parents[1] / "
 
 def integration_environment():
     keys = ("DATABASE_URL", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_STORAGE_BUCKET")
-    return {key: _supabase_environment.get(key) or "" for key in keys}
+    return {**{key: _supabase_environment.get(key) or "" for key in keys},
+            "SWING_DATABASE_SCHEMA": _supabase_environment.get("SWING_DATABASE_SCHEMA") or "public"}
 
 # Set before importing api.main/database. Never connect tests to the team's DB.
 _directory = TemporaryDirectory(prefix="swing-tests-")
@@ -23,6 +24,8 @@ atexit.register(_directory.cleanup)
 os.environ["DATABASE_URL"] = "sqlite:///" + str(Path(_directory.name) / "test.db")
 os.environ["SWING_MOCK"] = "0"
 os.environ["SWING_WORKER_ID"] = "test-worker"
+os.environ["SWING_DATABASE_SCHEMA"] = "public"
+os.environ["SWING_STORAGE_BACKEND"] = "supabase"
 # 테스트는 외부 LLM(Gemini)을 절대 호출하지 않는다. load_dotenv(override=False)라
 # api.settings import 전에 비워두면 .env의 실제 키를 읽지 않는다.
 os.environ["GEMINI_API_KEY"] = ""
@@ -47,6 +50,13 @@ class FakeStorage:
             raise StorageError("Test object does not exist")
         self.sign_count += 1
         return f"https://storage.invalid/{bucket}/{path}?test={self.sign_count}"
+
+    def download(self,bucket,path,max_bytes=32*1024*1024):
+        from api.storage import StorageObjectNotFound,StorageError
+        if bucket!=self.bucket or path not in self.objects:raise StorageObjectNotFound('Test object missing')
+        payload=self.objects[path]
+        if len(payload)>max_bytes:raise StorageError('Test object too large')
+        return payload
 
     def close(self):
         pass
@@ -84,4 +94,6 @@ def mock_client(mock_settings, fake_storage):
     from fastapi.testclient import TestClient
     from api.main import app
     with TestClient(app) as client:
+        from tests.auth_helpers import authenticate
+        authenticate(client)
         yield client

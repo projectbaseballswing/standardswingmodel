@@ -286,20 +286,24 @@ class _SwingCameraScreenState extends State<SwingCameraScreen>
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           // 왼쪽: 갤러리에서 불러오기 썸네일.
-          GestureDetector(
-            onTap: _recording || _picking ? null : _pickFromGallery,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: Colors.white12,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: const Icon(
-                Icons.photo_library_outlined,
-                color: Colors.white70,
-                size: 20,
+          Semantics(
+            label: '영상 불러오기',
+            button: true,
+            child: GestureDetector(
+              onTap: _recording || _picking ? null : _pickFromGallery,
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Colors.white12,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: const Icon(
+                  Icons.photo_library_outlined,
+                  color: Colors.white70,
+                  size: 20,
+                ),
               ),
             ),
           ),
@@ -455,6 +459,14 @@ class _ReviewScreenState extends State<SwingVideoReviewScreen> {
                 ),
               ),
               _handednessSelector(),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                child: Text(
+                  '1080p·60FPS 이상 권장 · 밝은 곳에서 카메라를 고정하고 전신·팔·손목, 준비 자세부터 팔로스루까지 담아주세요. 30FPS도 분석할 수 있으며 가림과 흔들림에 따라 3D 품질이 달라집니다.',
+                  key: Key('capture-quality-guide'),
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                 child: Row(

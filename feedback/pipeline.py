@@ -45,6 +45,9 @@ class SkeletonResult:
     fps: float
     frame_size: tuple  # (width, height)
     max_missing_gap: int
+    # Independent display artifact; never supplied to model 0.2 scoring.
+    pose3d_capture: Optional[Dict[str, Any]] = None
+    pose3d_error: Optional[Dict[str, str]] = None
 
 
 @dataclass
@@ -108,10 +111,14 @@ class SwingPipeline:
 
         # 기존 모듈의 확인용 print 는 서버 로그에서 숨기고 debug 로만 남긴다
         buffer = io.StringIO()
+        decoded_pts = []
+        capture = None
+        capture_data = None
+        capture_error = None
         with contextlib.redirect_stdout(buffer):
             stage("reading_video")
             try:
-                frames, fps = read_video(video_path)
+                frames, fps = read_video(video_path, timestamps_out=decoded_pts)
             except ValueError as exc:
                 raise PipelineError("INVALID_VIDEO", str(exc)) from exc
             if not frames:
@@ -119,6 +126,12 @@ class SwingPipeline:
             if is_left:
                 frames = [cv2.flip(frame, 1) for frame in frames]
             height, width = frames[0].shape[:2]
+            try:
+                from feedback.pose3d import Pose3DCapture
+                capture = Pose3DCapture(decoded_pts, is_left, width, height, fps)
+            except Exception:
+                capture_error = {'code': 'WORLD_CAPTURE_INIT_FAILED',
+                                 'message': '3D 좌표 보존을 시작하지 못했습니다.'}
 
             stage("tracking_player")
             player_df = track_target_player(self.yolo_model, frames)
@@ -139,11 +152,18 @@ class SwingPipeline:
                 roi_infos.append(roi_info)
             del frames
 
-            pose_result = extract_pose_with_roi(roi_frames, roi_infos, fps, model_path=self.pose_model)
+            pose_result = extract_pose_with_roi(roi_frames, roi_infos, fps,
+                model_path=self.pose_model, world_capture=capture)
             if pose_result is None:
                 raise PipelineError("POSE_NOT_DETECTED", "관절을 검출하지 못했습니다.")
             raw_landmarks, visibility = pose_result
             normalized = np.asarray(normalize_landmarks_sequence(raw_landmarks, visibility))
+            if capture is not None:
+                try:
+                    capture_data = capture.finish()
+                except Exception as exc:
+                    capture_error = {'code': getattr(exc, 'code', 'WORLD_CAPTURE_FAILED'),
+                        'message': getattr(exc, 'message', '3D 좌표 보존에 실패했습니다. 기존 점수 결과는 별도로 제공됩니다.')}
 
         logger.debug(buffer.getvalue())
 
@@ -154,6 +174,8 @@ class SwingPipeline:
             fps=float(fps),
             frame_size=(int(width), int(height)),
             max_missing_gap=int(max_missing_gap),
+            pose3d_capture=capture_data,
+            pose3d_error=capture_error,
         )
 
     def run(

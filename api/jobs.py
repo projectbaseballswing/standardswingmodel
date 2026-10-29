@@ -84,6 +84,7 @@ class JobManager:
         gemini_api_key: str = "",
         gemini_model: str = "",
         coaching_scope: str = "overall",
+        pose_storage_factory=None,
     ):
         self.store = store
         self.reference_fps = reference_fps
@@ -92,6 +93,7 @@ class JobManager:
         self.gemini_api_key = gemini_api_key
         self.gemini_model = gemini_model
         self.coaching_scope = coaching_scope
+        self._pose_storage_factory = pose_storage_factory
         self._pipeline_factory = pipeline_factory
         self._pipeline: Optional[SwingPipeline] = None
         # 이벤트 기반 기준 모델(0.2). 파일이 없으면 기존 0.1 비교를 쓴다.
@@ -147,6 +149,7 @@ class JobManager:
         with database.SessionLocal.begin() as db:
             # 회원 테이블도 시작 시 검사한다. create_all로 migration을 우회하지 않는다.
             db.execute(select(database.User.user_id).limit(1))
+            db.execute(select(database.AuthSession.token_hash).limit(1))
             db.execute(update(Swing).where(
                 Swing.worker_id == self.worker_id,
                 Swing.status.in_(("queued", "processing")),
@@ -154,28 +157,45 @@ class JobManager:
                 "code": "SERVER_RESTARTED",
                 "message": "서버가 중단되어 분석을 완료하지 못했습니다. 영상을 다시 업로드하세요.",
             }))
+            db.execute(update(database.Pose3D).where(
+                database.Pose3D.analysis_id.in_(select(Swing.analysis_id).where(Swing.worker_id == self.worker_id)),
+                database.Pose3D.status.in_(("pending", "processing")),
+            ).values(status="failed", updated_at=_now(), error={
+                "code":"SERVER_RESTARTED", "message":"3D 생성 중 서버가 중단되었습니다. 점수 결과는 별도로 유지됩니다."
+            }))
 
     def create_video_job(self, input_info: dict, **metadata) -> Job:
         job = Job(analysis_id=uuid.uuid4().hex, input=input_info, stage="uploading", **metadata)
         suffix = input_info["suffix"]
         job.video_storage_path = f"swings/{job.analysis_id}/original{suffix}"
         self._add(job)
+        from api.pose3d import init_pose
+        try:
+            init_pose(job)
+        except Exception as exc:
+            # The score job already exists. Optional display initialization
+            # must not stop the original upload/analysis workflow.
+            logger.warning("3D initialization failed for %s: %s", job.analysis_id, type(exc).__name__)
         return job
 
     def fail(self, job: Job, code: str, message: str) -> None:
         job.status, job.stage, job.finished_at = "failed", None, _now()
         job.error, job.result = {"code": code, "message": message}, None
         self._save(job)
+        from api.pose3d import fail_pose
+        fail_pose(job.analysis_id, code, "영상 분석이 실패하여 3D 데이터를 만들 수 없습니다.")
 
     def complete_mock(self, job: Job, report: dict) -> Job:
         job.status, job.stage, job.finished_at = "done", None, _now()
         job.result = report
         self._save(job)
+        from api.pose3d import fail_pose
+        fail_pose(job.analysis_id,"MOCK_HAS_NO_WORLD","목업 점수에는 실제 World 좌표가 없습니다. 샘플로 대체하지 않습니다.")
         return job
 
-    def compare_features(self, features, fps: float, input_info: Dict[str, Any], mock_report=None) -> Job:
+    def compare_features(self, features, fps: float, input_info: Dict[str, Any], mock_report=None, user_id=None) -> Job:
         """이미 추출된 피처(.npy)로 바로 비교한다. 빠르므로 동기로 처리한다."""
-        job = Job(analysis_id=uuid.uuid4().hex, input=input_info, status="processing", stage="comparing")
+        job = Job(analysis_id=uuid.uuid4().hex, input=input_info, status="processing", stage="comparing", user_id=user_id)
         self._add(job)
         try:
             if mock_report is not None:
@@ -224,6 +244,7 @@ class JobManager:
 
     def _run_video(self, job: Job, video_path: str, is_left: bool) -> None:
         job.status = "processing"
+        skeleton = None
 
         def on_stage(name: str) -> None:
             job.stage = name
@@ -272,6 +293,13 @@ class JobManager:
             job.finished_at = _now()
             try:
                 self._save(job)
+                # Persist score first. 3D is an independent state/result and
+                # never feeds smoothed world coordinates to model 0.2.
+                from api.pose3d import fail_pose, persist_pose
+                if job.status == 'done' and self._pose_storage_factory is not None:
+                    persist_pose(job, skeleton, self._pose_storage_factory)
+                else:
+                    fail_pose(job.analysis_id, 'ANALYSIS_UNAVAILABLE', '영상의 3D 데이터를 생성하지 못했습니다.')
             except Exception:
                 logger.exception("analysis %s state could not be saved; recover on restart", job.analysis_id)
             finally:

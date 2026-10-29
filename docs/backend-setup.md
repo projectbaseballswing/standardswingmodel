@@ -3,6 +3,8 @@
 대상 저장소는 `standardswingmodel`입니다. 기존 FastAPI/SQLAlchemy와 영상 분석 워커를 사용합니다.
 팀 환경은 Supabase PostgreSQL + private Supabase Storage입니다. `.env`는 공유 저장소에 올리지 않습니다.
 
+기존 운영 DB의 `0002 → 0003` 적용과 버킷/권한 변경은 [영향 분석·백업·롤백 계획](swing-3d-migration.md)을 검토하고 승인받은 뒤 수행합니다. 아래 설정·명령 예시는 자동 실행 지시나 운영 변경 승인을 대신하지 않습니다.
+
 ## 1. Supabase에서 준비할 것
 
 1. 팀 프로젝트를 생성하거나 기존 팀 프로젝트의 접근 권한을 받습니다. 같은 팀 DB를 쓸 경우 새 프로젝트를 만들 필요는 없습니다.
@@ -15,12 +17,12 @@
    이 키와 DB 비밀번호는 서버 `.env`에만 보관하며 Flutter 코드나 앱 빌드에 포함하지 않습니다.
 5. Storage에서 `swing-videos`라는 **private bucket**을 생성합니다. 다른 이름을 쓰면 환경변수도 맞춥니다.
    프로젝트·bucket 업로드 한도와 `SWING_MAX_UPLOAD_MB`를 맞추세요. 프로젝트 한도가 더 작으면 서버 설정도 낮춥니다.
-   MIME 제한을 사용할 경우 `video/mp4`, `video/quicktime`, `video/x-msvideo`, `video/x-matroska`, `video/x-m4v`를 허용합니다.
+   MIME 제한을 사용할 경우 `video/mp4`, `video/quicktime`, `video/x-msvideo`, `video/x-matroska`, `video/x-m4v`와 **3D gzip용 `application/gzip`**을 허용해야 합니다. 기존 운영 bucket의 허용 MIME 변경도 영향 확인과 승인 후 수행합니다.
 6. 파일은 백엔드 service role로만 업로드·서명합니다. 일반 클라이언트에 bucket 쓰기 권한을 열 필요가 없습니다.
 
 회원은 기존 `public.users`와 bcrypt를 유지합니다. **Supabase Auth로 회원 체계를 교체하지 않았습니다.**
 SQLAlchemy는 PostgreSQL에 직접 접속하고, Storage만 기존 의존성인 HTTPX로 REST API를 호출합니다.
-Migration은 `users`, `swings`에 RLS를 활성화하며 클라이언트용 정책을 만들지 않습니다.
+기존 migration은 `users`, `swings`에 RLS를 활성화했습니다. `0003`은 `auth_sessions`, `pose_3d`만 추가하고 새 테이블의 RLS 및 일반 클라이언트 직접 접근 차단을 설정합니다. 기존 사용자를 복사하거나 기존 행을 변경하지 않습니다.
 DB 연결 계정은 migration/백엔드 실행 권한이 있는 서버 계정이어야 합니다.
 
 공식 참고: [Postgres 연결](https://supabase.com/docs/guides/database/connecting-to-postgres),
@@ -35,10 +37,15 @@ DB 연결 계정은 migration/백엔드 실행 권한이 있는 서버 계정이
 | 변수 | 용도 |
 |---|---|
 | `DATABASE_URL` | Supabase PostgreSQL 서버 접속 문자열. 필수, 기본 SQLite 자동 대체 없음 |
+| `SWING_DATABASE_SCHEMA` | 기본 `public`: 기존 users/swings와 같은 스키마. 격리 staging만 명시적으로 다른 값 사용 |
 | `SUPABASE_URL` | `https://`로 시작하는 팀 프로젝트 URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | 서버 전용 service_role 키 |
 | `SUPABASE_STORAGE_BUCKET` | private bucket 이름, 예제는 `swing-videos` |
 | `SUPABASE_SIGNED_URL_SECONDS` | 영상 URL 유효기간, 기본 900초 |
+| `SWING_STORAGE_BACKEND` | 기본 `supabase`; `local`은 명시적 로컬 개발 전용 |
+| `SWING_LOCAL_STORAGE_ROOT` | local 선택 때 필요한 private 프로젝트/OS 임시 폴더 하위 경로 |
+| `SWING_SESSION_TTL_SECONDS` | Bearer 세션 만료, 기본 28800초 |
+| `SWING_CORS_ORIGINS` | 개발 기본 `*`; 배포는 정확한 프론트 origin을 쉼표로 구분 |
 | `SWING_MOCK` | `1`이면 분석만 fixture로 대체. DB·Storage는 실제로 사용 |
 | `SWING_MAX_UPLOAD_MB` | 영상 업로드 제한, 기본 200 MiB. 실제 Storage 한도도 적용 |
 | `SWING_WORKER_ID` | 서버마다 다르고 재시작에도 유지되는 값. 빈 값은 호스트명 |
@@ -65,6 +72,7 @@ python -m pip install -r requirements-api.txt
 # 실제 YOLO/MediaPipe 분석도 실행할 때는 python -m pip install -r requirements.txt
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 # 편집기로 .env의 실제 값 입력
+# 운영 DB는 swing-3d-migration.md의 백업·영향 검토와 승인 완료 후에만 실행
 python -m alembic upgrade head
 python -m alembic current
 ```
@@ -80,10 +88,11 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 cp .env.example .env
 # .env 편집 후
+# 운영 DB는 swing-3d-migration.md의 백업·영향 검토와 승인 완료 후에만 실행
 python -m alembic upgrade head
 ```
 
-팀 DB에는 담당자 한 명이 migration을 먼저 적용합니다. 서버는 자동으로 `create_all`을 실행하지 않습니다.
+팀 DB에는 담당자 한 명이 **승인받은 migration만** 먼저 적용합니다. 현재 운영 `0002`에는 `alembic upgrade 0003`이 필요한 추가 단계이며, [승인 절차](swing-3d-migration.md)를 따릅니다. 서버는 자동으로 `create_all`이나 migration을 실행하지 않습니다.
 새 테이블/컬럼 변경은 migration 파일로 공유하고 다른 팀원도 서버 코드와 schema 버전을 맞춥니다.
 새 DB에는 `upgrade head`만 실행하면 됩니다. `stamp`로 테이블 생성을 건너뛰지 마세요.
 
@@ -119,21 +128,24 @@ Swagger는 `http://127.0.0.1:8000/docs`, 상태 확인은 `http://127.0.0.1:8000
 
 ## 5. Swagger와 Supabase에서 실제 확인
 
+보호 API에는 `Authorization: Bearer <로그인 토큰>`이 필요합니다. 현재 Swagger에 Bearer 입력 UI가 없다면 실제 Flutter 또는 헤더를 지정할 수 있는 HTTP 클라이언트를 사용합니다. 토큰·비밀번호·signed URL은 로그나 공유 문서에 붙이지 않습니다.
+
 1. `POST /api/register`에 `id`, `password`, `email`, `nickname` 네 필드만 입력합니다.
    Supabase Table Editor의 `users`에서 회원과 생성 시각을 확인합니다. 평문 비밀번호는 저장하지 않습니다.
-2. `POST /api/login`에 `id`, `password` 두 필드만 보내 로그인하고 `user`를 기억합니다.
-   `POST /api/me`에 `{"user":"로그인에서 받은 값"}`을 보내 조회합니다.
-3. `POST /api/analyses`에서 `video` 파일, `handedness=right|left`, 선택 `user_id`를 입력합니다.
+2. `POST /api/login`에 `id`, `password` 두 필드만 보내 `user`, `access_token`, `token_type=bearer`, `expires_in`을 받습니다.
+   Bearer 헤더와 함께 `POST /api/me`에 `{"user":"로그인에서 받은 값"}`을 보내 조회합니다.
+3. 인증된 `POST /api/analyses`에서 `video` 파일, `handedness=right|left`, 선택 `user_id`를 입력합니다. 소유자는 세션으로 결정하며 다른 user_id는 403입니다.
    촬영 시각이 있으면 `recorded_at`에 `2026-10-03T14:00:00+09:00`처럼 시간대도 입력합니다.
 4. 202 응답의 `analysis_id`로 `GET /api/analyses/{analysis_id}`를 조회합니다.
    mock은 이미 `done`, 일반 모드는 `queued`/`processing` 후 `done` 또는 `failed`입니다.
 5. Storage에서 `swings/<analysis_id>/original.mp4` 등의 객체를 확인합니다.
    `swings` 테이블에서 사용자 관계, 경로, 메타데이터, 상태, 결과 JSON을 확인합니다.
-6. `/overall`, `/joints`, `/phases`, `/speed`를 조회합니다. 기존 결과와 속도 `available=false`를 확인합니다.
+6. `/overall`, `/joints`, `/phases`, `/speed`를 조회합니다. 기존 결과와 해당 모델의 `available`을 확인합니다.
 7. `/video`를 호출하고 반환된 `url`을 브라우저에서 열어 원본 영상이 재생/다운로드되는지 확인합니다.
    만료되면 `/video`를 다시 호출합니다. URL은 DB에 저장되지 않습니다.
 8. 서버를 종료하고 **같은 DB·Storage 설정**으로 재시작합니다. 다시 로그인하고 같은 분석 ID로 결과·영상 URL을 조회합니다.
-9. 일반 모드에서는 실제 영상 분석도 반복 확인합니다. mock 성공은 YOLO/MediaPipe 분석 성공을 의미하지 않습니다.
+9. 일반 모드에서는 `GET /api/analyses/{analysis_id}/pose-3d`의 202 → 200과 Flutter 본인 3D 재생을 확인합니다. 실패 422가 기존 점수를 지우지 않는지도 확인합니다. mock은 실제 World가 없어 3D 실패이며 샘플로 대체하지 않습니다.
+10. 토큰 없음·만료·로그아웃 후 401, 다른 계정으로 같은 분석/영상/3D 접근 시 403을 확인합니다. mock 성공은 YOLO/MediaPipe 분석 성공을 의미하지 않습니다.
 
 테스트 suite:
 
@@ -158,6 +170,8 @@ python -m pytest tests -q --basetemp ".venv/pytest-$([guid]::NewGuid().ToString(
 |---|---|
 | `users` | 기존 `id`, `email`(unique), `nickname`(unique), `password_hash` + `created_at` |
 | `swings` | `analysis_id` PK, nullable `user_id` FK, `recorded_at`, bucket·object path·크기·MIME, worker ID, 상태·단계·시각, 입력·오류·결과 JSONB |
+| `auth_sessions` | `0003` 추가. token SHA-256, 기존 user FK, 생성·만료·폐기 시각 |
+| `pose_3d` | `0003` 추가. 기존 analysis/user FK, 독립 상태, 계약 버전, 비공개 gzip 경로·SHA·크기·시간축·품질·오류 |
 | `alembic_version` | 적용된 migration 버전 |
 
 하나의 업로드와 분석이 1:1이므로 별도 Feedback 테이블을 만들지 않았습니다.
@@ -165,7 +179,8 @@ python -m pytest tests -q --basetemp ".venv/pytest-$([guid]::NewGuid().ToString(
 새 점수 계산/평균 집계/LLM 텍스트를 추가하지 않습니다. signed URL과 영상 바이너리는 DB에 넣지 않습니다.
 
 object path는 `swings/<analysis_id>/original<확장자>`입니다. 사용자 파일명을 경로로 쓰지 않아 같은 이름도 충돌하지 않습니다.
-사용자 관계는 DB FK로 관리합니다. 사용자 ID 생략 시 null이며 임의의 회원 계정을 만들지 않습니다.
+사용자 관계는 DB FK로 관리합니다. 신규 업로드는 user_id 생략 시에도 인증된 세션 소유자를 저장합니다. 기존 null 소유자 기록은 자동 배정하지 않으며 403으로 보호합니다.
+3D는 `pose3d/<owner-hash>/<analysis_id>/display-v1.json.gz`에 저장하고 공개 URL을 반환하지 않습니다. clip 31 MiB·전체 응답 32 MiB 한도와 좌표 계약은 [3D 처리 문서](swing-3d-pipeline.md)를 참조합니다.
 
 - 확장자·용량·빈 파일·사용자·시각 검증 실패: DB 행과 Storage 객체를 만들지 않습니다.
 - 컨테이너 헤더와 MIME도 확인합니다. 이 검사는 영상 전체 디코딩이나 스윙 검출을 대신하지 않습니다.
@@ -173,6 +188,7 @@ object path는 `swings/<analysis_id>/original<확장자>`입니다. 사용자 �
 - Storage 요청 실패: `failed` / `STORAGE_UPLOAD_FAILED`와 예정 경로를 남깁니다.
   타임아웃은 원격 저장 성공 여부가 불확실하므로 해당 객체가 남을 수 있으며, DB 경로로 추적합니다.
 - 분석 실패: 원본을 유지하고 기존 분석 오류 코드와 `failed` 상태를 저장합니다.
+- 3D만 실패: `pose_3d.status=failed`와 안전한 오류를 기록하고 기존 점수·피드백의 `done` 결과를 유지합니다.
 - 업로드 후 DB 연결 실패: 먼저 기록한 행과 경로가 남습니다. 연결 복구 후 같은 worker ID로 재시작하면
   미완료 행을 `failed` / `SERVER_RESTARTED`로 정리합니다. 자동 재시도는 하지 않습니다.
 - 정상 종료: 이미 접수한 분석을 끝낸 뒤 종료합니다. 임시 영상은 처리 완료/요청 실패 시 삭제합니다.
@@ -182,20 +198,17 @@ object path는 `swings/<analysis_id>/original<확장자>`입니다. 사용자 �
 DB와 Storage 사이에는 하나의 트랜잭션이 없습니다. 이번 규모에서는 업로드 전에 DB에 경로를 확정하는 방식으로
 추적 불가능한 객체를 예방합니다. 전송 결과가 불확실할 때 자동 삭제하면 실제 성공한 영상을 잃을 수 있어 삭제하지 않습니다.
 DB 장애가 지속되는 동안 상태 기록도 불가능하며, 연결 복구 후 같은 worker ID로 재시작해야 미완료 행이 정리됩니다.
-`created_at`, `recorded_at`, `finished_at`과 현재 상태를 저장하며, 아직 수정 API/변경 이력 기능이 없어 `updated_at`은 추가하지 않았습니다.
+기존 swings의 `created_at`, `recorded_at`, `finished_at`은 유지합니다. 독립 생성 상태를 관리하는 새 pose_3d에는 `created_at`, `updated_at`을 둡니다.
 
 ## 7. 현재 범위와 팀 공유 사항
 
-기존 로그인 응답은 토큰 없이 `user` ID만 반환합니다. `user_id` 입력은 회원 연결용이며 소유자 인증이 아닙니다.
-기존 API 호환을 유지했으므로 분석 ID를 아는 사람이 결과·영상 URL을 조회할 수 있습니다.
-외부 공개 전에는 인증 토큰과 소유자 접근 제어를 별도로 붙여야 합니다.
+기존 bcrypt 계정에 실제 Bearer 세션과 소유권 검사를 연결했습니다. 기존 `public.users` 계정을 복사하지 않고 같은 테이블에서 인증합니다. 무인증 401, 다른 소유자 403이며 user_id나 분석 ID만으로 접근할 수 없습니다.
 
-Flutter에는 변경이 없습니다. 기존 영상 업로드는 계속 동작하지만 회원 연결을 사용하려면 담당자가 `user_id`를 보내야 합니다.
-스윙 목록 UI의 임시 데이터, 추이 계산, LLM 피드백, 새 모델은 이번 작업에서 변경하지 않았습니다.
+Flutter 로그인·업로드·기록 조회는 세션을 보내고 종합 피드백에서 해당 분석의 3D를 조회합니다. P2/O1/F1/S2/H4 표시는 기존 모델 0.2의 점수·피드백을 바꾸지 않습니다. 구 무인증 클라이언트와 호환되지 않으므로 Flutter와 백엔드를 함께 배포합니다.
 팀에는 `.env.example`, migration, 두 requirements 파일, 이 문서를 공유하고 실제 secret은 승인된 비공개 경로로 전달하세요.
 
 현재 CORS는 개발 편의를 위해 모든 origin을 허용하며 쿠키 credentials는 허용하지 않습니다.
-실제 배포 때 프론트 도메인으로 제한하세요. 현재 사용자 조회·영상 조회를 보호하는 인증 정책은 아닙니다.
+실제 배포 때 `SWING_CORS_ORIGINS`를 프론트 도메인으로 제한하세요. CORS와 Bearer 소유권 검사는 별개입니다. HTTPS·로그인 rate limiting·계정 복구 운영도 검토합니다.
 
 ## 8. 실제 Supabase 자동 검증
 
@@ -203,6 +216,7 @@ Flutter에는 변경이 없습니다. 기존 영상 업로드는 계속 동작�
 이 작업은 **실제 DB에 테스트 회원과 분석 1건, Storage에 영상 1개를 생성**합니다.
 `e2e_...` ID로 구분하며 기존 데이터·신규 테스트 데이터 모두 자동 삭제하지 않습니다.
 별도 포트와 고유 worker ID로 mock 서버를 두 번 실행해 재시작 영속성까지 확인하고 서버를 종료합니다.
+이는 **mock 점수 + 실제 Supabase 저장·인증 검사**이며 실제 3D 추론 검증은 아닙니다. 기존 운영 DB 대신 승인된 검증 환경을 사용하고 migration을 자동 실행하지 않습니다.
 
 ```powershell
 $env:RUN_SUPABASE_INTEGRATION_TESTS="1"

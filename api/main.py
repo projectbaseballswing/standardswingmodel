@@ -11,14 +11,15 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
-from api import login, me, register, swings
+from api import login, me, register, swings, pose3d
 from api.analyses import lifespan
 from api.analyses import router as analyses_router
+from api.settings import settings
 
 logging.basicConfig(level=logging.INFO)
 
@@ -38,9 +39,9 @@ app = FastAPI(
 # 배포 시에는 allow_origins 를 실제 프론트 도메인으로 제한할 것.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=list(settings.cors_origins),
     # 와일드카드(*) origin 과 credentials 는 브라우저가 함께 허용하지 않는다.
-    # 현재 프론트는 쿠키/인증 헤더를 보내지 않으므로 False 로 둔다.
+    # Bearer 헤더는 allow_headers로 허용하며 쿠키 인증은 사용하지 않는다.
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,6 +57,25 @@ app.include_router(analyses_router)
 
 # 회원별 스윙 기록 목록 (달력/목록 화면용)
 app.include_router(swings.router)
+app.include_router(pose3d.router)
+
+
+@app.get('/api/local-video', include_in_schema=False)
+def local_video(request: Request, path: str, expires: int, signature: str):
+    """Explicit dev storage only; short-lived capability issued after ownership."""
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    from api.analyses import _storage
+    from api.storage import LocalPrivateStorage, StorageError
+    storage = _storage(request)
+    if not isinstance(storage, LocalPrivateStorage):
+        raise HTTPException(404, 'Not available')
+    try:
+        target = storage.capability_path(path, expires, signature)
+    except StorageError:
+        raise HTTPException(403, '유효한 영상 접근 권한이 없습니다.') from None
+    if not target.is_file():raise HTTPException(404, '저장된 영상을 찾을 수 없습니다.')
+    return FileResponse(target, headers={'Cache-Control':'private, no-store'})
 
 
 @app.exception_handler(SQLAlchemyError)

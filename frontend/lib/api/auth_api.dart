@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
+import '../data/session.dart';
 
 /// 서버 호출 중 발생한 오류. UI 에서 message 를 그대로 보여주면 된다.
 class ApiException implements Exception {
@@ -15,8 +16,14 @@ class ApiException implements Exception {
 
 /// 로그인 성공 시 서버가 돌려주는 정보.
 class LoginResult {
-  const LoginResult({required this.userId});
+  const LoginResult({
+    required this.userId,
+    required this.accessToken,
+    required this.expiresIn,
+  });
   final String userId;
+  final String accessToken;
+  final int expiresIn;
 }
 
 /// 내 정보 조회 결과. (POST /api/me)
@@ -48,10 +55,9 @@ class AuthApi {
 
   final http.Client _client;
 
-  Uri _uri(String path, [Map<String, dynamic>? query]) =>
-      Uri.parse('${ApiConfig.baseUrl}$path').replace(
-        queryParameters: query?.map((k, v) => MapEntry(k, '$v')),
-      );
+  Uri _uri(String path, [Map<String, dynamic>? query]) => Uri.parse(
+    '${ApiConfig.baseUrl}$path',
+  ).replace(queryParameters: query?.map((k, v) => MapEntry(k, '$v')));
 
   /// 이메일 중복확인. true = 사용 가능, false = 중복.
   ///
@@ -94,12 +100,32 @@ class AuthApi {
     required String id,
     required String password,
   }) async {
-    final res = await _post('/api/login', {
-      'id': id,
-      'password': password,
-    });
+    final res = await _post('/api/login', {'id': id, 'password': password});
     final body = _decode(res);
-    return LoginResult(userId: body['user'] as String);
+    if (body['success'] != true ||
+        body['user'] is! String ||
+        (body['user'] as String).isEmpty ||
+        body['access_token'] is! String ||
+        (body['access_token'] as String).isEmpty ||
+        body['token_type'] != 'bearer' ||
+        body['expires_in'] is! int ||
+        (body['expires_in'] as int) <= 0) {
+      throw ApiException('로그인 인증 응답이 올바르지 않습니다. 서버 버전을 확인해주세요.');
+    }
+    return LoginResult(
+      userId: body['user'],
+      accessToken: body['access_token'],
+      expiresIn: body['expires_in'],
+    );
+  }
+
+  Future<void> logout() async {
+    if (Session.instance.accessToken == null) return;
+    final res = await _post('/api/logout', {}).timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => throw ApiException('로그아웃 서버에 연결하지 못했습니다.'),
+    );
+    if (res.statusCode != 204) _decode(res);
   }
 
   /// 내 정보 조회.
@@ -128,7 +154,11 @@ class AuthApi {
     try {
       return await _client.post(
         _uri(path),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          if (path == '/api/me' || path == '/api/logout')
+            ...Session.instance.authorizationHeaders,
+        },
         body: jsonEncode(body),
       );
     } catch (_) {
@@ -149,7 +179,9 @@ class AuthApi {
     }
     // FastAPI 는 오류를 {"detail": "..."} 로 준다.
     final detail = body['detail'];
-    throw ApiException(detail is String ? detail : '요청을 처리하지 못했습니다. (${res.statusCode})');
+    throw ApiException(
+      detail is String ? detail : '요청을 처리하지 못했습니다. (${res.statusCode})',
+    );
   }
 
   void dispose() => _client.close();

@@ -2,6 +2,11 @@
 
 from pathlib import Path
 from urllib.parse import quote
+import hashlib
+import hmac
+import secrets
+import time
+import tempfile
 
 import httpx
 
@@ -31,6 +36,31 @@ class SupabaseStorage:
             headers={"Authorization": f"Bearer {key}", "apikey": key},
             timeout=httpx.Timeout(120.0, connect=10.0),
         )
+
+    def ensure_private(self):
+        response=self._request('GET',f"/bucket/{quote(self.bucket,safe='')}")
+        try:
+            info=response.json()
+            if info.get('id')!=self.bucket or info.get('public') is not False:
+                raise ValueError('Private bucket required')
+        except (ValueError,AttributeError):
+            raise StorageError('선택한 Storage bucket은 비공개여야 합니다.') from None
+
+    def download(self,bucket,path,max_bytes=32*1024*1024):
+        if bucket!=self.bucket:raise StorageError('Unexpected storage bucket')
+        endpoint=f"/object/authenticated/{quote(bucket,safe='')}/{quote(path,safe='/')}"
+        # Stream bounded compressed payload; never proxy arbitrary client URLs.
+        try:
+            with self.client.stream('GET',self.base_url+endpoint) as response:
+                if response.status_code==404:raise StorageObjectNotFound('저장된 파일을 찾을 수 없습니다.')
+                response.raise_for_status();chunks=[];size=0
+                for part in response.iter_bytes():
+                    size+=len(part)
+                    if size>max_bytes:raise StorageError('저장된 파일 크기가 허용 범위를 벗어났습니다.')
+                    chunks.append(part)
+                return b''.join(chunks)
+        except httpx.HTTPError:
+            raise StorageError('저장소에서 파일을 읽을 수 없습니다.') from None
 
     def _request(self, method: str, path: str, *, missing_is_not_found=False, **kwargs):
         try:
@@ -75,8 +105,61 @@ class SupabaseStorage:
         self.client.close()
 
 
+class LocalPrivateStorage:
+    """Explicit isolated development backend; no public static directory.
+
+    It is persistent disk storage, not a fixture. Real bearer ownership remains
+    mandatory. Supabase deployment must use the default supabase backend.
+    """
+    bucket='local-private'
+    expires_in=60
+    _signing_key=secrets.token_bytes(32)
+    def __init__(self,root):
+        self.root=Path(root).resolve()
+        project = Path(__file__).resolve().parents[1]
+        temporary = Path(tempfile.gettempdir()).resolve()
+        if (not root or self.root in (project, temporary)
+                or not any(self.root.is_relative_to(base) for base in (project, temporary))):
+            raise StorageError('Local storage must be a private subdirectory of the project or OS temporary directory')
+        self.root.mkdir(parents=True,exist_ok=True)
+    def _path(self,path):
+        target=(self.root/path).resolve()
+        if not target.is_relative_to(self.root) or target==self.root:
+            raise StorageError('Invalid storage path')
+        return target
+    def upload(self,path,local_path,content_type):
+        target=self._path(path);target.parent.mkdir(parents=True,exist_ok=True)
+        with target.open('xb') as out,open(local_path,'rb') as stream:
+            while chunk:=stream.read(1024*1024):out.write(chunk)
+    def download(self,bucket,path,max_bytes=32*1024*1024):
+        if bucket!=self.bucket:raise StorageError('Unexpected storage bucket')
+        target=self._path(path)
+        if not target.is_file():raise StorageObjectNotFound('저장된 파일을 찾을 수 없습니다.')
+        if target.stat().st_size>max_bytes:raise StorageError('File too large')
+        return target.read_bytes()
+    def signed_url(self,bucket,path):
+        # Local API serves videos through authenticated, bounded capability URLs.
+        if bucket!=self.bucket or not self._path(path).is_file():raise StorageObjectNotFound('저장된 파일을 찾을 수 없습니다.')
+        expiry=int(time.time())+self.expires_in
+        digest=hmac.new(self._signing_key,f'{path}:{expiry}'.encode(),hashlib.sha256).hexdigest()
+        return f'/api/local-video?path={quote(path,safe="")}&expires={expiry}&signature={digest}'
+    def capability_path(self,path,expires,signature):
+        expected=hmac.new(self._signing_key,f'{path}:{expires}'.encode(),hashlib.sha256).hexdigest()
+        if expires<int(time.time()) or expires>int(time.time())+self.expires_in or not hmac.compare_digest(expected,signature):
+            raise StorageError('Expired or invalid video capability')
+        if not path.startswith('swings/') or '/original' not in path:raise StorageError('Only videos use capability URLs')
+        return self._path(path)
+    def close(self):pass
+
 def create_storage():
-    return SupabaseStorage(
+    if settings.storage_backend=='local':
+        return LocalPrivateStorage(settings.local_storage_root)
+    if settings.storage_backend!='supabase':raise StorageError('Unknown storage backend')
+    storage=SupabaseStorage(
         settings.supabase_url, settings.supabase_service_role_key,
         settings.storage_bucket, settings.signed_url_seconds,
     )
+    try:storage.ensure_private()
+    except Exception:
+        storage.close();raise
+    return storage

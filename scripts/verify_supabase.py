@@ -1,4 +1,6 @@
-"""Opt-in real Supabase E2E. Creates labelled data and NEVER deletes it.
+"""Opt-in Supabase persistence/auth test with MOCK scoring; no 3D inference.
+
+Creates labelled data and NEVER deletes it. This is not real-video/model E2E.
 
 RUN_SUPABASE_INTEGRATION_TESTS=1 python scripts/verify_supabase.py --video <actual.mp4>
 Only IDs, check names and status codes are reported; never credentials or signed URLs.
@@ -114,8 +116,9 @@ def verify(video, report, save):
         report["alembic_current"] = current
         report["alembic_head"] = head
         rls = connection.execute(text("SELECT relname, relrowsecurity FROM pg_class "
-                                      "WHERE relnamespace='public'::regnamespace AND relname IN ('users','swings')")).all()
-        check(len(rls) == 2 and all(row[1] for row in rls), "RLS is not enabled on both tables")
+                                      "WHERE relnamespace=current_schema()::regnamespace "
+                                      "AND relname IN ('users','swings','auth_sessions','pose_3d')")).all()
+        check(len(rls) == 4 and all(row[1] for row in rls), "RLS is not enabled on all API tables")
         report["rls_enabled"] = True
     with httpx.Client(timeout=30) as remote:
         bucket = remote.get(settings.supabase_url.rstrip("/") + "/storage/v1/bucket/" + quote(settings.storage_bucket, safe=""),
@@ -158,8 +161,10 @@ def verify(video, report, save):
                     report["password_hash_verified"] = True
                     call(client, "POST", "/api/login", 401, json={"id": user_id, "password": "incorrect"})
                     call(client, "POST", "/api/login", 401, json={"id": uuid.uuid4().hex, "password": "incorrect"})
-                check(call(client, "POST", "/api/login", json={"id": user_id, "password": password}).json()["user"] == user_id,
-                      "login returned another user")
+                logged_in = call(client, "POST", "/api/login", json={"id": user_id, "password": password}).json()
+                check(logged_in["user"] == user_id and logged_in.get("token_type") == "bearer",
+                      "login returned another user or no bearer session")
+                client.headers["Authorization"] = "Bearer " + logged_in["access_token"]
                 check(call(client, "POST", "/api/me", json={"user": user_id}).json()["id"] == user_id, "me mismatch")
                 if iteration == 0:
                     with video.open("rb") as stream:
@@ -177,7 +182,12 @@ def verify(video, report, save):
                 for section in ("overall", "joints", "phases", "speed"):
                     section_result = call(client, "GET", f"/api/analyses/{analysis_id}/{section}").json()
                     if section == "speed":
-                        check(section_result["available"] is False, "speed placeholder changed")
+                        check(section_result == analysis["result"]["speed"], "speed feedback changed")
+                pose = call(client, "GET", f"/api/analyses/{analysis_id}/pose-3d", 422).json()
+                check(pose.get("error", {}).get("code") == "MOCK_HAS_NO_WORLD", "mock score invented World data")
+                del client.headers["Authorization"]
+                call(client, "GET", f"/api/analyses/{analysis_id}/pose-3d", 401)
+                client.headers["Authorization"] = "Bearer " + logged_in["access_token"]
                 video_result = call(client, "GET", f"/api/analyses/{analysis_id}/video").json()
                 signed = video_result["url"]
                 check(urlsplit(signed).hostname == urlsplit(settings.supabase_url).hostname, "signed URL origin mismatch")
@@ -201,6 +211,8 @@ def verify(video, report, save):
                 report["signed_url_not_persisted"] = True
                 if iteration == 1:
                     report["restart_persistence"] = True
+                call(client, "POST", "/api/logout")
+                call(client, "GET", f"/api/analyses/{analysis_id}", 401)
                 save()
         report["stage"] = "complete"
         report["passed"] = True
@@ -217,7 +229,8 @@ def main():
     if os.getenv("RUN_SUPABASE_INTEGRATION_TESTS") != "1":
         print("SKIP: set RUN_SUPABASE_INTEGRATION_TESTS=1 to create real test data")
         return 0
-    report = {"passed": False, "stage": "preflight", "test_data_deleted": False}
+    report = {"passed": False, "stage": "preflight", "test_data_deleted": False,
+              "scoring": "mock", "real_3d_inference": False}
     def save():
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

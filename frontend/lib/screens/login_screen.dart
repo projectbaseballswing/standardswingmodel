@@ -48,7 +48,11 @@ class _LoginScreenState extends State<LoginScreen> {
       final result = await _authApi.login(id: id, password: password);
       if (!mounted) return;
       // 로그인한 사용자를 세션에 저장(프로필·서버 호출에서 참조).
-      Session.instance.signIn(result.userId);
+      Session.instance.signIn(
+        result.userId,
+        accessToken: result.accessToken,
+        expiresIn: result.expiresIn,
+      );
       // 로그인 성공 → 스윙 목록 화면으로 이동 (뒤로가기로 로그인에 못 돌아오게 go 사용).
       context.go('/swings');
     } on ApiException catch (e) {
@@ -86,10 +90,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const Spacer(flex: 8),
               // 입력창
-              AppTextField(
-                hint: '아이디',
-                controller: _idController,
-              ),
+              AppTextField(hint: '아이디', controller: _idController),
               const SizedBox(height: 12),
               AppTextField(
                 hint: '비밀번호',
@@ -103,7 +104,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Text(
                     _errorMessage!,
                     style: const TextStyle(
-                        color: AppColors.error, fontSize: 13),
+                      color: AppColors.error,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               ],
@@ -116,8 +119,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     label: '회원가입',
                     onTap: () => context.push('/signup'),
                   ),
-                  const Text('  |  ',
-                      style: TextStyle(color: AppColors.link, fontSize: 13)),
+                  const Text(
+                    '  |  ',
+                    style: TextStyle(color: AppColors.link, fontSize: 13),
+                  ),
                   HoverLink(
                     label: '비밀번호 찾기',
                     onTap: () {

@@ -12,6 +12,7 @@ import tempfile
 import logging
 from datetime import datetime, timezone
 import json
+import hashlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -25,6 +26,7 @@ from api import schemas
 from api.jobs import Job, JobManager
 from api.database import User, get_db
 from api.settings import settings
+from api.auth import analysis_access
 from api.storage import StorageError, StorageObjectNotFound, create_storage
 from api.video_validation import video_type, validate_video_header
 from feedback.compare import MODEL_VERSION
@@ -36,7 +38,7 @@ FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "analysis_sample.j
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(analysis_access)])
 
 
 def _mock_report() -> dict:
@@ -60,6 +62,7 @@ async def lifespan(app: FastAPI):
         gemini_api_key=settings.gemini_api_key,
         gemini_model=settings.gemini_model,
         coaching_scope=settings.coaching_scope,
+        pose_storage_factory=lambda: create_storage(),
     )
     app.state.jobs = jobs
     try:
@@ -150,14 +153,15 @@ async def create_analysis(
     request: Request,
     video: UploadFile = File(..., description="스윙 영상 (mp4, mov 등)"),
     handedness: Literal["right", "left"] = Form(..., description="우타(right) / 좌타(left)"),
-    user_id: str | None = Form(None, description="로그인 응답의 user. 생략하면 사용자 미연결"),
+    user_id: str | None = Form(None, description="이전 클라이언트 호환 필드. 인증 토큰 소유자와 같아야 함"),
     recorded_at: datetime | None = Form(None, description="촬영 시각 ISO 8601, 시간대 포함. 생략하면 업로드 시각"),
     db: Session = Depends(get_db),
 ):
     """영상을 업로드하면 분석 작업을 등록합니다. 결과는 GET /api/analyses/{analysis_id} 로 조회합니다."""
     suffix, content_type = video_type(video.filename or "", video.content_type)
-    if user_id is not None and db.get(User, user_id) is None:
-        raise HTTPException(404, "사용자를 찾을 수 없습니다.")
+    if user_id is not None and user_id != request.state.user_id:
+        raise HTTPException(403, "업로드 소유자는 인증된 사용자와 일치해야 합니다.")
+    user_id = request.state.user_id
     if recorded_at is not None and recorded_at.tzinfo is None:
         raise HTTPException(422, "recorded_at에 시간대(Z 또는 +09:00 등)를 포함하세요.")
     storage = _storage(request)
@@ -165,16 +169,19 @@ async def create_analysis(
     job, handed_to_worker = None, False
     try:
         size = 0
+        digest = hashlib.sha256()
         with os.fdopen(fd, "wb") as out:
             while chunk := await video.read(1024 * 1024):
                 size += len(chunk)
+                digest.update(chunk)
                 if size > settings.max_upload_mb * 1024 * 1024:
                     raise HTTPException(413, f"영상은 {settings.max_upload_mb}MB 이하여야 합니다.")
                 await run_in_threadpool(out.write, chunk)
         if size == 0:
             raise HTTPException(422, "빈 영상 파일은 업로드할 수 없습니다.")
         await run_in_threadpool(validate_video_header, video_path, suffix)
-        info = {"type": "video", "filename": video.filename, "handedness": handedness, "suffix": suffix}
+        info = {"type": "video", "filename": video.filename, "handedness": handedness, "suffix": suffix,
+                "source_sha256":digest.hexdigest()}
         if settings.mock:
             info["mock"] = True
         job = await run_in_threadpool(
@@ -237,6 +244,7 @@ async def create_analysis_from_features(
         fps,
         {"type": "features", "filename": features.filename, "fps": fps},
         _mock_report() if settings.mock else None,
+        user_id=request.state.user_id,
     )
     return _to_analysis(job)
 
@@ -272,6 +280,8 @@ def get_video(request: Request, analysis_id: str):
     storage = _storage(request)
     try:
         url = storage.signed_url(job.storage_bucket, job.video_storage_path)
+        if url.startswith('/api/local-video?'):
+            url = str(request.base_url).rstrip('/') + url
     except StorageObjectNotFound as exc:
         raise HTTPException(404, str(exc)) from None
     except StorageError as exc:
