@@ -8,7 +8,7 @@ import numpy as np
 ################################################################
 
 # 영상 읽기
-def read_video(video_path):
+def read_video(video_path, *, timestamps_out=None):
     cap = cv2.VideoCapture(video_path)
 
     if not cap.isOpened():
@@ -31,6 +31,13 @@ def read_video(video_path):
             break
 
         frames.append(frame)
+        if timestamps_out is not None:
+            # Observe the same decode pass; preserve the original frames/FPS.
+            # Invalid decoder PTS later disables only the 3D display artifact.
+            try:
+                timestamps_out.append(float(cap.get(cv2.CAP_PROP_POS_MSEC)) / 1000.0)
+            except Exception:
+                timestamps_out.append(float('nan'))
 
     cap.release()
 

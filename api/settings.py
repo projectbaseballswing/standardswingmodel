@@ -18,6 +18,15 @@ from feedback.reference import DEFAULT_TEMPLATE_PATH
 
 @dataclass(frozen=True)
 class Settings:
+    # Existing team accounts and analyses remain in public. Staging can select
+    # one isolated schema explicitly; no account copying or fallback is used.
+    database_schema: str = os.getenv("SWING_DATABASE_SCHEMA") or "public"
+    cors_origins: tuple[str, ...] = tuple(
+        value.strip() for value in os.getenv("SWING_CORS_ORIGINS", "*").split(",") if value.strip()
+    )
+    storage_backend: str = os.getenv("SWING_STORAGE_BACKEND", "supabase")
+    local_storage_root: str = os.getenv("SWING_LOCAL_STORAGE_ROOT", "")
+    session_ttl_seconds: int = int(os.getenv("SWING_SESSION_TTL_SECONDS", "28800"))
     template_path: Path = Path(os.getenv("SWING_TEMPLATE_PATH", DEFAULT_TEMPLATE_PATH))
     yolo_weights: Path = Path(os.getenv("SWING_YOLO_WEIGHTS", DEFAULT_YOLO_WEIGHTS))
     pose_model: Path = Path(os.getenv("SWING_POSE_MODEL", DEFAULT_POSE_MODEL))

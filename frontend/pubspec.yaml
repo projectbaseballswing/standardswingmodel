@@ -36,6 +36,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   go_router: ^18.0.2
   http: ^1.2.2
+  # Reuse the renderer version validated by the 3D integration experiments.
+  three_js: 0.3.0
 
   # 스윙 촬영 (카메라 프리뷰 + 영상 녹화)
   camera: ^0.11.0+2

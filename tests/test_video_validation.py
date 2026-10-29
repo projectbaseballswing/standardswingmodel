@@ -35,7 +35,7 @@ def test_mime_and_extension_preserved(mock_client, mime, stored):
     assert response.status_code == 202
     with SessionLocal() as db:
         row = db.get(Swing, response.json()["analysis_id"])
-        assert row.user_id is None
+        assert row.user_id == mock_client.test_user_id
         assert row.content_type == stored
         assert row.video_storage_path.endswith("/original.mp4")
 

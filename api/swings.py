@@ -1,7 +1,7 @@
 """회원별 스윙 목록 조회. 목록 화면용 경량 응답이며 새 DB 테이블은 만들지 않는다.
 
-주의: 현재 프로젝트에는 인증 토큰/접근 권한 검사가 없다.
-user_id 경로 파라미터는 개발용 필터일 뿐 소유자 인증 수단이 아니다.
+검증된 Bearer 세션의 소유자와 user_id 경로가 일치해야 한다.
+기존 기록과 비교 계산은 보존하며 소유자 없는 기록을 임의 배정하지 않는다.
 """
 
 from __future__ import annotations
@@ -23,11 +23,12 @@ from api.schemas import (
     SwingListResponse,
 )
 from api.settings import settings
+from api.auth import user_path_access
 from feedback.llm_coach import generate_comparison_coaching
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", tags=["swings"])
+router = APIRouter(prefix="/api", tags=["swings"], dependencies=[Depends(user_path_access)])
 
 
 def _utc_datetime(value: datetime) -> datetime:
@@ -132,7 +133,8 @@ def list_user_swings(
 
     UI 표시 시각은 recorded_at이 우선이고 없으면 created_at(업로드 시각)을 사용한다.
     분석 전체 JSON과 Storage 객체 경로는 목록 응답에 포함하지 않는다.
-    JWT 인증/소유권 검사는 없으며 user_id는 조회 필터일 뿐 인증 수단이 아니다.
+    라우터의 Bearer 세션·소유권 검사를 통과한 본인의 기록만 조회한다.
+    user_id 자체는 인증 수단이 아니다.
     """
     if (year is None) != (month is None):
         raise HTTPException(422, "월별 조회에는 year와 month가 모두 필요합니다.")
@@ -227,7 +229,8 @@ def compare_with_previous(
     현재보다 이전인 가장 최근 1건이다. 결과는 DB(Swing.result)에서 읽으므로 서버
     재시작과 무관하게 조회된다. 직전 분석이 없으면 has_previous=false.
 
-    JWT 인증/소유권 검사는 없으며 user_id는 조회 필터일 뿐 인증 수단이 아니다.
+    라우터의 Bearer 세션·소유권 검사를 통과한 본인의 기록만 비교한다.
+    user_id 자체는 인증 수단이 아니다.
     """
     if db.get(User, user_id) is None:
         raise HTTPException(404, "사용자를 찾을 수 없습니다.")

@@ -229,3 +229,6 @@ data/*
 
 # 로컬 개발용 SQLite
 local.db
+
+# Private integration evidence: credentials, source clips and browser profiles.
+.local/

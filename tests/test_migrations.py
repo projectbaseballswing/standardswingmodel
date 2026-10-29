@@ -22,7 +22,7 @@ def test_fresh_database_matches_models(tmp_path):
     alembic(url, "upgrade", "head")
     alembic(url, "check")
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0002"
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0003"
         columns = {row[1] for row in db.execute("PRAGMA table_info(swings)")}
         assert {"user_id", "video_storage_path", "result", "worker_id"} <= columns
 

@@ -177,6 +177,22 @@ class _FeedbackBody extends StatelessWidget {
                   videoPath: videoPath,
                   api: api,
                 ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    key: const Key('open-swing-3d'),
+                    onPressed: () => context.push(
+                      '/analyses/${Uri.encodeComponent(analysisId)}/pose-3d',
+                    ),
+                    icon: const Icon(Icons.view_in_ar),
+                    label: const Text('3D 스윙 보기'),
+                  ),
+                ),
+                const Text(
+                  '이 영상에서 생성한 3D 추정 자세를 확인합니다.',
+                  style: TextStyle(fontSize: 12, color: AppColors.hint),
+                ),
                 const SizedBox(height: 16),
                 _ScoreCard(feedback: feedback),
                 const SizedBox(height: 12),

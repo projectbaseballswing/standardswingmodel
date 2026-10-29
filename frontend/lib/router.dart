@@ -1,4 +1,5 @@
 import 'package:go_router/go_router.dart';
+import 'features/swing_3d/user_swing_3d_screen.dart';
 
 import 'models/feedback.dart';
 import 'route_observer.dart';
@@ -31,6 +32,11 @@ final router = GoRouter(
     ),
     // 종합 피드백. 분석 id 로 결과를 조회한다.
     // 쿼리 first=1 이면 새 업로드 분석 완료를 polling한다. 과거 기록은 한 번 조회한다.
+    GoRoute(
+      path: '/analyses/:id/pose-3d',
+      builder: (context, state) =>
+          UserSwing3dScreen(analysisId: state.pathParameters['id']!),
+    ),
     GoRoute(
       path: '/analyses/:id',
       builder: (context, state) => OverallFeedbackScreen(

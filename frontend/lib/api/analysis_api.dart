@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart' show XFile;
 
 import 'api_config.dart';
 import 'auth_api.dart' show ApiException;
+import '../data/session.dart';
 
 /// 스윙 영상 업로드 결과. 등록된 분석 작업의 id 와 상태.
 class AnalysisCreated {
@@ -56,6 +57,7 @@ class AnalysisApi {
         .last
         .replaceAll(RegExp(r'[\x00-\x1f\x7f]'), '');
     final request = http.MultipartRequest('POST', _uri('/api/analyses'))
+      ..headers.addAll(Session.instance.authorizationHeaders)
       ..fields['handedness'] = isLeft ? 'left' : 'right'
       ..fields['user_id'] = userId
       ..fields['recorded_at'] = recordedAt.toUtc().toIso8601String();
@@ -210,7 +212,13 @@ class AnalysisApi {
 
   Future<http.Response> _get(Uri uri) async {
     try {
-      return await _client.get(uri, headers: {'Accept': 'application/json'});
+      return await _client.get(
+        uri,
+        headers: {
+          'Accept': 'application/json',
+          ...Session.instance.authorizationHeaders,
+        },
+      );
     } catch (_) {
       throw ApiException('서버에 연결할 수 없습니다. 네트워크를 확인해주세요.');
     }

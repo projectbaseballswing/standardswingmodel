@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
 import 'auth_api.dart' show ApiException;
+import '../data/session.dart';
 
 /// 사용자별 스윙 목록. userId는 조회 필터이며 인증 토큰이 아니다.
 class SwingApi {
@@ -31,7 +32,13 @@ class SwingApi {
     http.Response response;
     try {
       response = await _client
-          .get(uri, headers: {'Accept': 'application/json'})
+          .get(
+            uri,
+            headers: {
+              'Accept': 'application/json',
+              ...Session.instance.authorizationHeaders,
+            },
+          )
           .timeout(const Duration(seconds: 15));
     } catch (_) {
       throw ApiException('서버에 연결할 수 없습니다. 네트워크를 확인해주세요.');
