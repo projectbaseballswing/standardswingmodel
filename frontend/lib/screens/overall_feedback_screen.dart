@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../api/analysis_api.dart';
 import '../api/auth_api.dart' show ApiException;
 import '../data/feedback_repository.dart';
 import '../models/feedback.dart';
 import '../theme/app_theme.dart';
 import '../video/selected_video.dart';
+import '../widgets/body_part_art.dart';
 import '../widgets/swing_video.dart';
 import '../widgets/feedback_metrics.dart';
 
@@ -136,6 +138,7 @@ class _OverallFeedbackScreenState extends State<OverallFeedbackScreen> {
             feedback: snapshot.data!,
             analysisId: widget.analysisId,
             videoPath: widget.videoPath,
+            api: _repo.api,
           );
         },
       ),
@@ -148,12 +151,14 @@ class _FeedbackBody extends StatelessWidget {
   const _FeedbackBody({
     required this.feedback,
     required this.analysisId,
+    required this.api,
     this.videoPath,
   });
 
   final OverallFeedback feedback;
   final String analysisId;
   final String? videoPath;
+  final AnalysisApi api;
 
   @override
   Widget build(BuildContext context) {
@@ -167,7 +172,11 @@ class _FeedbackBody extends StatelessWidget {
               children: [
                 _dateLabel(feedback.recordedAt),
                 const SizedBox(height: 12),
-                _VideoRow(analysisId: analysisId, videoPath: videoPath),
+                _VideoRow(
+                  analysisId: analysisId,
+                  videoPath: videoPath,
+                  api: api,
+                ),
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
@@ -287,11 +296,17 @@ class _FeedbackBody extends StatelessWidget {
 // 상단: 날짜 아래 영상 2개
 // ---------------------------------------------------------------------------
 class _VideoRow extends StatelessWidget {
-  const _VideoRow({required this.analysisId, this.videoPath});
+  const _VideoRow({
+    required this.analysisId,
+    required this.api,
+    this.videoPath,
+  });
 
   final String analysisId;
 
   final String? videoPath;
+
+  final AnalysisApi api;
 
   @override
   Widget build(BuildContext context) {
@@ -305,6 +320,8 @@ class _VideoRow extends StatelessWidget {
               key: ValueKey((analysisId, videoPath)),
               analysisId: analysisId,
               videoPath: videoPath,
+              api: api,
+              preload: true,
             ),
           ),
         ),
@@ -321,7 +338,7 @@ class _VideoRow extends StatelessWidget {
   }
 }
 
-/// 정사각 비율 썸네일 틀 + 아래 라벨.
+/// 5:7(가로:세로) 비율 썸네일 틀 + 아래 라벨.
 class _ThumbFrame extends StatelessWidget {
   const _ThumbFrame({required this.label, required this.child});
 
@@ -333,7 +350,7 @@ class _ThumbFrame extends StatelessWidget {
     return Column(
       children: [
         AspectRatio(
-          aspectRatio: 1.05,
+          aspectRatio: 5 / 7,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: child,
@@ -400,87 +417,67 @@ class _ScoreCard extends StatelessWidget {
                 ),
               ),
             ),
+          const SizedBox(height: 4),
+          // 점수  / 100  [▼ 9]  (이전 70점)
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  feedbackNumber(feedback.totalScore),
+                  style: const TextStyle(
+                    fontSize: 38,
+                    height: 1.0,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Text(
+                  '/ 100',
+                  style: TextStyle(fontSize: 12, color: _gray),
+                ),
+                if (delta != null) ...[
+                  const SizedBox(width: 8),
+                  _DeltaBadge(delta: delta),
+                  const SizedBox(width: 8),
+                  Text(
+                    '(이전 ${feedback.previousTotalScore}점)',
+                    style: const TextStyle(fontSize: 10, color: _gray),
+                  ),
+                ],
+              ],
+            ),
+          ),
           const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 점수
-              Expanded(
-                flex: 4,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            feedbackNumber(feedback.totalScore),
-                            style: const TextStyle(
-                              fontSize: 44,
-                              height: 1.0,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.primary,
-                            ),
-                          ),
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 6, left: 2),
-                            child: Text(
-                              '/ 100',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: AppColors.hint,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (delta != null) ...[
-                      const SizedBox(height: 6),
-                      _DeltaBadge(delta: delta),
-                      const SizedBox(height: 2),
-                      Text(
-                        '(이전 ${feedback.previousTotalScore}점)',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.hint,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+          // 요약 분홍 박스
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF1F1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              feedback.summary,
+              style: const TextStyle(
+                fontSize: 13,
+                height: 15 / 13,
+                color: Color(0xFFD9534F),
               ),
-              const SizedBox(width: 12),
-              // 요약 분홍 박스
-              Expanded(
-                flex: 6,
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFDECEC),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    feedback.summary,
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      height: 1.4,
-                      color: Color(0xFFC0514F),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ],
       ),
     );
   }
 }
+
+/// 피그마 보조 글자색.
+const Color _gray = Color(0xFF8E8E93);
 
 /// ▼9 / ▲8 같은 증감 배지.
 class _DeltaBadge extends StatelessWidget {
@@ -491,24 +488,21 @@ class _DeltaBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final up = delta > 0;
-    final color = up ? const Color(0xFF2E9E5B) : AppColors.primary;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          up ? Icons.arrow_drop_up : Icons.arrow_drop_down,
-          size: 18,
-          color: color,
+    final style = _toneStyle(up ? _Tone.good : _Tone.bad);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      decoration: BoxDecoration(
+        color: style.soft,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        '${up ? '▲' : '▼'} ${feedbackNumber(delta.abs())}',
+        style: TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w700,
+          color: style.color,
         ),
-        Text(
-          feedbackNumber(delta.abs()),
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: color,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -572,9 +566,10 @@ class _CategoryCardState extends State<_CategoryCard> {
                     children: [
                       Text(
                         '${spec.items.length}곳',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: AppColors.hint,
+                          fontWeight: FontWeight.w500,
+                          color: tone.color,
                         ),
                       ),
                       Icon(
@@ -582,7 +577,7 @@ class _CategoryCardState extends State<_CategoryCard> {
                             ? Icons.keyboard_arrow_up
                             : Icons.keyboard_arrow_down,
                         size: 18,
-                        color: AppColors.hint,
+                        color: tone.color,
                       ),
                     ],
                   ),
@@ -617,7 +612,19 @@ class _ItemRow extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _PartIcon(part: item.part, tone: tone),
+        BodyPartThumb(
+          part: item.part,
+          region: bodyRegionOf(
+            key: item.key,
+            label: item.label,
+            part: item.part,
+          ),
+          tone: switch (tone) {
+            _Tone.good => BodyTone.good,
+            _Tone.bad => BodyTone.bad,
+            _Tone.neutral => BodyTone.neutral,
+          },
+        ),
         const SizedBox(width: 10),
         Expanded(
           child: Column(
@@ -694,45 +701,7 @@ class _ItemRow extends StatelessWidget {
             ],
           ),
         ),
-        const Padding(
-          padding: EdgeInsets.only(left: 4, top: 2),
-          child: Icon(Icons.chevron_right, size: 18, color: AppColors.hint),
-        ),
       ],
-    );
-  }
-}
-
-/// 부위 아이콘(연한 색 알약 배경 + 아이콘). 실제 일러스트가 생기면 교체.
-class _PartIcon extends StatelessWidget {
-  const _PartIcon({required this.part, required this.tone});
-
-  final BodyPart part;
-  final _Tone tone;
-
-  @override
-  Widget build(BuildContext context) {
-    final style = _toneStyle(tone);
-    IconData icon;
-    switch (part) {
-      case BodyPart.leg:
-        icon = Icons.directions_walk;
-        break;
-      case BodyPart.arm:
-        icon = Icons.sports_handball;
-        break;
-      case BodyPart.torso:
-        icon = Icons.accessibility_new;
-        break;
-    }
-    return Container(
-      width: 40,
-      height: 48,
-      decoration: BoxDecoration(
-        color: style.soft,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Icon(icon, size: 22, color: style.color),
     );
   }
 }

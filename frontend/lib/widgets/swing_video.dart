@@ -7,12 +7,14 @@ import 'package:video_player/video_player.dart';
 import '../api/analysis_api.dart';
 import '../api/auth_api.dart' show ApiException;
 import '../route_observer.dart';
+import '../theme/app_theme.dart';
 import '../video/selected_video.dart';
 
 typedef SwingVideoControllerFactory =
     VideoPlayerController Function({String? videoPath, Uri? url});
 
-/// 로컬 영상 우선. 과거 영상은 탭할 때만 URL과 스트림을 요청한다.
+/// 로컬 영상 우선. 과거 영상은 [preload]가 true면 화면 진입 시, 아니면 탭할 때
+/// URL과 스트림을 요청한다.
 /// URL은 이 위젯의 controller 안에서만 사용하며 영구 저장하지 않는다.
 class SwingVideo extends StatefulWidget {
   const SwingVideo({
@@ -24,6 +26,7 @@ class SwingVideo extends StatefulWidget {
     this.now,
     this.fit = BoxFit.cover,
     this.autoplay = false,
+    this.preload = false,
   });
 
   final String analysisId;
@@ -33,6 +36,9 @@ class SwingVideo extends StatefulWidget {
   final DateTime Function()? now;
   final BoxFit fit;
   final bool autoplay;
+
+  /// 저장된 영상도 진입 즉시 불러와 첫 화면을 보여준다(재생은 하지 않음).
+  final bool preload;
 
   @override
   State<SwingVideo> createState() => _SwingVideoState();
@@ -70,7 +76,9 @@ class _SwingVideoState extends State<SwingVideo>
     WidgetsBinding.instance.addObserver(this);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
-    if (_local) unawaited(_load(play: widget.autoplay && !kIsWeb));
+    if (_local || widget.preload) {
+      unawaited(_load(play: widget.autoplay && !kIsWeb));
+    }
   }
 
   @override
@@ -98,7 +106,9 @@ class _SwingVideoState extends State<SwingVideo>
       _position = Duration.zero;
       _error = null;
       _useStoredVideo = false;
-      if (_local) unawaited(_load(play: widget.autoplay && !kIsWeb));
+      if (_local || widget.preload) {
+        unawaited(_load(play: widget.autoplay && !kIsWeb));
+      }
     }
   }
 
@@ -404,20 +414,27 @@ class _SwingVideoState extends State<SwingVideo>
             child: SizedBox(
               width: c.value.size.width,
               height: c.value.size.height,
-              child: VideoPlayer(c),
+              // 웹에서는 영상이 HTML <video>라 탭을 가로챈다. 탭이 위의
+              // GestureDetector로 가야 재생 중에도 눌러서 정지할 수 있다.
+              child: IgnorePointer(child: VideoPlayer(c)),
             ),
           ),
           if (!c.value.isPlaying)
-            Container(
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.35),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.play_arrow,
-                color: Colors.white,
-                size: 28,
+            // 피그마: 34px 흰 원(92% 불투명) 위 빨간 재생 삼각형.
+            Center(
+              child: Container(
+                width: 34,
+                height: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow,
+                  color: AppColors.primary,
+                  size: 20,
+                ),
               ),
             ),
           Positioned(

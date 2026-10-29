@@ -150,6 +150,29 @@ void main() {
   );
 
   testWidgets(
+    'swiping the calendar sideways moves to the next/previous month',
+    (tester) async {
+      final requests = <http.Request>[];
+      final repository = repositoryWith((request) async {
+        requests.add(request);
+        return listing([]);
+      });
+      final now = DateTime.now();
+      await showList(tester, repository);
+      await tester.pumpAndSettle();
+      await tester.fling(find.text('15'), const Offset(-300, 0), 1000);
+      await tester.pumpAndSettle();
+      final next = DateTime(now.year, now.month + 1);
+      expect(requests.last.url.queryParameters['month'], '${next.month}');
+      expect(find.text('${next.month}월'), findsOneWidget);
+      await tester.fling(find.text('15'), const Offset(300, 0), 1000);
+      await tester.pumpAndSettle();
+      expect(requests.last.url.queryParameters['month'], '${now.month}');
+      expect(requests.length, 3);
+    },
+  );
+
+  testWidgets(
     'records are grouped by local day, decimals are visible, completed history opens',
     (tester) async {
       final now = DateTime.now();
