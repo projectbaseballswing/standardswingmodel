@@ -120,6 +120,13 @@ class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
     _load();
   }
 
+  // 왼쪽으로 밀면(손가락이 오른쪽→왼쪽) 다음 달, 오른쪽으로 밀면 이전 달.
+  void _onCalendarSwipe(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity.abs() < 200) return;
+    _changeMonth(velocity < 0 ? 1 : -1);
+  }
+
   List<Swing> _swingsOn(DateTime day) =>
       _swings.where((s) => s.isOnDay(day)).toList()
         ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
@@ -152,7 +159,12 @@ class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
             children: [
               _header(),
               const SizedBox(height: 16),
-              _calendar(),
+              // 달력을 좌우로 밀면 이전/다음 달로 넘어간다.
+              GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onHorizontalDragEnd: _onCalendarSwipe,
+                child: _calendar(),
+              ),
               _listContent(selected, daySwings),
             ],
           ),
