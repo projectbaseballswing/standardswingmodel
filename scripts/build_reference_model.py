@@ -201,6 +201,10 @@ def main() -> None:
     for key in ("swing_time_ms", "peak_hand_speed", "plant_to_impact_ms"):
         values = np.asarray([r[key] for r in speed_rows], dtype=float)
         values = values[np.isfinite(values)]
+        if key == "peak_hand_speed":
+            # 속도 점수 기준. 분위수는 튄 값에 덜 흔들리므로 자르기 전 값으로 낸다.
+            payload["speed_peak_hand_speed_median"] = np.asarray(float(np.median(values)))
+            payload["speed_peak_hand_speed_p90"] = np.asarray(float(np.percentile(values, 90)))
         low, high = np.percentile(values, [5, 95])  # 추적 실패로 튄 값 제외
         values = values[(values >= low) & (values <= high)]
         payload[f"speed_{key}_mean"] = np.asarray(float(values.mean()))
@@ -235,7 +239,7 @@ def main() -> None:
     payload["phase_keys"] = np.asarray([key for key, *_ in PHASES], dtype=object)
     payload["phase_points"] = np.asarray(PHASE_POINTS)
     payload["metadata_json"] = json.dumps({
-        "model_version": "0.2-draft",
+        "model_version": "0.2.1-draft",
         "built_from": str(args.skeleton_dir),
         "swings_total": len(files),
         "swings_used": used,

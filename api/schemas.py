@@ -68,7 +68,9 @@ class OverallFeedback(BaseModel):
     model_version: str = Field(description="비교 모델 버전. 값의 의미가 바뀌면 올라간다")
     available: bool = Field(True, description="이 피드백을 계산할 수 있었는지")
     reliability: Reliability = Field("medium", description="값의 신뢰도")
-    score: Optional[float] = Field(None, description="0~100. 프로 선수 스윙이 기준과 보통 떨어진 거리를 80점으로 환산")
+    score: Optional[float] = Field(None, description="0~100. 0.2.1 부터 자세 점수 70% + 속도 점수 30%. 평균적인 프로가 80점")
+    posture_score: Optional[float] = Field(None, description="자세만 본 점수. 프로 선수 스윙이 기준과 보통 떨어진 거리를 80점으로 환산")
+    speed_score: Optional[float] = Field(None, description="최대 손 속도 점수. 프로 중앙값 80점, 상위 10% 100점")
     distance: Optional[float] = Field(None, description="기준 템플릿과의 거리")
     typical_pro_distance: Optional[float] = Field(None, description="80점에 해당하는 거리")
     group_scores: List[GroupScore]

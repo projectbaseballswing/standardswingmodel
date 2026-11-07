@@ -24,6 +24,12 @@ from feedback.swing_features import FEATURE_NAMES_KO, FEATURE_UNITS, compute_fea
 
 # 점수: 기준 스윙이 평균에서 떨어진 거리(typical_distance)를 80점으로 둔다
 SCORE_AT_TYPICAL = 0.8
+# 거리를 제곱해서 환산한다. 1제곱이면 프로 스윙을 '가만히 서 있는 자세'로 바꿔도 70점이 나왔다.
+# 2제곱이면 프로 보통 거리의 1.5배 -> 60점, 2배 -> 41점.
+SCORE_EXPONENT = 2.0
+# 종합 점수 = 자세 점수와 손 속도 점수의 가중 평균. 자세 곡선은 시간 정규화돼 있어서
+# 속도가 빠지면 느리거나 거의 안 움직인 스윙도 높은 점수를 받는다.
+SPEED_SCORE_WEIGHT = 0.3
 
 # 자세 차이 판정 (단위: 기준 스윙들의 편차)
 LEVEL_CAUTION, LEVEL_WARNING = 1.0, 2.0
@@ -99,7 +105,16 @@ def _r(value: float, digits: int = 2) -> Optional[float]:
 def distance_to_score(distance: float, typical: float) -> Optional[float]:
     if not np.isfinite(distance) or typical <= 0:
         return None
-    return round(100.0 * SCORE_AT_TYPICAL ** (distance / typical), 1)
+    return round(100.0 * SCORE_AT_TYPICAL ** ((distance / typical) ** SCORE_EXPONENT), 1)
+
+
+def speed_to_score(speed: float, median: float, p90: float) -> Optional[float]:
+    """최대 손 속도 -> 점수. 프로 중앙값이 80점, 프로 상위 10%가 100점, 정지가 0점."""
+    if speed is None or not np.isfinite(speed) or median <= 0:
+        return None
+    if speed <= median:
+        return round(80.0 * speed / median, 1)
+    return round(80.0 + 20.0 * min(1.0, (speed - median) / max(p90 - median, 1e-6)), 1)
 
 
 def level_of(z: float, caution: float = LEVEL_CAUTION, warning: float = LEVEL_WARNING) -> str:
@@ -235,11 +250,21 @@ class SwingComparisonV2:
             warnings.append(f"영상에 담기지 않아 분석하지 못한 구간: {', '.join(missing)}")
         quality["warnings"] = warnings
 
+        posture_score = distance_to_score(distance, self.model.typical_distance)
+        speed_score = None
+        if self.model.peak_speed_reference is not None:
+            speed_score = speed_to_score(self._peak_hand_speed(), *self.model.peak_speed_reference)
+        score = posture_score
+        if posture_score is not None and speed_score is not None:
+            score = round((1 - SPEED_SCORE_WEIGHT) * posture_score + SPEED_SCORE_WEIGHT * speed_score, 1)
+
         return {
             "model_version": self.model.model_version,
             "available": self.available,
             "reliability": self.reliability,
-            "score": distance_to_score(distance, self.model.typical_distance),
+            "score": score,
+            "posture_score": posture_score,
+            "speed_score": speed_score,
             "distance": _r(distance, 3),
             "typical_pro_distance": _r(self.model.typical_distance, 3),
             "group_scores": group_scores,
@@ -500,15 +525,19 @@ class SwingComparisonV2:
     # ------------------------------------------------------------------
     # 속도
     # ------------------------------------------------------------------
+    def _peak_hand_speed(self) -> Optional[float]:
+        """임팩트 앞 5프레임 ~ 뒤 2프레임의 최대 손 속도. 기준 모델을 만들 때와 같은 범위다."""
+        if self.events.impact is None:
+            return None
+        window = self.speed[max(0, self.events.impact - 5):min(len(self.speed), self.events.impact + 3)]
+        return float(np.max(window)) if len(window) else None
+
     def speed_feedback(self) -> Dict[str, Any]:
         events = self.events
         measured: Dict[str, Optional[float]] = {"swing_time_ms": None, "peak_hand_speed": None, "plant_to_impact_ms": None}
         if events.impact is not None and events.swing_start is not None:
             measured["swing_time_ms"] = (events.impact - events.swing_start) / self.fps * 1000
-        if events.impact is not None:
-            window = self.speed[max(0, events.impact - 5):min(len(self.speed), events.impact + 3)]
-            if len(window):
-                measured["peak_hand_speed"] = float(np.max(window))
+        measured["peak_hand_speed"] = self._peak_hand_speed()
         if events.impact is not None and events.foot_plant is not None:
             measured["plant_to_impact_ms"] = (events.impact - events.foot_plant) / self.fps * 1000
 

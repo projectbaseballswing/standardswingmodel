@@ -119,10 +119,31 @@ def compute_features(pixel_landmarks: np.ndarray) -> np.ndarray:
     return np.stack(columns, axis=1)
 
 
+def _torso_scale_per_frame(pixel_landmarks: np.ndarray, zoom_frame) -> np.ndarray:
+    """프레임별 몸통 길이(어깨 중심 ~ 골반 중심) 중앙값. 확대 지점이 있으면 앞뒤를 따로 계산한다.
+
+    어깨 너비는 카메라가 타자를 비스듬히 볼수록 좁게 찍혀서, 그걸로 나눈 속도는 촬영 각도에 따라
+    달라진다 (프로 887개: 각도 지표와 상관 -0.31). 몸통 길이는 각도에 둔감하다 (상관 +0.06).
+    """
+    shoulder = (pixel_landmarks[:, LEAD_SHOULDER, :2] + pixel_landmarks[:, REAR_SHOULDER, :2]) / 2
+    hip = (pixel_landmarks[:, LEAD_HIP, :2] + pixel_landmarks[:, REAR_HIP, :2]) / 2
+    length = np.linalg.norm(shoulder - hip, axis=1)
+
+    def median(values: np.ndarray) -> float:
+        value = float(np.nanmedian(values)) if np.isfinite(values).any() else float("nan")
+        return value if np.isfinite(value) and value > 1 else 1.0
+
+    scale = np.full(len(pixel_landmarks), median(length), dtype=float)
+    if zoom_frame is not None:
+        scale[:zoom_frame] = median(length[:zoom_frame])
+        scale[zoom_frame:] = median(length[zoom_frame:])
+    return scale
+
+
 def hand_speed(pixel_landmarks: np.ndarray, fps: float) -> np.ndarray:
-    """손 중심 속도 (몸 크기 / 초). 프레임 수와 같은 길이로 맞춘다."""
+    """손 중심 속도 (몸통 길이 / 초). 프레임 수와 같은 길이로 맞춘다."""
     arr = np.asarray(pixel_landmarks, dtype=float)
-    scale = _scale_per_frame(arr, find_zoom_frame(arr))
+    scale = _torso_scale_per_frame(arr, find_zoom_frame(arr))
     hand = (arr[:, LEAD_WRIST, :2] + arr[:, REAR_WRIST, :2]) / 2
     x = _smooth(_interpolate_nan(hand[:, 0])) / scale
     y = _smooth(_interpolate_nan(hand[:, 1])) / scale
