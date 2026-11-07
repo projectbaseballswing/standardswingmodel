@@ -239,7 +239,7 @@ def main() -> None:
     payload["phase_keys"] = np.asarray([key for key, *_ in PHASES], dtype=object)
     payload["phase_points"] = np.asarray(PHASE_POINTS)
     payload["metadata_json"] = json.dumps({
-        "model_version": "0.2.1-draft",
+        "model_version": "0.2.2-draft",
         "built_from": str(args.skeleton_dir),
         "swings_total": len(files),
         "swings_used": used,

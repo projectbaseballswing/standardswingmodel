@@ -4,6 +4,11 @@
 각도는 그 자체로 크기와 무관하다. 좌타 영상은 추출 단계에서 좌우반전되어 우타 기준으로 통일돼 있다.
 
 주의: 기울기 계열(상체/어깨/골반)은 화면 기준이라 카메라를 세워서 찍었다고 가정한다.
+
+깊이(z): 저장된 z 는 MediaPipe 이미지 z 에 화면 너비를 곱한 값인데, x, y 보다 약 3배 크게 나온다.
+같은 추론의 월드 좌표(미터)와 맞춰 보면 배율 하나로 거의 일치한다 (프로 49개: 상관 +0.98,
+배율 중앙 0.34, 영상 간 변동 11%, 해상도·사람 크기·좌우타와 무관). 보정 없이 쓰면 뼈 길이가
+프레임마다 20~38% 흔들려서 예전(0.1) 피처가 왜곡됐다.
 """
 
 from __future__ import annotations
@@ -30,6 +35,9 @@ from feedback.events import (
     _smooth,
     find_zoom_frame,
 )
+
+# 이미지 z -> x, y 와 같은 단위로 맞추는 배율 (모듈 설명 참고)
+DEPTH_SCALE = 0.34
 
 FEATURE_NAMES: List[str] = [
     "lead_elbow_angle",      # 앞팔 팔꿈치 각도
@@ -78,8 +86,13 @@ def _angle(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> np.ndarray:
 
 
 def _fill(points: np.ndarray) -> np.ndarray:
-    """(T, 2) 좌표의 결측을 메우고 부드럽게 한다."""
-    return np.stack([_smooth(_interpolate_nan(points[:, c])) for c in range(2)], axis=1)
+    """(T, D) 좌표의 결측을 메우고 부드럽게 한다."""
+    return np.stack([_smooth(_interpolate_nan(points[:, c])) for c in range(points.shape[1])], axis=1)
+
+
+def depth_points(pixel_landmarks: np.ndarray, joint: int) -> np.ndarray:
+    """(T, 3) 관절 좌표. z 에 DEPTH_SCALE 을 곱해 x, y 와 같은 픽셀 단위로 맞춘다."""
+    return _fill(pixel_landmarks[:, joint, :3] * np.array([1.0, 1.0, DEPTH_SCALE]))
 
 
 def compute_features(pixel_landmarks: np.ndarray) -> np.ndarray:
@@ -88,6 +101,10 @@ def compute_features(pixel_landmarks: np.ndarray) -> np.ndarray:
     scale = _scale_per_frame(arr, find_zoom_frame(arr)).reshape(-1, 1)
 
     joint = {idx: _fill(arr[:, idx, :2]) for idx in range(12)}
+    # 팔꿈치 각도만 3D 로 잰다. 팔은 몸에 가려지고 카메라 쪽으로 뻗어서 2D 각도가 크게 틀어진다.
+    # 무릎은 2D 가 더 안정적이었다 (프로 49개: 임팩트 앞 무릎 편차 2D 9.1도, 3D 12.6도).
+    arm = {idx: depth_points(arr, idx) for idx in (LEAD_SHOULDER, REAR_SHOULDER, LEAD_ELBOW, REAR_ELBOW,
+                                                  LEAD_WRIST, REAR_WRIST)}
     shoulder_center = (joint[LEAD_SHOULDER] + joint[REAR_SHOULDER]) / 2
     hip_center = (joint[LEAD_HIP] + joint[REAR_HIP]) / 2
     hand_center = (joint[LEAD_WRIST] + joint[REAR_WRIST]) / 2
@@ -102,8 +119,8 @@ def compute_features(pixel_landmarks: np.ndarray) -> np.ndarray:
 
     torso = shoulder_center - hip_center
     columns = [
-        _angle(joint[LEAD_SHOULDER], joint[LEAD_ELBOW], joint[LEAD_WRIST]),
-        _angle(joint[REAR_SHOULDER], joint[REAR_ELBOW], joint[REAR_WRIST]),
+        _angle(arm[LEAD_SHOULDER], arm[LEAD_ELBOW], arm[LEAD_WRIST]),
+        _angle(arm[REAR_SHOULDER], arm[REAR_ELBOW], arm[REAR_WRIST]),
         _angle(joint[LEAD_HIP], joint[LEAD_KNEE], joint[LEAD_ANKLE]),
         _angle(joint[REAR_HIP], joint[REAR_KNEE], joint[REAR_ANKLE]),
         90.0 - tilt(torso),  # 0이면 똑바로 선 자세, +면 투수 쪽으로 기울어짐
