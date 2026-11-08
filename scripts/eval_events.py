@@ -38,9 +38,15 @@ def main() -> None:
     parser.add_argument("--skeleton-dir", default="data/skeletons")
     parser.add_argument("--since", default=None, help="이 날짜(YYYY-MM-DD) 이후 라벨만 사용")
     parser.add_argument("--details", action="store_true", help="오차가 큰 사례 출력")
+    parser.add_argument("--rules-only", action="store_true", help="LSTM 이벤트 모델 없이 규칙 감지기만 평가")
+    parser.add_argument("--test-only", action="store_true",
+                        help="data/event_test_split.json 의 시험용 라벨만 평가 (LSTM 학습에 안 쓴 선수)")
     args = parser.parse_args()
 
     rows = list(csv.DictReader(Path(args.labels).open(encoding="utf-8-sig")))
+    if args.test_only:
+        split = json.loads(Path("data/event_test_split.json").read_text(encoding="utf-8"))
+        rows = [r for r in rows if r["video_id"] in set(split["test_videos"])]
     if args.since:
         rows = [r for r in rows if r.get("labeled_at", "") >= args.since]
     print(f"라벨 {len(rows)}개")
@@ -60,6 +66,7 @@ def main() -> None:
             meta["fps"],
             clip_start=num(row.get("clip_start")) or 0,
             clip_end=num(row.get("clip_end")),
+            use_event_model=not args.rules_only,
         ).as_dict()
 
         for key in KEYS:

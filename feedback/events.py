@@ -193,6 +193,8 @@ def detect_events(
     clip_end: Optional[int] = None,
     pose_templates: Optional[Dict[str, Tuple[np.ndarray, np.ndarray]]] = None,
     use_pose_templates: bool = True,
+    use_event_model: bool = True,
+    event_model=None,
 ) -> SwingEvents:
     """관절 좌표(원본 프레임 좌표, (T, 12, 3))에서 이벤트를 찾는다.
 
@@ -305,8 +307,40 @@ def detect_events(
         events.follow_end = end
         events.warnings.append("임팩트 이후 프레임이 없습니다.")
 
+    if use_event_model:
+        from feedback.event_lstm import load_event_model  # event_lstm 이 이 모듈을 import 해서 여기서 불러온다
+
+        model = event_model if event_model is not None else load_event_model()
+        if model is not None:
+            _apply_event_model(events, model, arr, fps, start, clip_end)
+
     _check_order(events)
     return events
+
+
+def _apply_event_model(events: SwingEvents, model, arr: np.ndarray, fps: float, start: int,
+                       clip_end: Optional[int]) -> None:
+    """LSTM 이 규칙보다 나았던 이벤트(model.use_events)를 LSTM 값으로 바꾼다 (docs/lstm-event-model.md).
+
+    LSTM 이 '없음' 으로 본 이벤트는 규칙 값을 그대로 둔다. 바꾼 뒤 규칙으로 찾은 이벤트와 순서가
+    어긋나면 그 규칙 값을 LSTM 값으로 바꾸거나, LSTM 도 없으면 비운다.
+    """
+    predicted = model.predict(arr, fps, start, clip_end)
+    for key in model.use_events:
+        if predicted.get(key) is not None:
+            setattr(events, key, predicted[key])
+
+    if events.foot_lift is not None and events.foot_plant is not None and events.foot_lift >= events.foot_plant:
+        lift = predicted.get("foot_lift")
+        events.foot_lift = lift if lift is not None and lift < events.foot_plant else None
+    if events.follow_end is not None and events.impact is not None and events.follow_end <= events.impact:
+        follow = predicted.get("follow_end")
+        events.follow_end = follow if follow is not None and follow > events.impact else None
+
+    # 규칙이 못 찾았다고 남긴 경고 중 LSTM 이 찾은 것은 지운다
+    found = {"스윙 시작을": events.swing_start, "앞발 착지를": events.foot_plant}
+    events.warnings = [w for w in events.warnings
+                       if not any(w.startswith(prefix) and value is not None for prefix, value in found.items())]
 
 
 def _check_order(events: SwingEvents) -> None:
