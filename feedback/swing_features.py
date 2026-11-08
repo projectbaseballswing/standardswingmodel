@@ -9,6 +9,13 @@
 같은 추론의 월드 좌표(미터)와 맞춰 보면 배율 하나로 거의 일치한다 (프로 49개: 상관 +0.98,
 배율 중앙 0.305, 범위 0.265~0.346, 영상 간 변동 6%, 해상도·사람 크기·좌우타와 무관).
 보정 없이 쓰면 뼈 길이가 프레임마다 20~38% 흔들려서 예전(0.1) 피처가 왜곡됐다.
+프로 전체(890개)로 다시 재도 배율 중앙 0.301, 영상 간 변동 6.4% 였다.
+
+회전(어깨/골반 회전, 꼬임)은 위에서 내려다본 방향(x, z)으로 잰다. 보정한 이미지 z 로 잰 값과
+월드 좌표로 잰 값이 거의 같아서 (프로 743개: 상관 0.99, 차이 중앙값 3~4도) 사용자 영상에서
+월드 좌표가 없어도 같은 값을 낼 수 있게 이미지 좌표로 계산한다.
+절대 회전각은 카메라가 타자를 보는 방향에 따라 통째로 밀린다 (프로 간 편차 약 16도).
+어깨와 골반의 차이(꼬임)는 카메라 방향과 무관하다 (편차 약 7도).
 """
 
 from __future__ import annotations
@@ -41,7 +48,9 @@ DEPTH_SCALE = 0.30
 # 영상별로 잰 배율이 이 범위를 벗어나면 그 영상의 깊이 추정을 믿지 않는다 (프로 영상 분포 바깥)
 DEPTH_SCALE_RANGE = (0.25, 0.36)
 # 깊이(z)를 쓰는 피처. 깊이 추정이 불안정한 영상에서는 측정 불가로 뺀다.
-DEPTH_FEATURES = ("lead_elbow_angle", "rear_elbow_angle")
+DEPTH_FEATURES = (
+    "lead_elbow_angle", "rear_elbow_angle", "shoulder_turn", "hip_turn", "hip_shoulder_separation",
+)
 
 FEATURE_NAMES: List[str] = [
     "lead_elbow_angle",      # 앞팔 팔꿈치 각도
@@ -57,6 +66,9 @@ FEATURE_NAMES: List[str] = [
     "lead_ankle_y_from_hip",  # 골반 기준 앞발 높이
     "shoulder_x_from_hip",   # 골반 기준 어깨 앞뒤 위치 (상체 쏠림)
     "shoulder_y_from_hip",   # 골반 기준 어깨 높이
+    "shoulder_turn",         # 어깨 회전 (위에서 본 어깨선 방향, +면 투수 쪽으로 열림)
+    "hip_turn",              # 골반 회전
+    "hip_shoulder_separation",  # 어깨 회전 - 골반 회전 (-면 어깨가 골반보다 닫혀 있음)
 ]
 
 FEATURE_NAMES_KO: Dict[str, str] = {
@@ -73,10 +85,16 @@ FEATURE_NAMES_KO: Dict[str, str] = {
     "lead_ankle_y_from_hip": "앞발 높이",
     "shoulder_x_from_hip": "상체 앞뒤 쏠림",
     "shoulder_y_from_hip": "상체 높이",
+    "shoulder_turn": "어깨 회전",
+    "hip_turn": "골반 회전",
+    "hip_shoulder_separation": "어깨-골반 꼬임",
 }
 
+ROTATION_UNITS_DEG = ("torso_lean", "shoulder_tilt", "hip_tilt", "shoulder_turn", "hip_turn",
+                      "hip_shoulder_separation")
+
 FEATURE_UNITS: Dict[str, str] = {
-    name: ("deg" if name.endswith("angle") or name in ("torso_lean", "shoulder_tilt", "hip_tilt") else "body")
+    name: ("deg" if name.endswith("angle") or name in ROTATION_UNITS_DEG else "body")
     for name in FEATURE_NAMES
 }
 
@@ -97,6 +115,25 @@ def _fill(points: np.ndarray) -> np.ndarray:
 def depth_points(pixel_landmarks: np.ndarray, joint: int) -> np.ndarray:
     """(T, 3) 관절 좌표. z 에 DEPTH_SCALE 을 곱해 x, y 와 같은 픽셀 단위로 맞춘다."""
     return _fill(pixel_landmarks[:, joint, :3] * np.array([1.0, 1.0, DEPTH_SCALE]))
+
+
+# 회전각을 -180~180 대신 이 값을 중심으로 한 바퀴 범위에 담는다.
+# 프로 스윙은 착지 -20도 -> 임팩트 +35도 -> 팔로우 +85도 근처를 지나서, 0 중심으로 자르면 팔로우에서 끊긴다.
+TURN_CENTER_DEG = 30.0
+
+
+def _wrap(angle: np.ndarray, center: float = 0.0) -> np.ndarray:
+    return (angle - center + 180.0) % 360.0 - 180.0 + center
+
+
+def turn_angle(lead: np.ndarray, rear: np.ndarray) -> np.ndarray:
+    """(T, 3) 두 관절을 잇는 선의 위에서 본 방향(도). 뒤 -> 앞 방향, x-z 평면. 스윙 동안 열리는 쪽이 +.
+
+    프레임끼리 이어 붙이지(unwrap) 않는다. 어깨가 카메라 쪽으로 겹쳐 선이 거의 점이 되는 프레임에서
+    방향이 튀면 한 바퀴(360도)가 통째로 더해져 이후 값이 모두 틀어진다 (프로 1개에서 발생).
+    """
+    d = lead - rear
+    return _wrap(np.degrees(np.arctan2(d[:, 2], d[:, 0])), TURN_CENTER_DEG)
 
 
 def estimate_depth_scale(pixel_landmarks: np.ndarray, world_landmarks: np.ndarray) -> Optional[float]:
@@ -137,7 +174,9 @@ def compute_features(pixel_landmarks: np.ndarray) -> np.ndarray:
     # 팔꿈치 각도만 3D 로 잰다. 팔은 몸에 가려지고 카메라 쪽으로 뻗어서 2D 각도가 크게 틀어진다.
     # 무릎은 2D 가 더 안정적이었다 (프로 49개: 임팩트 앞 무릎 편차 2D 9.1도, 3D 12.6도).
     arm = {idx: depth_points(arr, idx) for idx in (LEAD_SHOULDER, REAR_SHOULDER, LEAD_ELBOW, REAR_ELBOW,
-                                                  LEAD_WRIST, REAR_WRIST)}
+                                                  LEAD_WRIST, REAR_WRIST, LEAD_HIP, REAR_HIP)}
+    shoulder_turn = turn_angle(arm[LEAD_SHOULDER], arm[REAR_SHOULDER])
+    hip_turn = turn_angle(arm[LEAD_HIP], arm[REAR_HIP])
     shoulder_center = (joint[LEAD_SHOULDER] + joint[REAR_SHOULDER]) / 2
     hip_center = (joint[LEAD_HIP] + joint[REAR_HIP]) / 2
     hand_center = (joint[LEAD_WRIST] + joint[REAR_WRIST]) / 2
@@ -165,6 +204,9 @@ def compute_features(pixel_landmarks: np.ndarray) -> np.ndarray:
         -(joint[LEAD_ANKLE][:, 1] - hip_center[:, 1]) / scale[:, 0],
         (shoulder_center[:, 0] - hip_center[:, 0]) / scale[:, 0],
         -(shoulder_center[:, 1] - hip_center[:, 1]) / scale[:, 0],
+        shoulder_turn,
+        hip_turn,
+        _wrap(shoulder_turn - hip_turn),
     ]
     return np.stack(columns, axis=1)
 

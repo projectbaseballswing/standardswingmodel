@@ -138,7 +138,7 @@ def test_depth_check_keeps_elbows_when_scale_is_normal(model, skeleton):
 
 
 def test_depth_check_drops_elbows_when_scale_is_abnormal(model, skeleton):
-    """배율이 프로 범위 밖이면 팔꿈치 각도만 측정 불가로 빼고, 나머지는 그대로 분석한다."""
+    """배율이 프로 범위 밖이면 깊이를 쓰는 항목(팔꿈치, 회전)만 측정 불가로 빼고, 나머지는 그대로 분석한다."""
     landmarks, fps = skeleton
     comparison = SwingComparisonV2(model, landmarks, fps, world_landmarks=_world_with_depth_scale(landmarks, 1.0))
     report = comparison.report(include_series=True)
@@ -146,6 +146,7 @@ def test_depth_check_drops_elbows_when_scale_is_abnormal(model, skeleton):
 
     available = {j["key"]: j["available"] for j in report["joints"]}
     assert available["lead_elbow_angle"] is False and available["rear_elbow_angle"] is False
+    assert available["hip_shoulder_separation"] is False
     assert available["lead_knee_angle"] is True
     assert report["overall"]["score"] is not None
     assert any("3D 깊이" in w for w in report["overall"]["quality"]["warnings"])

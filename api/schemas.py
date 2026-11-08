@@ -28,7 +28,7 @@ class Quality(BaseModel):
     nan_ratio: Optional[float] = None
     joint_visibility: Dict[str, float] = Field(default_factory=dict)
     depth_scale: Optional[float] = Field(
-        None, description="이미지 z -> 월드 z 배율. 프로 영상은 0.27~0.35. 0.25~0.36 을 벗어나면 팔꿈치 각도를 빼고 분석")
+        None, description="이미지 z -> 월드 z 배율. 프로 영상은 0.27~0.35. 0.25~0.36 을 벗어나면 깊이를 쓰는 항목(팔꿈치 각도, 어깨/골반 회전)을 빼고 분석")
     warnings: List[str] = Field(default_factory=list)
 
 

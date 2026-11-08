@@ -59,6 +59,7 @@ BODY_PARTS = {
     "rear_knee_angle": "rear_leg",
     "torso_lean": "torso", "shoulder_tilt": "torso", "hip_tilt": "torso",
     "shoulder_x_from_hip": "torso", "shoulder_y_from_hip": "torso",
+    "shoulder_turn": "torso", "hip_turn": "torso", "hip_shoulder_separation": "torso",
 }
 
 # 화면에 보여줄 부위 이름. 좌타 영상은 좌우반전해서 분석하므로 앞/뒤가 좌우로 바뀐다.
@@ -74,12 +75,17 @@ BODY_PART_ORDER = ["lead_arm", "rear_arm", "torso", "lead_leg", "rear_leg"]
 # 피처별 신뢰도. 영상 200개 분포와 관절 검출 신뢰도로 정했다.
 #   low    뒷팔 팔꿈치: 20도 미만의 불가능한 각도가 17% (가려진 뒤쪽 팔을 잘 못 잡는다)
 #   medium 손목에 의존하는 값들 (손목 검출 신뢰도 0.84), 앞팔 팔꿈치(불가능한 각도 3%)
+#   medium 회전(어깨/골반 회전, 꼬임): 깊이를 한 대의 카메라로 추정한 값. 월드 좌표와 3~4도 차이,
+#          임팩트 골반 회전은 월드보다 약 5도 크게 나온다.
 #   high   무릎·골반·어깨 기반 (검출 신뢰도 0.99 이상, 비현실값 0%)
 FEATURE_RELIABILITY = {
     "rear_elbow_angle": "low",
     "lead_elbow_angle": "medium",
     "hand_x_from_shoulder": "medium",
     "hand_y_from_shoulder": "medium",
+    "shoulder_turn": "medium",
+    "hip_turn": "medium",
+    "hip_shoulder_separation": "medium",
 }
 RELIABILITY_ORDER = {"low": 0, "medium": 1, "high": 2}
 
@@ -101,6 +107,9 @@ FEATURE_DESCRIPTIONS = {
     "lead_ankle_y_from_hip": "골반 기준 앞발의 높이.",
     "shoulder_x_from_hip": "골반 기준 상체의 앞뒤 쏠림.",
     "shoulder_y_from_hip": "골반 기준 상체의 높이.",
+    "shoulder_turn": "위에서 본 어깨선 방향. +면 투수 쪽으로 열림. 카메라 방향에 따라 통째로 밀릴 수 있다.",
+    "hip_turn": "위에서 본 골반선 방향. +면 투수 쪽으로 열림. 카메라 방향에 따라 통째로 밀릴 수 있다.",
+    "hip_shoulder_separation": "어깨 회전 - 골반 회전. -면 어깨가 골반보다 닫혀 있다(꼬임). 카메라 방향과 무관.",
 }
 
 
