@@ -59,8 +59,9 @@ class _SignupScreenState extends State<SignupScreen> {
       final available = await _authApi.checkEmail(email);
       if (!mounted) return;
       setState(() {
-        _emailStatus =
-            available ? _EmailStatus.available : _EmailStatus.duplicated;
+        _emailStatus = available
+            ? _EmailStatus.available
+            : _EmailStatus.duplicated;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -84,10 +85,7 @@ class _SignupScreenState extends State<SignupScreen> {
     });
     if (mismatch) return;
 
-    if (id.isEmpty ||
-        nickname.isEmpty ||
-        email.isEmpty ||
-        password.isEmpty) {
+    if (id.isEmpty || nickname.isEmpty || email.isEmpty || password.isEmpty) {
       setState(() => _errorMessage = '모든 항목을 입력해주세요.');
       return;
     }
@@ -132,11 +130,15 @@ class _SignupScreenState extends State<SignupScreen> {
   Widget? _emailStatusMessage() {
     switch (_emailStatus) {
       case _EmailStatus.available:
-        return const Text('사용할 수 있는 이메일입니다.',
-            style: TextStyle(color: AppColors.success, fontSize: 13));
+        return const Text(
+          '사용할 수 있는 이메일입니다.',
+          style: TextStyle(color: AppColors.success, fontSize: 13),
+        );
       case _EmailStatus.duplicated:
-        return const Text('중복된 이메일입니다.',
-            style: TextStyle(color: AppColors.error, fontSize: 13));
+        return const Text(
+          '중복된 이메일입니다.',
+          style: TextStyle(color: AppColors.error, fontSize: 13),
+        );
       case _EmailStatus.none:
         return null;
     }
@@ -174,35 +176,42 @@ class _SignupScreenState extends State<SignupScreen> {
               // 이메일
               _label('이메일'),
               const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: AppTextField(
-                      hint: '이메일 입력',
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
+              // 버튼 높이를 입력창 높이에 맞춘다.
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: AppTextField(
+                        hint: '이메일 입력',
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    height: 52,
-                    child: ElevatedButton(
+                    const SizedBox(width: 8),
+                    ElevatedButton(
                       onPressed: _checkingEmail ? null : _onCheckEmail,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(horizontal: 16),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: Text(_checkingEmail ? '확인 중' : '중복확인',
-                          style: const TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w600)),
+                      child: Text(
+                        _checkingEmail ? '확인 중' : '중복확인',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               if (emailMessage != null) ...[
                 const SizedBox(height: 6),
@@ -225,14 +234,17 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
               if (_passwordMismatch) ...[
                 const SizedBox(height: 6),
-                const Text('비밀번호가 일치하지 않습니다.',
-                    style: TextStyle(color: AppColors.error, fontSize: 13)),
+                const Text(
+                  '비밀번호가 일치하지 않습니다.',
+                  style: TextStyle(color: AppColors.error, fontSize: 13),
+                ),
               ],
               if (_errorMessage != null) ...[
                 const SizedBox(height: 6),
-                Text(_errorMessage!,
-                    style:
-                        const TextStyle(color: AppColors.error, fontSize: 13)),
+                Text(
+                  _errorMessage!,
+                  style: const TextStyle(color: AppColors.error, fontSize: 13),
+                ),
               ],
               const SizedBox(height: 40),
               PrimaryButton(
@@ -247,6 +259,8 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
-  Widget _label(String text) => Text(text,
-      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600));
+  Widget _label(String text) => Text(
+    text,
+    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+  );
 }

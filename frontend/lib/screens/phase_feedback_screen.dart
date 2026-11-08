@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
+import '../data/feedback_repository.dart';
 import '../models/feedback.dart';
 import '../theme/app_theme.dart';
 import '../widgets/feedback_metrics.dart';
@@ -12,7 +14,7 @@ import '../widgets/feedback_metrics.dart';
 /// 누르면 그 구간의 상세가 아래에 나온다.
 ///
 /// 새 업로드와 과거 기록 모두 서버 구간 점수를 사용한다. 이전 비교는 만들지 않는다.
-/// 포즈 이미지는 서버가 제공하지 않아 기존 자리표시자를 유지한다.
+/// 포즈 그림은 사용자 영상이 아니라 피그마의 구간별 대표 일러스트다.
 class PhaseFeedbackScreen extends StatefulWidget {
   const PhaseFeedbackScreen({super.key, required this.feedback});
 
@@ -260,7 +262,7 @@ class _StepNode extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _accentColor(phase);
+    final color = _badgeColor(phase);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -273,8 +275,9 @@ class _StepNode extends StatelessWidget {
             decoration: BoxDecoration(
               color: color,
               shape: BoxShape.circle,
-              border: selected
-                  ? Border.all(color: AppColors.primary, width: 2.5)
+              // 선택한 구간은 같은 색의 연한 테두리를 한 겹 더 두른다.
+              boxShadow: selected
+                  ? [BoxShadow(color: _softColor(phase), spreadRadius: 3)]
                   : null,
             ),
             child: Text(
@@ -296,7 +299,7 @@ class _StepNode extends StatelessWidget {
               fontSize: 9,
               height: 1.1,
               fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              color: selected ? AppColors.primary : AppColors.hint,
+              color: selected ? color : AppColors.hint,
             ),
           ),
         ],
@@ -375,16 +378,19 @@ class _PhaseCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = _accentColor(phase);
+    final accent = _badgeColor(phase);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFFFEF4F4) : Colors.white,
+          // 선택한 카드는 구간 색(초록/빨강/회색)의 테두리와 아주 연한 배경.
+          color: selected
+              ? Color.lerp(_softColor(phase), Colors.white, 0.5)
+              : Colors.white,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: selected ? AppColors.primary : const Color(0xFFEDEDED),
+            color: selected ? accent : const Color(0xFFEDEDED),
             width: selected ? 1.6 : 1,
           ),
         ),
@@ -414,7 +420,7 @@ class _PhaseCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                const _PosePlaceholder(width: 46, height: 58),
+                _PoseImage(phase: phase, index: number - 1, height: 64),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -425,10 +431,11 @@ class _PhaseCard extends StatelessWidget {
                         alignment: Alignment.centerLeft,
                         child: Text(
                           _scoreText(phase),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 30,
                             height: 1.0,
                             fontWeight: FontWeight.w800,
+                            color: _scoreColor(phase),
                           ),
                         ),
                       ),
@@ -468,7 +475,7 @@ class _PhaseDetailCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = _accentColor(phase);
+    final accent = _badgeColor(phase);
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -491,11 +498,11 @@ class _PhaseDetailCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          // 포즈 자리표시자 + 점수
+          // 구간 포즈 + 점수
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const _PosePlaceholder(width: 92, height: 116, label: '현재 스윙'),
+              _PoseFrame(phase: phase, index: number - 1, label: '현재 스윙'),
               const SizedBox(width: 16),
               Expanded(child: _ScoreBlock(phase: phase)),
             ],
@@ -530,11 +537,11 @@ class _ScoreBlock extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: Text(
           _scoreText(phase),
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 40,
             height: 1.0,
             fontWeight: FontWeight.w800,
-            color: AppColors.primary,
+            color: _scoreColor(phase),
           ),
         ),
       ),
@@ -567,9 +574,9 @@ class _TipBox extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: const [
-              Text('💡', style: TextStyle(fontSize: 14)),
+          const Row(
+            children: [
+              _Bulb(),
               SizedBox(width: 6),
               Text(
                 '확인 안내',
@@ -630,10 +637,8 @@ class _MeasurementBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _accentColor(phase);
-    final soft = color == AppColors.hint
-        ? const Color(0xFFF4F4F4)
-        : const Color(0xFFE7F5EC);
+    final color = _scoreColor(phase);
+    final soft = _softColor(phase);
     final text = _statusText(phase);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -653,64 +658,95 @@ class _MeasurementBadge extends StatelessWidget {
   }
 }
 
-/// 포즈 이미지 자리표시자(회색 박스 + 사람 아이콘). 하단에 라벨 칩(선택).
-///
-/// TODO(backend): 포즈 오버레이 이미지가 생기면 교체.
-class _PosePlaceholder extends StatelessWidget {
-  const _PosePlaceholder({
-    required this.width,
+/// 피그마 구간 포즈 일러스트(48.3×64 원본 비율).
+class _PoseImage extends StatelessWidget {
+  const _PoseImage({
+    required this.phase,
+    required this.index,
     required this.height,
-    this.label,
   });
 
-  final double width;
+  final AnalysisPhase phase;
+  final int index;
   final double height;
-  final String? label;
+
+  @override
+  Widget build(BuildContext context) => SvgPicture.asset(
+    _poseAsset(phase, index),
+    width: height * 48.3019 / 64,
+    height: height,
+  );
+}
+
+/// 구간 상세의 포즈 칸: 회색 배경 + 포즈 + 하단 라벨 칩.
+class _PoseFrame extends StatelessWidget {
+  const _PoseFrame({
+    required this.phase,
+    required this.index,
+    required this.label,
+  });
+
+  final AnalysisPhase phase;
+  final int index;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        width: width,
-        height: height,
-        color: const Color(0xFFE9E9E9),
-        alignment: Alignment.center,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Icon(
-              Icons.sports_baseball,
-              size: width * 0.42,
-              color: Colors.grey.shade400,
+    return Container(
+      width: 66,
+      height: 112,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF2F3F5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 2),
+          _PoseImage(phase: phase, index: index, height: 86),
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(5),
             ),
-            if (label != null)
-              Positioned(
-                bottom: 6,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    label!,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 7.5,
+                fontWeight: FontWeight.w700,
               ),
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
+}
+
+class _Bulb extends StatelessWidget {
+  const _Bulb();
+
+  @override
+  Widget build(BuildContext context) =>
+      SvgPicture.asset('assets/phases/bulb.svg', width: 12, height: 14);
+}
+
+/// 서버 구간 키 → 포즈 그림. 0.1/0.2 키를 모두 받고, 모르는 키는 순서로 고른다.
+String _poseAsset(AnalysisPhase p, int index) {
+  const byKey = {
+    'stride': 'stride',
+    'load': 'stride',
+    'transition': 'transition',
+    'stance': 'transition',
+    'swing': 'swing',
+    'follow': 'follow_through',
+    'follow_through': 'follow_through',
+  };
+  const order = ['stride', 'transition', 'swing', 'follow_through'];
+  final name = byKey[p.key] ?? order[index.clamp(0, order.length - 1)];
+  return 'assets/phases/$name.svg';
 }
 
 /// 흰 배경 둥근 카드.
@@ -733,13 +769,40 @@ class _Card extends StatelessWidget {
   }
 }
 
-/// 기존 색상은 측정 상태를 구분한다. 임의의 점수 기준이나 비교 증감으로 평가하지 않는다.
-Color _accentColor(AnalysisPhase p) =>
-    !p.available ||
-        p.score == null ||
-        !const ['high', 'medium'].contains(p.reliability)
-    ? AppColors.hint
-    : const Color(0xFF2E9E5B);
+enum _PhaseTone { good, bad, neutral }
+
+/// 점수가 [FeedbackRepository.goodScore] 이상이면 초록, 미만이면 빨강.
+/// 분석 불가·점수 없음·신뢰도 낮음은 판정하지 않고 회색.
+_PhaseTone _toneOf(AnalysisPhase p) {
+  if (!p.available ||
+      p.score == null ||
+      !const ['high', 'medium'].contains(p.reliability)) {
+    return _PhaseTone.neutral;
+  }
+  return p.score! >= FeedbackRepository.goodScore
+      ? _PhaseTone.good
+      : _PhaseTone.bad;
+}
+
+/// 번호 배지(피그마 구간 번호 색).
+Color _badgeColor(AnalysisPhase p) => switch (_toneOf(p)) {
+  _PhaseTone.good => const Color(0xFF4CC38A),
+  _PhaseTone.bad => AppColors.primary,
+  _PhaseTone.neutral => const Color(0xFFC0C4CA),
+};
+
+/// 점수 글자색.
+Color _scoreColor(AnalysisPhase p) => switch (_toneOf(p)) {
+  _PhaseTone.good => const Color(0xFF2FA96B),
+  _PhaseTone.bad => AppColors.primary,
+  _PhaseTone.neutral => AppColors.hint,
+};
+
+Color _softColor(AnalysisPhase p) => switch (_toneOf(p)) {
+  _PhaseTone.good => const Color(0xFFE8F6EE),
+  _PhaseTone.bad => const Color(0xFFFFECEC),
+  _PhaseTone.neutral => const Color(0xFFF0F0F2),
+};
 
 String _scoreText(AnalysisPhase p) =>
     feedbackNumber(p.available ? p.score : null);

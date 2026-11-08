@@ -21,9 +21,12 @@ class FeedbackRepository {
 
   final AnalysisApi _api;
 
+  /// 같은 화면의 영상 요청도 이 클라이언트를 함께 쓴다.
+  AnalysisApi get api => _api;
+
   /// 부위 점수가 이 값 이상이면 "잘함", 미만이면 "개선 필요" 로 본다.
   /// distance_to_score 가 "프로 평균 거리 = 80점" 이라, 프로 평균 수준을 기준선으로 둔다.
-  static const int _goodScore = 80;
+  static const int goodScore = 80;
 
   /// 분석 결과를 가져온다.
   ///
@@ -110,7 +113,7 @@ class FeedbackRepository {
           available: groupAvailable,
           level: score == null || !groupAvailable || groupReliability == 'low'
               ? 'unavailable'
-              : score >= _goodScore
+              : score >= goodScore
               ? 'good'
               : 'caution',
           description: !groupAvailable
@@ -264,7 +267,7 @@ class FeedbackRepository {
   }
 
   /// z-score(표준편차 단위) → 0~100 점수.
-  /// |z|=1(프로 변동 경계, level good 의 끝)을 80점(_goodScore)에 맞춘다: 100·0.8^|z|.
+  /// |z|=1(프로 변동 경계, level good 의 끝)을 80점(goodScore)에 맞춘다: 100·0.8^|z|.
   int _scoreFromZ(double z) => (100 * pow(0.8, z.abs())).round().clamp(0, 100);
 
   /// 가장 많이 어긋난 구간(worst_phase)의 방향을 피처 대표 방향으로 쓴다.

@@ -48,6 +48,8 @@ dependencies:
   # 녹화 파일 저장 경로
   path_provider: ^2.1.4
   path: ^1.9.0
+  # 피그마 신체 부위 SVG 렌더링
+  flutter_svg: ^2.3.2
 
 dev_dependencies:
   flutter_test:
@@ -70,6 +72,11 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # 피그마에서 받은 일러스트 (신체 부위: 종합 피드백/관절별 분석, 구간 포즈: 구간별 피드백)
+  assets:
+    - assets/body/
+    - assets/phases/
 
   # To add assets to your application, add an assets section, like this:
   # assets:
