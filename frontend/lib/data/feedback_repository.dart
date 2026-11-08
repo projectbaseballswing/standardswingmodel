@@ -81,6 +81,17 @@ class FeedbackRepository {
     final totalScore = available ? _number(overall['score']) : null;
     final reliability = _reliability(overall['reliability']);
 
+    final rotationChecks = [
+      for (final c in _rows(overall['rotation_checks']))
+        RotationCheck(
+          key: c['key'] as String? ?? '',
+          name: c['name'] as String? ?? '',
+          passed: c['passed'] as bool?,
+          affectsScore: c['affects_score'] == true,
+          message: c['message'] as String? ?? '',
+        ),
+    ];
+
     // 백엔드 LLM 코칭. 없거나 형식이 틀리면 null → 규칙 기반 폴백.
     final coaching = _mapCoaching(result['coaching']);
 
@@ -159,7 +170,11 @@ class FeedbackRepository {
       available: available,
       reliability: reliability,
       warnings: _strings(_map(overall['quality'])['warnings']),
-      phases: _mapPhases(_map(result['phases'])['phases']),
+      phases: _mapPhases(
+        _map(result['phases'])['phases'],
+        swingChecks: rotationChecks,
+      ),
+      rotationChecks: rotationChecks,
       speedMetrics: _mapSpeed(_map(result['speed'])),
       events: eventBased
           ? _mapEvents(_map(result['phases'])['events'])
@@ -350,7 +365,10 @@ class FeedbackRepository {
   Iterable<Map<String, dynamic>> _rows(dynamic v) =>
       v is List ? v.whereType<Map<String, dynamic>>() : const [];
 
-  List<AnalysisPhase> _mapPhases(dynamic raw) => [
+  List<AnalysisPhase> _mapPhases(
+    dynamic raw, {
+    List<RotationCheck> swingChecks = const [],
+  }) => [
     for (final p in _rows(raw))
       AnalysisPhase(
         key: p['key'] as String? ?? '',
@@ -368,6 +386,7 @@ class FeedbackRepository {
             ? null
             : p['tempo_level'] as String?,
         warnings: _strings(p['warnings']),
+        checks: p['key'] == 'swing' ? swingChecks : const [],
         deviations: p['available'] == false
             ? const []
             : [
@@ -508,6 +527,14 @@ class FeedbackRepository {
           ? null
           : feedback.coaching?.parts[item.key];
       final llmPoints = partCoaching?.points ?? const <String>[];
+      // 몸통이 회전 확인에 걸렸으면 그 문장을 규칙 기반 포인트 앞에 둔다.
+      final rotationPoints =
+          item.key == 'torso' && status != JointStatus.limited
+          ? [
+              for (final c in feedback.rotationChecks)
+                if (c.passed == false) c.message,
+            ]
+          : const <String>[];
       list.add(
         PartAnalysis(
           key: item.key,
@@ -525,10 +552,15 @@ class FeedbackRepository {
           coachComment: _jointCoach(item, status),
           pointsTitle: status == JointStatus.limited
               ? '분석 안내'
-              : needWork
+              : needWork || rotationPoints.isNotEmpty
               ? '개선 포인트'
               : '유지 포인트',
-          points: llmPoints.isNotEmpty ? llmPoints : _jointPoints(item, status),
+          points: llmPoints.isNotEmpty
+              ? llmPoints
+              : [
+                  ...rotationPoints,
+                  ..._jointPoints(item, status),
+                ].take(3).toList(),
         ),
       );
     }

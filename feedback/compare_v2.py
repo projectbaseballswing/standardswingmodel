@@ -39,6 +39,13 @@ SCORE_EXPONENT = 2.0
 # 속도가 빠지면 느리거나 거의 안 움직인 스윙도 높은 점수를 받는다.
 SPEED_SCORE_WEIGHT = 0.3
 
+# 회전 확인: 착지 -> 임팩트 사이 몸통이 실제로 돌았는지 본다 (프로 649개 통과율).
+#   골반이 열림 98%, 어깨가 열림 99%   -> 둘 다 실패하면 자세 점수 상한 (팔로만 치거나 거꾸로 된 동작)
+#   착지 때 꼬임 89%, 꼬임이 풀림 91% -> 프로도 10% 는 걸려서 점수에는 넣지 않고 피드백만 준다
+# 어느 쪽이 먼저 가장 빨리 도는지(순서)는 30fps 에서 잴 수 없다 (프로 58% 가 같은 프레임).
+ROTATION_OPEN_MIN_DEG = 5.0
+ROTATION_FAIL_POSTURE_CAP = 40.0
+
 # 자세 차이 판정 (단위: 기준 스윙들의 편차)
 LEVEL_CAUTION, LEVEL_WARNING = 1.0, 2.0
 # 구간 길이 판정 (단위: 기준 길이 편차)
@@ -107,9 +114,12 @@ FEATURE_DESCRIPTIONS = {
     "lead_ankle_y_from_hip": "골반 기준 앞발의 높이.",
     "shoulder_x_from_hip": "골반 기준 상체의 앞뒤 쏠림.",
     "shoulder_y_from_hip": "골반 기준 상체의 높이.",
-    "shoulder_turn": "위에서 본 어깨선 방향. +면 투수 쪽으로 열림. 카메라 방향에 따라 통째로 밀릴 수 있다.",
-    "hip_turn": "위에서 본 골반선 방향. +면 투수 쪽으로 열림. 카메라 방향에 따라 통째로 밀릴 수 있다.",
-    "hip_shoulder_separation": "어깨 회전 - 골반 회전. -면 어깨가 골반보다 닫혀 있다(꼬임). 카메라 방향과 무관.",
+    "shoulder_turn": "가슴이 투수 쪽으로 얼마나 돌아갔는지(열렸는지). 준비 자세에서는 옆으로 서 있다가 "
+                     "스윙하면서 투수를 향해 돌아간다. 촬영 방향에 따라 값이 통째로 조금 밀릴 수 있다.",
+    "hip_turn": "골반(배꼽)이 투수 쪽으로 얼마나 돌아갔는지(열렸는지). 타격의 힘은 팔보다 하체와 몸통이 "
+                "도는 데서 나온다. 촬영 방향에 따라 값이 통째로 조금 밀릴 수 있다.",
+    "hip_shoulder_separation": "골반과 어깨가 돈 정도의 차이. 앞발이 닿을 때 골반은 돌기 시작하고 어깨는 "
+                               "덜 돈 상태(꼬임)를 만들었다가, 그 꼬임을 풀면서 힘을 싣는다. 촬영 방향과 무관.",
 }
 
 
@@ -338,6 +348,14 @@ class SwingComparisonV2:
         speed_score = None
         if self.model.peak_speed_reference is not None:
             speed_score = speed_to_score(self._peak_hand_speed(), *self.model.peak_speed_reference)
+        checks = self.rotation_checks()
+        # 골반과 어깨가 둘 다 안 돌았을 때만 건다. 하나만 보면 이벤트 검출이 어긋난 프로 영상도 6% 걸린다 (둘 다: 3%).
+        gates = [c for c in checks if c["affects_score"]]
+        posture_capped = (posture_score is not None and posture_score > ROTATION_FAIL_POSTURE_CAP
+                          and bool(gates) and all(c["passed"] is False for c in gates))
+        if posture_capped:
+            posture_score = ROTATION_FAIL_POSTURE_CAP
+            warnings.append(f"몸통이 거의 돌지 않아 자세 점수를 {ROTATION_FAIL_POSTURE_CAP:.0f}점으로 제한했습니다.")
         score = posture_score
         if posture_score is not None and speed_score is not None:
             score = round((1 - SPEED_SCORE_WEIGHT) * posture_score + SPEED_SCORE_WEIGHT * speed_score, 1)
@@ -348,6 +366,8 @@ class SwingComparisonV2:
             "reliability": self.reliability,
             "score": score,
             "posture_score": posture_score,
+            "posture_capped": posture_capped,
+            "rotation_checks": checks,
             "speed_score": speed_score,
             "distance": _r(distance, 3),
             "typical_pro_distance": _r(self.model.typical_distance, 3),
@@ -657,6 +677,50 @@ class SwingComparisonV2:
         }
 
     # ------------------------------------------------------------------
+    def rotation_checks(self) -> List[Dict[str, Any]]:
+        """착지 -> 임팩트 사이 몸통 회전 확인 4개. 측정할 수 없으면 passed=None."""
+        plant, impact = self.events.foot_plant, self.events.impact
+
+        def at(feature: str, frame: Optional[int]) -> Optional[float]:
+            if feature not in self.model.feature_names or frame is None or not 0 <= frame < len(self.features):
+                return None
+            index = self.model.feature_index(feature)
+            value = float(self.features[frame, index])
+            return value if index not in self.missing_features and np.isfinite(value) else None
+
+        def delta(feature: str) -> Optional[float]:
+            start, end = at(feature, plant), at(feature, impact)
+            return None if start is None or end is None else end - start
+
+        def check(key, name, value, passed, affects_score, pro_rate, ok, bad):
+            measured = value is not None
+            return {
+                "key": key, "name": name, "passed": bool(passed) if measured else None,
+                "value": _r(value, 1), "unit": "deg", "affects_score": affects_score,
+                "pro_pass_rate": pro_rate,
+                "message": (ok if passed else bad) if measured else f"{name}을(를) 측정하지 못했어요.",
+            }
+
+        hip, shoulder = delta("hip_turn"), delta("shoulder_turn")
+        sep_plant, sep_release = at("hip_shoulder_separation", plant), delta("hip_shoulder_separation")
+        f = lambda v: f"{abs(v):.0f}" if v is not None else ""
+        return [
+            check("hip_opens", "골반 회전", hip, hip is not None and hip > ROTATION_OPEN_MIN_DEG, True, 0.98,
+                  f"착지부터 임팩트까지 골반이 {f(hip)}도 돌아갔어요.",
+                  "착지부터 임팩트까지 골반이 거의 돌지 않았어요. 하체를 돌리면서 쳐 보세요."),
+            check("shoulder_opens", "어깨 회전", shoulder,
+                  shoulder is not None and shoulder > ROTATION_OPEN_MIN_DEG, True, 0.99,
+                  f"착지부터 임팩트까지 어깨가 {f(shoulder)}도 돌아갔어요.",
+                  "착지부터 임팩트까지 어깨가 거의 돌지 않았어요. 팔로만 치지 말고 몸통을 돌려 보세요."),
+            check("plant_separation", "착지 때 꼬임", sep_plant, sep_plant is not None and sep_plant < 0, False, 0.89,
+                  f"앞발이 닿을 때 어깨가 골반보다 {f(sep_plant)}도 덜 돌아가 꼬임이 있어요.",
+                  "앞발이 닿을 때 어깨가 골반만큼 돌아가 있어 꼬임이 없어요. 어깨를 조금 더 닫아 두세요."),
+            check("separation_releases", "꼬임 풀기", sep_release,
+                  sep_release is not None and sep_release > 0, False, 0.91,
+                  "임팩트까지 꼬임이 풀리면서 어깨가 골반을 따라 돌았어요.",
+                  "임팩트까지 꼬임이 풀리지 않았어요. 골반이 먼저 돈 뒤 어깨가 따라 돌게 해 보세요."),
+        ]
+
     def report(self, include_series: bool = False) -> Dict[str, Any]:
         joints = self.joints(include_series=include_series)
         return {

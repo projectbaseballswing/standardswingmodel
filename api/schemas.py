@@ -67,6 +67,17 @@ class Issue(BaseModel):
     level: Level
 
 
+class RotationCheck(BaseModel):
+    key: str = Field(description="hip_opens / shoulder_opens / plant_separation / separation_releases")
+    name: str
+    passed: Optional[bool] = Field(None, description="측정하지 못하면 null")
+    value: Optional[float] = Field(None, description="착지->임팩트 회전량, 또는 착지 때 꼬임(도)")
+    unit: str = "deg"
+    affects_score: bool = Field(description="true 인 확인(골반, 어깨)이 모두 실패하면 자세 점수에 상한이 걸린다")
+    pro_pass_rate: float = Field(description="프로 스윙 중 통과한 비율")
+    message: str = Field(description="화면용 문장")
+
+
 class OverallFeedback(BaseModel):
     model_version: str = Field(description="비교 모델 버전. 값의 의미가 바뀌면 올라간다")
     available: bool = Field(True, description="이 피드백을 계산할 수 있었는지")
@@ -74,6 +85,8 @@ class OverallFeedback(BaseModel):
     score: Optional[float] = Field(None, description="0~100. 0.2.1 부터 자세 점수 70% + 속도 점수 30%. 평균적인 프로가 80점")
     posture_score: Optional[float] = Field(None, description="자세만 본 점수. 프로 선수 스윙이 기준과 보통 떨어진 거리를 80점으로 환산")
     speed_score: Optional[float] = Field(None, description="최대 손 속도 점수. 프로 중앙값 80점, 상위 10% 100점")
+    posture_capped: bool = Field(False, description="골반과 어깨가 모두 돌지 않아 자세 점수에 상한(40점)이 걸렸는지")
+    rotation_checks: List[RotationCheck] = Field(default_factory=list, description="착지->임팩트 몸통 회전 확인")
     distance: Optional[float] = Field(None, description="기준 템플릿과의 거리")
     typical_pro_distance: Optional[float] = Field(None, description="80점에 해당하는 거리")
     group_scores: List[GroupScore]

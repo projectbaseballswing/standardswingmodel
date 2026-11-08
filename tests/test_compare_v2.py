@@ -170,3 +170,27 @@ def test_direction_text_uses_feature_specific_wording(model, skeleton):
     for phase in report["phases"]["phases"]:
         for row in phase["top_deviations"]:
             assert row["direction_text"].startswith("기준")
+
+
+def test_rotation_checks_cap_posture_when_torso_does_not_turn(model, skeleton):
+    """골반과 어깨를 착지 자세에 고정하고 팔만 움직이면 회전 확인에 걸려 자세 점수에 상한이 걸린다."""
+    from feedback.compare_v2 import ROTATION_FAIL_POSTURE_CAP
+    from feedback.events import LEAD_HIP, LEAD_SHOULDER, REAR_HIP, REAR_SHOULDER
+
+    landmarks, fps = skeleton
+    normal = SwingComparisonV2(model, landmarks, fps).report()
+    AnalysisReport.model_validate(normal)
+    checks = {c["key"]: c for c in normal["overall"]["rotation_checks"]}
+    assert set(checks) == {"hip_opens", "shoulder_opens", "plant_separation", "separation_releases"}
+
+    comparison = SwingComparisonV2(model, landmarks, fps)
+    plant = comparison.events.foot_plant
+    assert plant is not None
+    torso = [LEAD_SHOULDER, REAR_SHOULDER, LEAD_HIP, REAR_HIP]
+    frozen = landmarks.copy()
+    frozen[:, torso] = landmarks[plant, torso]
+    report = SwingComparisonV2(model, frozen, fps).report()
+    AnalysisReport.model_validate(report)
+    checks = {c["key"]: c for c in report["overall"]["rotation_checks"]}
+    assert checks["hip_opens"]["passed"] is False and checks["shoulder_opens"]["passed"] is False
+    assert report["overall"]["posture_score"] <= ROTATION_FAIL_POSTURE_CAP

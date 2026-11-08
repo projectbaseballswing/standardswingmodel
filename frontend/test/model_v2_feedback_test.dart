@@ -509,4 +509,62 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  test(
+    'rotation checks go to the swing phase and torso improve points',
+    () async {
+      final body = v2();
+      body['result']['overall']['rotation_checks'] = [
+        {
+          'key': 'hip_opens',
+          'name': '골반 회전',
+          'passed': false,
+          'value': 1.0,
+          'unit': 'deg',
+          'affects_score': true,
+          'pro_pass_rate': 0.98,
+          'message': '골반이 거의 돌지 않았어요.',
+        },
+        {
+          'key': 'plant_separation',
+          'name': '착지 때 꼬임',
+          'passed': true,
+          'value': -8.0,
+          'unit': 'deg',
+          'affects_score': false,
+          'pro_pass_rate': 0.89,
+          'message': '꼬임이 있어요.',
+        },
+      ];
+      (body['result']['overall']['group_scores'] as List).add({
+        'key': 'torso',
+        'name': '몸통',
+        'available': true,
+        'reliability': 'high',
+        'feature_count': 0,
+        'score': 60.0,
+      });
+      final joints = body['result']['joints'] as List;
+      joints.add({
+        ...(jsonDecode(jsonEncode(joints.first)) as Map<String, dynamic>),
+        'key': 'hip_turn',
+        'name': '골반 회전',
+        'body_part': 'torso',
+        'reliability': 'medium',
+      });
+      final repo = repository(body);
+      final f = await repo.fetchFeedback('rotation');
+      expect(f.rotationChecks, hasLength(2));
+      expect(f.rotationChecks.first.affectsScore, isTrue);
+      for (final phase in f.phases) {
+        expect(phase.checks, phase.key == 'swing' ? hasLength(2) : isEmpty);
+      }
+      final torso = repo
+          .buildPartAnalyses(f)
+          .singleWhere((p) => p.key == 'torso');
+      expect(torso.pointsTitle, '개선 포인트');
+      expect(torso.points.first, '골반이 거의 돌지 않았어요.');
+      expect(torso.points, isNot(contains('꼬임이 있어요.')));
+    },
+  );
 }

@@ -6,6 +6,49 @@
     "reliability": "high",
     "score": 70.9,
     "posture_score": 79.8,
+    "posture_capped": false,
+    "rotation_checks": [
+      {
+        "key": "hip_opens",
+        "name": "골반 회전",
+        "passed": true,
+        "value": 31.5,
+        "unit": "deg",
+        "affects_score": true,
+        "pro_pass_rate": 0.98,
+        "message": "착지부터 임팩트까지 골반이 31도 돌아갔어요."
+      },
+      {
+        "key": "shoulder_opens",
+        "name": "어깨 회전",
+        "passed": true,
+        "value": 38.9,
+        "unit": "deg",
+        "affects_score": true,
+        "pro_pass_rate": 0.99,
+        "message": "착지부터 임팩트까지 어깨가 39도 돌아갔어요."
+      },
+      {
+        "key": "plant_separation",
+        "name": "착지 때 꼬임",
+        "passed": true,
+        "value": -7.8,
+        "unit": "deg",
+        "affects_score": false,
+        "pro_pass_rate": 0.89,
+        "message": "앞발이 닿을 때 어깨가 골반보다 8도 덜 돌아가 꼬임이 있어요."
+      },
+      {
+        "key": "separation_releases",
+        "name": "꼬임 풀기",
+        "passed": true,
+        "value": 7.5,
+        "unit": "deg",
+        "affects_score": false,
+        "pro_pass_rate": 0.91,
+        "message": "임팩트까지 꼬임이 풀리면서 어깨가 골반을 따라 돌았어요."
+      }
+    ],
     "speed_score": 50.0,
     "distance": 0.897,
     "typical_pro_distance": 0.892,
@@ -4519,7 +4562,7 @@
       "name": "어깨 회전",
       "body_part": "torso",
       "body_part_name": "몸통",
-      "description": "위에서 본 어깨선 방향. +면 투수 쪽으로 열림. 카메라 방향에 따라 통째로 밀릴 수 있다.",
+      "description": "가슴이 투수 쪽으로 얼마나 돌아갔는지(열렸는지). 준비 자세에서는 옆으로 서 있다가 스윙하면서 투수를 향해 돌아간다. 촬영 방향에 따라 값이 통째로 조금 밀릴 수 있다.",
       "unit": "deg",
       "direction_labels": {
         "higher": "더 열려 있어요",
@@ -4849,7 +4892,7 @@
       "name": "골반 회전",
       "body_part": "torso",
       "body_part_name": "몸통",
-      "description": "위에서 본 골반선 방향. +면 투수 쪽으로 열림. 카메라 방향에 따라 통째로 밀릴 수 있다.",
+      "description": "골반(배꼽)이 투수 쪽으로 얼마나 돌아갔는지(열렸는지). 타격의 힘은 팔보다 하체와 몸통이 도는 데서 나온다. 촬영 방향에 따라 값이 통째로 조금 밀릴 수 있다.",
       "unit": "deg",
       "direction_labels": {
         "higher": "더 열려 있어요",
@@ -5179,7 +5222,7 @@
       "name": "어깨-골반 꼬임",
       "body_part": "torso",
       "body_part_name": "몸통",
-      "description": "어깨 회전 - 골반 회전. -면 어깨가 골반보다 닫혀 있다(꼬임). 카메라 방향과 무관.",
+      "description": "골반과 어깨가 돈 정도의 차이. 앞발이 닿을 때 골반은 돌기 시작하고 어깨는 덜 돈 상태(꼬임)를 만들었다가, 그 꼬임을 풀면서 힘을 싣는다. 촬영 방향과 무관.",
       "unit": "deg",
       "direction_labels": {
         "higher": "꼬임이 덜해요 (어깨가 더 열림)",

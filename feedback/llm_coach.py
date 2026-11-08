@@ -178,6 +178,12 @@ def build_llm_input(report: Dict[str, Any], *, scope: str = "overall") -> Dict[s
         "overall_score": overall.get("score"),
         "reliability": overall.get("reliability"),
         "parts": list(parts.values()),
+        # 몸통 회전 확인. 통과 못 한 것만 넘긴다 (failed). 점수에 반영된 것은 affects_score=true.
+        "rotation_issues": [
+            {"name": c.get("name"), "message": c.get("message"), "affects_score": c.get("affects_score")}
+            for c in overall.get("rotation_checks") or []
+            if c.get("passed") is False
+        ],
     }
 
     if scope == "full":
@@ -209,6 +215,9 @@ SYSTEM_INSTRUCTION = """\
 - overall_summary 는 스윙 전체를 2~3문장으로, overall_coach 는 가장 먼저 고치면
   좋을 핵심 한 가지를 짧게.
 - 입력으로 받은 부위(key)에 대해서만 쓴다. 없는 부위를 만들지 않는다.
+- rotation_issues 는 착지부터 임팩트까지 몸통 회전에서 걸린 항목이다. 있으면 몸통(torso)
+  부위 improve_points 에 반영하고, affects_score 가 true 인 항목(몸통이 거의 돌지 않음)은
+  가장 먼저 고칠 점이라 overall_coach 로 삼는다.
 """
 
 

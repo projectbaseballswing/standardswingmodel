@@ -310,6 +310,7 @@ class OverallFeedback {
     this.phases = const [],
     this.speedMetrics = const [],
     this.events = const [],
+    this.rotationChecks = const [],
     this.coaching,
   });
 
@@ -326,6 +327,9 @@ class OverallFeedback {
   final String reliability;
   final List<String> warnings;
   final List<AnalysisPhase> phases;
+
+  /// 착지 → 임팩트 몸통 회전 확인. 0.2.2 이전 기록에는 없다.
+  final List<RotationCheck> rotationChecks;
   final List<SpeedMetric> speedMetrics;
   final List<SwingEvent> events;
 
@@ -389,6 +393,26 @@ class PhaseDeviation {
   final double? zScore;
 }
 
+/// 착지 → 임팩트 몸통 회전 확인 하나. 서버 `overall.rotation_checks[]`.
+class RotationCheck {
+  const RotationCheck({
+    required this.key,
+    required this.name,
+    required this.message,
+    this.passed,
+    this.affectsScore = false,
+  });
+  final String key;
+  final String name;
+
+  /// 통과 여부. 측정하지 못하면 null.
+  final bool? passed;
+
+  /// true 인 확인(골반, 어깨)이 모두 실패하면 자세 점수에 상한이 걸린다.
+  final bool affectsScore;
+  final String message;
+}
+
 class AnalysisPhase {
   const AnalysisPhase({
     required this.key,
@@ -403,6 +427,7 @@ class AnalysisPhase {
     this.tempoLevel,
     this.warnings = const [],
     this.deviations = const [],
+    this.checks = const [],
   });
   final String key;
   final String name;
@@ -416,6 +441,9 @@ class AnalysisPhase {
   final String? tempoLevel;
   final List<String> warnings;
   final List<PhaseDeviation> deviations;
+
+  /// 이 구간 카드에 보여줄 몸통 회전 확인. 스윙 구간에만 채운다.
+  final List<RotationCheck> checks;
 }
 
 class SpeedMetric {
