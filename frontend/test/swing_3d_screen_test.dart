@@ -235,6 +235,10 @@ void main() {
       final repo = FeedbackRepository(
         api: AnalysisApi(
           client: MockClient((request) async {
+            // 영상 썸네일 preload 요청은 피드백 재조회 횟수에서 제외.
+            if (request.url.path == '/api/analyses/saved-analysis/video') {
+              return http.Response('', 404);
+            }
             requests++;
             expect(request.url.path, '/api/analyses/saved-analysis');
             return http.Response(

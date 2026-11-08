@@ -326,7 +326,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('77.3'), findsOneWidget);
       expect(find.text('일부 관절이 가려져 있습니다.'), findsOneWidget);
-      expect(find.text('탭하여 재생'), findsOneWidget);
+      // 저장된 영상은 진입 즉시 URL을 한 번 요청한다.
+      expect(requests.where((uri) => uri.path.endsWith('/video')).length, 1);
       expect(find.byType(PhaseMetrics), findsNothing);
       await tester.ensureVisible(find.byType(SpeedFeedbackCard));
       expect(find.text('내 26.7 body/s / 기준 18 body/s'), findsOneWidget);
@@ -354,7 +355,7 @@ void main() {
       await tester.tap(find.byIcon(Icons.arrow_back_ios_new));
       await tester.pumpAndSettle();
       expect(find.byType(OverallFeedbackScreen), findsOneWidget);
-      expect(requests.length, 1);
+      expect(requests.where((uri) => !uri.path.endsWith('/video')).length, 1);
       expect(tester.takeException(), isNull);
     },
   );

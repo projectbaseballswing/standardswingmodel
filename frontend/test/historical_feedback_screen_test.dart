@@ -46,6 +46,9 @@ void main() {
         api: AnalysisApi(
           client: MockClient((request) async {
             requests.add(request.url);
+            if (request.url.path.endsWith('/video')) {
+              return jsonResponse({'detail': 'not found'}, 404);
+            }
             return request.url.path.endsWith('/new')
                 ? pending.future
                 : jsonResponse(storedAnalysis());
@@ -72,16 +75,19 @@ void main() {
       final video = tester.widget<SwingVideo>(find.byType(SwingVideo));
       expect(video.analysisId, 'new');
       expect(video.videoPath, isNull);
-      expect(find.text('탭하여 재생'), findsOneWidget);
+      // 저장된 영상은 진입 즉시 새 분석 id로 URL을 요청한다.
+      expect(find.text('저장된 영상이 없습니다.'), findsOneWidget);
       expect(requests.map((uri) => uri.path), [
         '/api/analyses/old',
+        '/api/analyses/old/video',
         '/api/analyses/new',
+        '/api/analyses/new/video',
       ]);
     },
   );
 
   testWidgets(
-    'completed list entry opens actual saved feedback and joint series without video requests',
+    'completed list entry opens actual saved feedback and joint series and preloads the video once',
     (tester) async {
       setView(tester);
       Session.instance.signIn('tester');
@@ -106,6 +112,9 @@ void main() {
               },
             ],
           });
+        }
+        if (request.url.path == '/api/analyses/saved-analysis/video') {
+          return jsonResponse({'detail': 'not found'}, 404);
         }
         expect(request.url.path, '/api/analyses/saved-analysis');
         expect(request.url.queryParameters, {'include_series': 'true'});
@@ -163,10 +172,8 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(
-        find.byIcon(Icons.sports_baseball),
-        findsOneWidget,
-      ); // 과거 영상 placeholder.
+      // 과거 영상은 진입 즉시 불러온다(여기서는 404 안내).
+      expect(find.text('저장된 영상이 없습니다.'), findsOneWidget);
       await tester.tap(find.text('상세 피드백 보기'));
       await tester.pumpAndSettle();
       expect(find.text('관절별 분석'), findsOneWidget);
@@ -184,7 +191,7 @@ void main() {
         calls.where((uri) => uri.path == '/api/analyses/saved-analysis').length,
         1,
       );
-      expect(calls.any((uri) => uri.path.endsWith('/video')), isFalse);
+      expect(calls.where((uri) => uri.path.endsWith('/video')).length, 1);
       expect(tester.takeException(), isNull);
     },
   );
@@ -203,7 +210,11 @@ void main() {
         setView(tester);
         var calls = 0;
         final api = AnalysisApi(
-          client: MockClient((_) async {
+          client: MockClient((request) async {
+            // 결과 화면이 뜬 뒤의 영상 요청은 분석 조회 횟수에서 뺀다.
+            if (request.url.path.endsWith('/video')) {
+              return jsonResponse({'detail': 'not found'}, 404);
+            }
             if (++calls > 1) return jsonResponse(storedAnalysis());
             if (failure == 'network') throw http.ClientException('offline');
             if (failure == '404') {
