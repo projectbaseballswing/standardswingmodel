@@ -104,3 +104,48 @@ def test_missing_phase_is_marked_unavailable(model, skeleton):
     # 분석 불가 구간이 있어도 신뢰도만 낮아질 뿐 전체 응답은 유효해야 한다
     AnalysisReport.model_validate(comparison.report())
     assert comparison.reliability in ("low", "medium")
+
+
+def test_report_survives_joint_missing_whole_video(model, skeleton):
+    """관절 하나가 영상 내내 1프레임만 잡혀도 분석이 실패하지 않고, 그 항목만 측정 불가로 내려간다."""
+    landmarks, fps = skeleton
+    broken = landmarks.copy()
+    broken[1:, 2, :] = np.nan  # 앞 팔꿈치
+    comparison = SwingComparisonV2(model, broken, fps, quality={"nan_ratio": 0.0, "joint_visibility": {}})
+    report = comparison.report(include_series=True)
+    AnalysisReport.model_validate(report)
+
+    elbow = next(j for j in report["joints"] if j["key"] == "lead_elbow_angle")
+    assert elbow["available"] is False
+    assert report["overall"]["score"] is not None
+    assert any("앞팔 팔꿈치" in w for w in report["overall"]["quality"]["warnings"])
+
+
+def _world_with_depth_scale(landmarks, depth_scale):
+    """x, y 는 그대로 두고 z 만 배율을 바꾼 가짜 월드 좌표. 이미지 z -> 월드 z 배율이 depth_scale 이 된다."""
+    world = landmarks.copy()
+    world[..., 2] *= depth_scale
+    return world
+
+
+def test_depth_check_keeps_elbows_when_scale_is_normal(model, skeleton):
+    landmarks, fps = skeleton
+    comparison = SwingComparisonV2(model, landmarks, fps, world_landmarks=_world_with_depth_scale(landmarks, 0.30))
+    report = comparison.report()
+    assert report["overall"]["quality"]["depth_scale"] == pytest.approx(0.30, abs=0.01)
+    elbow = next(j for j in report["joints"] if j["key"] == "lead_elbow_angle")
+    assert elbow["available"] is True
+
+
+def test_depth_check_drops_elbows_when_scale_is_abnormal(model, skeleton):
+    """배율이 프로 범위 밖이면 팔꿈치 각도만 측정 불가로 빼고, 나머지는 그대로 분석한다."""
+    landmarks, fps = skeleton
+    comparison = SwingComparisonV2(model, landmarks, fps, world_landmarks=_world_with_depth_scale(landmarks, 1.0))
+    report = comparison.report(include_series=True)
+    AnalysisReport.model_validate(report)
+
+    available = {j["key"]: j["available"] for j in report["joints"]}
+    assert available["lead_elbow_angle"] is False and available["rear_elbow_angle"] is False
+    assert available["lead_knee_angle"] is True
+    assert report["overall"]["score"] is not None
+    assert any("3D 깊이" in w for w in report["overall"]["quality"]["warnings"])

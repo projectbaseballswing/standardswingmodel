@@ -51,6 +51,12 @@ def _skeleton_quality(skeleton) -> Dict[str, Any]:
     }
 
 
+def _world_landmarks(skeleton):
+    """깊이 점검용 MediaPipe 월드 좌표. 3D 보존에 실패했거나 없으면 None (점검을 건너뛴다)."""
+    capture = getattr(skeleton, "pose3d_capture", None)
+    return capture.get("world_raw") if isinstance(capture, dict) else None
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -267,6 +273,7 @@ class JobManager:
                     skeleton.fps,
                     quality=_skeleton_quality(skeleton),
                     handedness="left" if is_left else "right",
+                    world_landmarks=_world_landmarks(skeleton),
                 ).report(include_series=True)
             else:
                 # 0.1: 임팩트 기준 80프레임 + DTW (기준 모델 파일이 없을 때)

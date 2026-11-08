@@ -27,6 +27,8 @@ class Quality(BaseModel):
     max_missing_gap: Optional[int] = Field(None, description="타자 bbox 최대 연속 결측 프레임 수")
     nan_ratio: Optional[float] = None
     joint_visibility: Dict[str, float] = Field(default_factory=dict)
+    depth_scale: Optional[float] = Field(
+        None, description="이미지 z -> 월드 z 배율. 프로 영상은 0.27~0.35. 0.25~0.36 을 벗어나면 팔꿈치 각도를 빼고 분석")
     warnings: List[str] = Field(default_factory=list)
 
 
@@ -128,7 +130,7 @@ class JointFeedback(BaseModel):
     available: bool = Field(True, description="이 관절을 비교할 수 있었는지")
     reliability: Reliability = "medium"
     level: Level
-    worst_phase: str
+    worst_phase: Optional[str] = Field(None, description="가장 많이 벌어진 구간. available=false 면 null")
     impact: Optional[JointImpact] = None
     range_of_motion: Optional[RangeOfMotion] = None
     phases: List[JointPhaseStat]

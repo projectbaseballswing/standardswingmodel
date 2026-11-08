@@ -20,7 +20,15 @@ import numpy as np
 
 from feedback.events import SwingEvents, detect_events
 from feedback.reference_model import PHASE_EVENTS, SPEED_METRICS, TIMING_NAMES, ReferenceModel
-from feedback.swing_features import FEATURE_NAMES_KO, FEATURE_UNITS, compute_features, hand_speed
+from feedback.swing_features import (
+    DEPTH_FEATURES,
+    DEPTH_SCALE_RANGE,
+    FEATURE_NAMES_KO,
+    FEATURE_UNITS,
+    compute_features,
+    estimate_depth_scale,
+    hand_speed,
+)
 
 # 점수: 기준 스윙이 평균에서 떨어진 거리(typical_distance)를 80점으로 둔다
 SCORE_AT_TYPICAL = 0.8
@@ -117,6 +125,13 @@ def speed_to_score(speed: float, median: float, p90: float) -> Optional[float]:
     return round(80.0 + 20.0 * min(1.0, (speed - median) / max(p90 - median, 1e-6)), 1)
 
 
+def _rms(values: np.ndarray) -> float:
+    """측정된 값만으로 낸 RMS. 측정된 값이 없으면 nan."""
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    return float(np.sqrt(np.mean(finite ** 2))) if len(finite) else float("nan")
+
+
 def level_of(z: float, caution: float = LEVEL_CAUTION, warning: float = LEVEL_WARNING) -> str:
     z = abs(z)
     if z < caution:
@@ -147,6 +162,7 @@ class SwingComparisonV2:
         clip_start: int = 0,
         clip_end: Optional[int] = None,
         handedness: str = "right",
+        world_landmarks: Optional[np.ndarray] = None,
     ):
         self.model = model
         self.handedness = handedness if handedness in BODY_PART_NAMES else "right"
@@ -156,6 +172,24 @@ class SwingComparisonV2:
         self.events: SwingEvents = detect_events(self.landmarks, self.fps, clip_start, clip_end)
         self.features = compute_features(self.landmarks)
         self.speed = hand_speed(self.landmarks, self.fps)
+        # 관절이 영상 전체에서 1프레임 이하로만 잡히면 보간할 수 없어 그 관절로 만든 피처가 통째로 빈다.
+        # 이런 피처는 측정 불가로 빼고 나머지로 비교한다.
+        self.undetected_features = {
+            index for index in range(self.features.shape[1]) if not np.isfinite(self.features[:, index]).any()
+        }
+        # 월드 좌표가 있으면 이 영상의 깊이 배율을 재서, 프로 범위를 벗어나면 깊이를 쓰는 피처를 뺀다.
+        # 월드 좌표는 이 점검에만 쓰고 피처 값에는 넣지 않는다.
+        self.depth_scale: Optional[float] = None
+        self.depth_dropped: set = set()
+        if world_landmarks is not None:
+            self.depth_scale = estimate_depth_scale(self.landmarks, world_landmarks)
+            low, high = DEPTH_SCALE_RANGE
+            if self.depth_scale is not None and not low <= self.depth_scale <= high:
+                self.depth_dropped = {
+                    model.feature_index(name) for name in DEPTH_FEATURES if name in model.feature_names
+                } - self.undetected_features
+                self.features[:, sorted(self.depth_dropped)] = np.nan
+        self.missing_features = self.undetected_features | self.depth_dropped
 
         self.user_curves: Dict[str, np.ndarray] = {}
         self.diff_z: Dict[str, np.ndarray] = {}
@@ -178,7 +212,8 @@ class SwingComparisonV2:
         missing = len(PHASE_EVENTS) - len(self.user_curves)
         if missing >= 2 or nan_ratio >= 0.2 or worst < 0.4:
             return "low"
-        if missing >= 1 or nan_ratio >= 0.05 or worst < 0.6 or self.events.zoom_frame is not None:
+        if (missing >= 1 or nan_ratio >= 0.05 or worst < 0.6 or self.events.zoom_frame is not None
+                or self.missing_features):
             return "medium"
         return "high"
 
@@ -189,7 +224,7 @@ class SwingComparisonV2:
     def _overall_distance(self) -> float:
         if not self.diff_z:
             return float("nan")
-        return float(np.sqrt(np.mean(np.concatenate([z.ravel() for z in self.diff_z.values()]) ** 2)))
+        return _rms(np.concatenate([z.ravel() for z in self.diff_z.values()]))
 
     # ------------------------------------------------------------------
     # 종합
@@ -214,7 +249,7 @@ class SwingComparisonV2:
             if len(members) < 2:
                 part_reliability = _worse(part_reliability, "medium")
 
-            values = groups.get(part)
+            values = [v for v in groups.get(part, []) if np.isfinite(v)]
             if not values:
                 group_scores.append({"key": part, "name": names.get(part, part), "available": False,
                                      "reliability": "low", "feature_count": len(members),
@@ -235,9 +270,9 @@ class SwingComparisonV2:
         frame_distances, worst = [], None
         for key in PHASE_EVENTS:
             z = self.diff_z.get(key)
-            values = np.sqrt(np.mean(z**2, axis=1)) if z is not None else np.full(self.model.points, np.nan)
+            values = np.array([_rms(row) for row in z]) if z is not None else np.full(self.model.points, np.nan)
             frame_distances.extend(values.tolist())
-            if z is not None:
+            if np.isfinite(values).any():
                 peak = float(np.nanmax(values))
                 if worst is None or peak > worst[1]:
                     worst = (key, peak, int(np.nanargmax(values)))
@@ -248,6 +283,17 @@ class SwingComparisonV2:
         missing = [self.model.phases[k].name for k in PHASE_EVENTS if k not in self.user_curves and k in self.model.phases]
         if missing:
             warnings.append(f"영상에 담기지 않아 분석하지 못한 구간: {', '.join(missing)}")
+        def names(indices) -> str:
+            return ", ".join(FEATURE_NAMES_KO.get(self.model.feature_names[i], self.model.feature_names[i])
+                             for i in sorted(indices))
+
+        if self.undetected_features:
+            warnings.append(f"관절이 검출되지 않아 분석하지 못한 항목: {names(self.undetected_features)}")
+        if self.depth_dropped:
+            warnings.append(f"3D 깊이 추정이 불안정해 분석하지 못한 항목: {names(self.depth_dropped)}. "
+                            "타자 옆쪽에서 몸 전체가 보이게 다시 촬영해 보세요.")
+        if self.depth_scale is not None:
+            quality["depth_scale"] = round(self.depth_scale, 3)
         quality["warnings"] = warnings
 
         posture_score = distance_to_score(distance, self.model.typical_distance)
@@ -341,7 +387,7 @@ class SwingComparisonV2:
                 curve = self.user_curves.get(key)
                 if phase is None:
                     continue
-                if curve is None:
+                if curve is None or index in self.missing_features:
                     phases.append({
                         "phase": key, "phase_name": phase.name, "available": False,
                         "user_mean": None, "reference_mean": _r(float(phase.mean[:, index].mean()), 1),
@@ -366,7 +412,7 @@ class SwingComparisonV2:
 
             # 임팩트 순간 = 스윙 구간의 마지막 지점
             impact = None
-            if "swing" in self.user_curves:
+            if "swing" in self.user_curves and index not in self.missing_features:
                 user_value = float(self.user_curves["swing"][-1, index])
                 ref_value = float(self.model.phases["swing"].mean[-1, index])
                 z = float(self.diff_z["swing"][-1, index])
@@ -376,7 +422,7 @@ class SwingComparisonV2:
                 }
 
             rom = None
-            if self.user_curves:
+            if self.user_curves and index not in self.missing_features:
                 user_all = np.concatenate([c[:, index] for c in self.user_curves.values()])
                 ref_all = np.concatenate([self.model.phases[k].mean[:, index] for k in self.user_curves])
                 rom = {
@@ -456,7 +502,7 @@ class SwingComparisonV2:
                 phase_warnings.append("선수마다 편차가 커서 템포를 판정하지 않았습니다. 수치만 참고하세요.")
             else:
                 tempo_level = level_of(tempo_z, TEMPO_CAUTION, TEMPO_WARNING)
-            distance = float(np.sqrt(np.mean(self.diff_z[key] ** 2)))
+            distance = _rms(self.diff_z[key])
 
             deviations = []
             for joint in joints:

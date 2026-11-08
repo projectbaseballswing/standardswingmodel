@@ -7,13 +7,13 @@
 
 깊이(z): 저장된 z 는 MediaPipe 이미지 z 에 화면 너비를 곱한 값인데, x, y 보다 약 3배 크게 나온다.
 같은 추론의 월드 좌표(미터)와 맞춰 보면 배율 하나로 거의 일치한다 (프로 49개: 상관 +0.98,
-배율 중앙 0.34, 영상 간 변동 11%, 해상도·사람 크기·좌우타와 무관). 보정 없이 쓰면 뼈 길이가
-프레임마다 20~38% 흔들려서 예전(0.1) 피처가 왜곡됐다.
+배율 중앙 0.305, 범위 0.265~0.346, 영상 간 변동 6%, 해상도·사람 크기·좌우타와 무관).
+보정 없이 쓰면 뼈 길이가 프레임마다 20~38% 흔들려서 예전(0.1) 피처가 왜곡됐다.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -37,7 +37,11 @@ from feedback.events import (
 )
 
 # 이미지 z -> x, y 와 같은 단위로 맞추는 배율 (모듈 설명 참고)
-DEPTH_SCALE = 0.34
+DEPTH_SCALE = 0.30
+# 영상별로 잰 배율이 이 범위를 벗어나면 그 영상의 깊이 추정을 믿지 않는다 (프로 영상 분포 바깥)
+DEPTH_SCALE_RANGE = (0.25, 0.36)
+# 깊이(z)를 쓰는 피처. 깊이 추정이 불안정한 영상에서는 측정 불가로 뺀다.
+DEPTH_FEATURES = ("lead_elbow_angle", "rear_elbow_angle")
 
 FEATURE_NAMES: List[str] = [
     "lead_elbow_angle",      # 앞팔 팔꿈치 각도
@@ -93,6 +97,35 @@ def _fill(points: np.ndarray) -> np.ndarray:
 def depth_points(pixel_landmarks: np.ndarray, joint: int) -> np.ndarray:
     """(T, 3) 관절 좌표. z 에 DEPTH_SCALE 을 곱해 x, y 와 같은 픽셀 단위로 맞춘다."""
     return _fill(pixel_landmarks[:, joint, :3] * np.array([1.0, 1.0, DEPTH_SCALE]))
+
+
+def estimate_depth_scale(pixel_landmarks: np.ndarray, world_landmarks: np.ndarray) -> Optional[float]:
+    """이 영상의 이미지 z -> 월드 z 배율. 둘 다 골반 중심을 원점, 몸통 길이를 1로 맞춘 뒤 최소제곱으로 구한다.
+
+    MediaPipe 월드 좌표(미터, 골반 중심 원점)는 같은 추론에서 나온 깊이라, 배율이 프로 영상 범위를
+    벗어나면 그 영상의 깊이 추정이 평소와 다르게 동작한 것으로 본다. 프레임 수가 다르면 None.
+    """
+    pixel = np.asarray(pixel_landmarks, dtype=float)
+    world = np.asarray(world_landmarks, dtype=float)
+    if pixel.shape != world.shape or pixel.ndim != 3 or pixel.shape[2] != 3:
+        return None
+
+    def depth(points: np.ndarray) -> np.ndarray:
+        filled = np.stack([_fill(points[:, j]) for j in range(points.shape[1])], axis=1)
+        hip = (filled[:, LEAD_HIP] + filled[:, REAR_HIP]) / 2
+        shoulder = (filled[:, LEAD_SHOULDER] + filled[:, REAR_SHOULDER]) / 2
+        # 기준 길이는 x, y 로만 잰다. z 를 넣으면 재려는 배율이 기준 길이에 섞인다.
+        torso = float(np.nanmedian(np.linalg.norm((shoulder - hip)[:, :2], axis=1)))
+        if not np.isfinite(torso) or torso <= 0:
+            return np.full(filled.shape[:2], np.nan)
+        return (filled[..., 2] - hip[:, None, 2]) / torso
+
+    image_z, world_z = depth(pixel), depth(world)
+    ok = np.isfinite(image_z) & np.isfinite(world_z)
+    denom = float(np.sum(image_z[ok] ** 2))
+    if ok.sum() < 12 or denom <= 0:
+        return None
+    return float(np.sum(image_z[ok] * world_z[ok]) / denom)
 
 
 def compute_features(pixel_landmarks: np.ndarray) -> np.ndarray:
