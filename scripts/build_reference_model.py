@@ -64,6 +64,43 @@ def load_labels(path: Path) -> dict:
         return {row["video_id"]: row for row in csv.DictReader(f)}
 
 
+def swing_events(data, labels: dict) -> tuple[dict | None, str]:
+    """스켈레톤 npz 하나 -> (이벤트, 제외 사유). 기준에 쓸 수 있으면 사유는 빈 문자열.
+
+    기준 모델과 기준 동작(build_reference_motion.py)이 같은 스윙, 같은 이벤트를 쓰도록 한 곳에 둔다.
+    """
+    meta = json.loads(str(data["meta_json"]))
+    nan_ratio = float((~np.isfinite(data["landmarks"].astype(float)).all(axis=(1, 2))).mean())
+    if nan_ratio > MAX_NAN_RATIO:
+        return None, "관절 결측이 많음"
+    label = labels.get(meta["video_id"], {})
+    events = detect_events(
+        data["landmarks_pixel"].astype(float), meta["fps"],
+        clip_start=num(label.get("clip_start")) or 0,
+        clip_end=num(label.get("clip_end")),
+    ).as_dict()
+    # 사람이 찍은 라벨이 있으면 그 값을 우선한다
+    for key in events:
+        if num(label.get(key)) is not None:
+            events[key] = num(label[key])
+    if events["impact"] is None or events["swing_start"] is None:
+        return None, "임팩트/스윙 시작 없음"
+    order = [events[k] for k in ("foot_lift", "foot_plant", "swing_start", "impact", "follow_end") if events[k] is not None]
+    if any(b < a for a, b in zip(order, order[1:])):
+        return None, "이벤트 순서 어긋남"
+    return events, ""
+
+
+def phase_windows(events: dict, fps: float):
+    """기준에 쓸 구간 (key, start, end, 길이가 범위 안인가). 양쪽 이벤트가 없는 구간은 빠진다."""
+    for key, _, start_key, end_key in PHASES:
+        start, end = events[start_key], events[end_key]
+        if start is None or end is None:
+            continue
+        low, high = PHASE_LIMITS_MS[key]
+        yield key, start, end, low <= (end - start) / fps * 1000 <= high
+
+
 def resample_phase(features: np.ndarray, start: int, end: int, points: int = PHASE_POINTS) -> np.ndarray | None:
     """구간 [start, end] 을 0~100% 로 늘이거나 줄여서 points 개로 맞춘다."""
     if end <= start or start < 0 or end >= len(features):
@@ -100,43 +137,18 @@ def main() -> None:
 
         nan_ratio = float((~np.isfinite(data["landmarks"].astype(float)).all(axis=(1, 2))).mean())
         row["nan_ratio"] = round(nan_ratio, 3)
-        if nan_ratio > MAX_NAN_RATIO:
-            row.update(status="skipped", reason="관절 결측이 많음")
-            summary_rows.append(row); skipped["관절 결측이 많음"] = skipped.get("관절 결측이 많음", 0) + 1
-            continue
-
-        label = labels.get(video_id, {})
-        events = detect_events(
-            pixel, meta["fps"],
-            clip_start=num(label.get("clip_start")) or 0,
-            clip_end=num(label.get("clip_end")),
-        ).as_dict()
-        # 사람이 찍은 라벨이 있으면 그 값을 우선한다
-        for key in events:
-            if num(label.get(key)) is not None:
-                events[key] = num(label[key])
-        row["labeled"] = bool(label)
-
-        if events["impact"] is None or events["swing_start"] is None:
-            row.update(status="skipped", reason="임팩트/스윙 시작 없음")
-            summary_rows.append(row); skipped["임팩트/스윙 시작 없음"] = skipped.get("임팩트/스윙 시작 없음", 0) + 1
-            continue
-
-        order = [events[k] for k in ("foot_lift", "foot_plant", "swing_start", "impact", "follow_end") if events[k] is not None]
-        if any(b < a for a, b in zip(order, order[1:])):
-            row.update(status="skipped", reason="이벤트 순서 어긋남")
-            summary_rows.append(row); skipped["이벤트 순서 어긋남"] = skipped.get("이벤트 순서 어긋남", 0) + 1
+        events, reason = swing_events(data, labels)
+        if nan_ratio <= MAX_NAN_RATIO:
+            row["labeled"] = video_id in labels
+        if events is None:
+            row.update(status="skipped", reason=reason)
+            summary_rows.append(row); skipped[reason] = skipped.get(reason, 0) + 1
             continue
 
         features = compute_features(pixel)
         fps = float(meta["fps"])
-        for key, _, start_key, end_key in PHASES:
-            start, end = events[start_key], events[end_key]
-            if start is None or end is None:
-                continue
-            duration_ms = (end - start) / fps * 1000
-            low, high = PHASE_LIMITS_MS[key]
-            if not low <= duration_ms <= high:
+        for key, start, end, in_range in phase_windows(events, fps):
+            if not in_range:
                 dropped_phases[key] = dropped_phases.get(key, 0) + 1
                 continue
             curve = resample_phase(features, start, end)

@@ -57,6 +57,15 @@ def _world_landmarks(skeleton):
     return capture.get("world_raw") if isinstance(capture, dict) else None
 
 
+def _attach_motion(result: Dict[str, Any], skeleton, events) -> None:
+    """기준 동작과 겹쳐 그릴 사용자 스켈레톤 (/reference-motion). 점수와 무관해서 실패해도 분석은 그대로."""
+    try:
+        from feedback.reference_motion import user_motion
+        result["motion"] = user_motion(skeleton.landmarks_pixel, skeleton.fps, events.as_dict())
+    except Exception:
+        logger.warning("reference motion skipped", exc_info=True)
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -267,14 +276,16 @@ class JobManager:
                 # 0.2: 이벤트 기반. 80프레임으로 자르기 전 스켈레톤을 그대로 쓴다.
                 skeleton = self._pipeline.extract_skeleton(video_path, is_left=is_left, on_stage=on_stage)
                 on_stage("comparing")
-                job.result = SwingComparisonV2(
+                comparison = SwingComparisonV2(
                     self.model_v2,
                     skeleton.landmarks_pixel,
                     skeleton.fps,
                     quality=_skeleton_quality(skeleton),
                     handedness="left" if is_left else "right",
                     world_landmarks=_world_landmarks(skeleton),
-                ).report(include_series=True)
+                )
+                job.result = comparison.report(include_series=True)
+                _attach_motion(job.result, skeleton, comparison.events)
             else:
                 # 0.1: 임팩트 기준 80프레임 + DTW (기준 모델 파일이 없을 때)
                 result = self._pipeline.run(video_path, is_left=is_left, on_stage=on_stage)

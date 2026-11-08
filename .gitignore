@@ -227,6 +227,7 @@ data/*
 !data/labels.csv
 !data/reference_model.npz
 !data/event_test_split.json
+!data/reference_motion.npz
 
 # 로컬 개발용 SQLite
 local.db

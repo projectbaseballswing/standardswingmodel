@@ -334,3 +334,24 @@ def get_coaching(request: Request, analysis_id: str):
     if coaching is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "LLM 코칭 문장이 없습니다.")
     return coaching
+
+
+@router.get("/analyses/{analysis_id}/reference-motion", response_model=schemas.ReferenceMotionResponse, tags=["feedback"])
+def get_reference_motion(request: Request, analysis_id: str):
+    """프로 대표 스켈레톤 + 같은 좌표로 맞춘 사용자 스켈레톤 (시각화용, 점수와 무관).
+
+    구간마다 진행률 0~1 을 20개 시점으로 나눠, 같은 시점끼리 겹쳐 그리면 된다.
+    이 기능 이전에 분석한 스윙에는 사용자 스켈레톤이 저장돼 있지 않아 404 입니다.
+    """
+    from feedback.reference_motion import load_reference_motion, motion_response
+
+    result = _finished_result(request, analysis_id)
+    stored = result.get("motion") if isinstance(result, dict) else None
+    if not stored:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "이 분석에는 기준 동작 비교 데이터가 없습니다. 새 영상 분석이 필요합니다.")
+    motion = load_reference_motion()
+    if motion is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "기준 동작 파일(data/reference_motion.npz)이 없습니다.")
+    job = _jobs(request).get(analysis_id)
+    handedness = (job.input or {}).get("handedness") if job is not None else None
+    return motion_response(analysis_id, stored, motion, handedness=handedness)

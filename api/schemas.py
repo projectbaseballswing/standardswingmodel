@@ -378,3 +378,64 @@ class Health(BaseModel):
     mock: bool = Field(False, description="목업 모드 여부. true 면 고정된 샘플 응답을 돌려준다")
     template_path: str
     video_pipeline_loaded: bool
+
+
+# ----------------------------------------------------------------------
+# 기준 동작 (시각화용, 점수와 무관)
+# ----------------------------------------------------------------------
+Point3 = List[float]  # [x, y, z]
+
+
+class MotionBone(BaseModel):
+    name: str
+    length: float = Field(description="표준 체형의 뼈 길이 (몸통 길이 = 1). 기준 스켈레톤은 늘 이 길이")
+
+
+class ReferencePose(BaseModel):
+    joints: List[List[Point3]] = Field(description="[시점][관절] = [x, y, z]. 관절 순서는 joint_names")
+    root: List[Point3] = Field(description="[시점] 임팩트 순간 골반 중심 기준 골반 중심 위치 (프로 중앙값)")
+    spread_deg: List[List[float]] = Field(
+        description="[시점][뼈] 프로들 사이에서 뼈 방향이 퍼진 정도(도, 중앙값). 클수록 프로마다 다른 부분. 뼈 순서는 bones"
+    )
+    swings_used: int
+
+
+class UserPose(BaseModel):
+    start_frame: int
+    end_frame: int
+    frames: List[float] = Field(description="[시점] 분석 영상의 프레임 번호 (소수 = 두 프레임 사이). /pose-3d 프레임 번호와 같다")
+    timestamps_s: List[float] = Field(description="[시점] frames / fps (초)")
+    joints: List[List[Point3]] = Field(description="[시점][관절] 사용자 실제 좌표. 뼈 길이는 사용자 체형 그대로")
+    root: Optional[List[Point3]] = Field(None, description="[시점] 임팩트 순간 골반 중심 기준 골반 중심 위치. 임팩트를 못 찾으면 null")
+
+
+class MotionPhase(BaseModel):
+    key: str
+    name: str
+    start_event: str
+    end_event: str
+    progress: List[float] = Field(description="[시점] 구간 진행률 0~1. 기준과 사용자가 같은 시점끼리 대응")
+    reference: Optional[ReferencePose] = None
+    user: Optional[UserPose] = Field(None, description="사용자 영상에 이 구간이 없으면 null (예: 앞발 들기가 잘린 영상)")
+
+
+class ReferenceMotionResponse(BaseModel):
+    """프로 대표 스켈레톤과, 같은 좌표·같은 시점으로 맞춘 사용자 스켈레톤.
+
+    점수에는 쓰지 않는다. 기준 스켈레톤은 특정 선수가 아니라 프로 스윙들의 뼈 방향 중 가장 많이 몰린 방향을
+    표준 체형에 이어 붙여 만든 자세다. 좌표 규칙은 coordinate_convention, 자세한 설명은 docs/reference-motion-api.md.
+    """
+
+    analysis_id: str
+    version: str
+    method: str
+    reference_model_version: Optional[str] = None
+    handedness: Optional[str] = Field(None, description="right/left. 좌타는 좌표가 좌우반전(우타 기준)되어 있다")
+    coordinate_convention: Dict[str, str]
+    joint_names: List[str]
+    draw_edges: List[List[int]] = Field(description="화면에 그릴 선 (joint_names 번호 쌍)")
+    bones: List[MotionBone]
+    fps: Optional[float] = None
+    frame_count: Optional[int] = None
+    events: Dict[str, Optional[int]] = Field(default_factory=dict, description="이벤트 프레임 번호")
+    phases: List[MotionPhase]
