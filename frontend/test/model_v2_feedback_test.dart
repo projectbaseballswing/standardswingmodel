@@ -552,8 +552,14 @@ void main() {
         'body_part': 'torso',
         'reliability': 'medium',
       });
+      body['result']['overall']['posture_score'] = 40.0;
+      body['result']['overall']['speed_score'] = 47.7;
+      body['result']['overall']['posture_capped'] = true;
       final repo = repository(body);
       final f = await repo.fetchFeedback('rotation');
+      expect(f.postureScore, 40.0);
+      expect(f.speedScore, 47.7);
+      expect(f.postureCapped, isTrue);
       expect(f.rotationChecks, hasLength(2));
       expect(f.rotationChecks.first.affectsScore, isTrue);
       for (final phase in f.phases) {

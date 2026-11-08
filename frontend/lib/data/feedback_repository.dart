@@ -175,6 +175,9 @@ class FeedbackRepository {
         swingChecks: rotationChecks,
       ),
       rotationChecks: rotationChecks,
+      postureScore: available ? _number(overall['posture_score']) : null,
+      speedScore: available ? _number(overall['speed_score']) : null,
+      postureCapped: overall['posture_capped'] == true,
       speedMetrics: _mapSpeed(_map(result['speed'])),
       events: eventBased
           ? _mapEvents(_map(result['phases'])['events'])

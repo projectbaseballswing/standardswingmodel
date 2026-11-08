@@ -311,6 +311,9 @@ class OverallFeedback {
     this.speedMetrics = const [],
     this.events = const [],
     this.rotationChecks = const [],
+    this.postureScore,
+    this.speedScore,
+    this.postureCapped = false,
     this.coaching,
   });
 
@@ -327,6 +330,13 @@ class OverallFeedback {
   final String reliability;
   final List<String> warnings;
   final List<AnalysisPhase> phases;
+
+  /// 종합 점수 = 자세 70% + 속도 30%. 0.2.1 이전 기록에는 없어서 null.
+  final double? postureScore;
+  final double? speedScore;
+
+  /// 골반과 어깨가 모두 돌지 않아 자세 점수에 상한(40점)이 걸렸는지.
+  final bool postureCapped;
 
   /// 착지 → 임팩트 몸통 회전 확인. 0.2.2 이전 기록에는 없다.
   final List<RotationCheck> rotationChecks;
