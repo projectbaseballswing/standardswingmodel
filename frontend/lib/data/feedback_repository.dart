@@ -209,11 +209,7 @@ class FeedbackRepository {
       );
     }
 
-    return Coaching(
-      overallSummary: summary,
-      overallCoach: coach,
-      parts: parts,
-    );
+    return Coaching(overallSummary: summary, overallCoach: coach, parts: parts);
   }
 
   /// 서버 joints[] 한 건을 세부 항목으로 변환한다.
@@ -226,6 +222,7 @@ class FeedbackRepository {
       name: (j['name'] as String?) ?? '항목',
       level: (j['level'] as String?) ?? 'good',
       direction: _worstPhaseDirection(j),
+      directionText: _worstPhaseDirectionText(j),
       unit: (j['unit'] as String?) ?? 'deg',
       description: (j['description'] as String?) ?? '',
       impact: _measure(j['impact']),
@@ -275,6 +272,28 @@ class FeedbackRepository {
       if (p['phase'] == worst) return (p['direction'] as String?) ?? 'similar';
     }
     return 'similar';
+  }
+
+  /// 가장 많이 어긋난 구간의 서버 방향 문구. 없으면(이전 버전 기록) null.
+  String? _worstPhaseDirectionText(Map<String, dynamic> j) {
+    final worst = j['worst_phase'] as String?;
+    final phases = (j['phases'] as List?) ?? const [];
+    for (final p in phases.whereType<Map<String, dynamic>>()) {
+      if (p['phase'] == worst) return p['direction_text'] as String?;
+    }
+    return null;
+  }
+
+  /// 세부 항목 하나를 한 문장으로. 서버 문구가 있으면 그걸 쓴다.
+  String _featureSentence(
+    FeatureAnalysis f, {
+    required String fallbackNoDirection,
+  }) {
+    if (f.directionText != null && f.direction != 'similar') {
+      return '${f.name}: ${f.directionText}.';
+    }
+    final dir = _directionWord(f.direction);
+    return dir == null ? fallbackNoDirection : '${f.name}이(가) 기준보다 $dir 편이에요.';
   }
 
   /// {user, reference, diff} → [Measure]. 없으면 null.
@@ -359,6 +378,7 @@ class FeedbackRepository {
                     diff: _number(d['diff']),
                     zScore: _number(d['z_score']),
                     direction: d['direction'] as String? ?? 'similar',
+                    directionText: d['direction_text'] as String?,
                     level: d['level'] as String? ?? '',
                   ),
               ],
@@ -409,10 +429,10 @@ class FeedbackRepository {
       return '세부 항목이 프로 기준과 잘 맞는 편이에요.';
     }
     final f = bad.first;
-    final dir = _directionWord(f.direction);
-    return dir == null
-        ? '${f.name}이(가) 프로 기준과 차이가 있어요.'
-        : '${f.name}이(가) 기준보다 $dir 편이에요.';
+    return _featureSentence(
+      f,
+      fallbackNoDirection: '${f.name}이(가) 프로 기준과 차이가 있어요.',
+    );
   }
 
   /// 방향 → 서술어. similar 는 null(차이 없음).
@@ -586,9 +606,10 @@ class FeedbackRepository {
         if (bad.isNotEmpty) {
           return [
             for (final f in bad.take(3))
-              _directionWord(f.direction) == null
-                  ? '${f.name}이(가) 기준 스윙과 차이가 있어요.'
-                  : '${f.name}이(가) 기준보다 ${_directionWord(f.direction)} 편이에요.',
+              _featureSentence(
+                f,
+                fallbackNoDirection: '${f.name}이(가) 기준 스윙과 차이가 있어요.',
+              ),
           ];
         }
         return [

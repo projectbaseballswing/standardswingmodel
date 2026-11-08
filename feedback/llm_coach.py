@@ -82,7 +82,7 @@ def _phase_lines(phases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "reference": p.get("reference_mean"),
                 "diff": p.get("diff"),
                 "level": p.get("level"),
-                "direction": _direction_ko(p.get("direction", "")),
+                "direction": p.get("direction_text") or _direction_ko(p.get("direction", "")),
             }
         )
     return lines
@@ -120,7 +120,7 @@ def _phase_summary(phase: Dict[str, Any]) -> Dict[str, Any]:
             {
                 "name": top.get("joint_name"),
                 "diff": top.get("diff"),
-                "direction": _direction_ko(top.get("direction", "")),
+                "direction": top.get("direction_text") or _direction_ko(top.get("direction", "")),
             }
             if top
             else None
@@ -402,7 +402,7 @@ def _compare_phases(current: Dict[str, Any], previous: Dict[str, Any]) -> List[D
                     {
                         "name": top.get("joint_name"),
                         "diff": top.get("diff"),
-                        "direction": _direction_ko(top.get("direction", "")),
+                        "direction": top.get("direction_text") or _direction_ko(top.get("direction", "")),
                     }
                     if top
                     else None

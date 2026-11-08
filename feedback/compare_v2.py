@@ -113,6 +113,35 @@ FEATURE_DESCRIPTIONS = {
 }
 
 
+# 기준보다 값이 클 때(higher) / 작을 때(lower) 화면에 보여줄 말. "기준보다 ___." 로 읽힌다.
+# 화면 좌표에서 +x 가 투수 쪽이다 (프로 98.5%: 앞 어깨가 +x). 기울기 +는 뒤 어깨/골반이 내려간 쪽.
+FEATURE_DIRECTION_LABELS = {
+    "lead_elbow_angle": ("더 펴져 있어요", "더 굽혀져 있어요"),
+    "rear_elbow_angle": ("더 펴져 있어요", "더 굽혀져 있어요"),
+    "lead_knee_angle": ("더 펴져 있어요", "더 굽혀져 있어요"),
+    "rear_knee_angle": ("더 펴져 있어요", "더 굽혀져 있어요"),
+    "torso_lean": ("투수 쪽으로 더 기울어 있어요", "포수 쪽으로 더 기울어 있어요"),
+    "shoulder_tilt": ("뒤 어깨가 더 내려가 있어요", "앞 어깨가 더 내려가 있어요"),
+    "hip_tilt": ("뒤 골반이 더 내려가 있어요", "앞 골반이 더 내려가 있어요"),
+    "hand_x_from_shoulder": ("투수 쪽으로 더 나가 있어요", "포수 쪽으로 더 들어가 있어요"),
+    "hand_y_from_shoulder": ("더 높아요", "더 낮아요"),
+    "lead_ankle_x_from_hip": ("더 멀리 나가 있어요", "덜 나가 있어요"),
+    "lead_ankle_y_from_hip": ("더 높이 들려 있어요", "더 낮아요"),
+    "shoulder_x_from_hip": ("투수 쪽으로 더 쏠려 있어요", "포수 쪽으로 더 남아 있어요"),
+    "shoulder_y_from_hip": ("더 높아요", "더 낮아요"),
+    "shoulder_turn": ("더 열려 있어요", "덜 열려 있어요"),
+    "hip_turn": ("더 열려 있어요", "덜 열려 있어요"),
+    "hip_shoulder_separation": ("꼬임이 덜해요 (어깨가 더 열림)", "꼬임이 더 커요 (어깨가 더 닫힘)"),
+}
+
+
+def direction_text(name: str, direction: str) -> str:
+    if direction == "similar":
+        return "기준과 비슷해요"
+    higher, lower = FEATURE_DIRECTION_LABELS.get(name, ("더 커요", "더 작아요"))
+    return f"기준보다 {higher if direction == 'higher' else lower}"
+
+
 def _r(value: float, digits: int = 2) -> Optional[float]:
     if value is None or not np.isfinite(value):
         return None
@@ -348,6 +377,7 @@ class SwingComparisonV2:
                     "type": "joint_angle",
                     "joint": joint["key"],
                     "joint_name": joint["name"],
+                    "direction_text": phase["direction_text"],
                     "phase": phase["phase"],
                     "phase_name": phase["phase_name"],
                     "user": phase["user_mean"],
@@ -401,7 +431,8 @@ class SwingComparisonV2:
                         "phase": key, "phase_name": phase.name, "available": False,
                         "user_mean": None, "reference_mean": _r(float(phase.mean[:, index].mean()), 1),
                         "reference_std": _r(float(phase.std[:, index].mean()), 1),
-                        "diff": None, "z_score": None, "direction": "similar", "level": "good",
+                        "diff": None, "z_score": None, "direction": "similar",
+                        "direction_text": direction_text(name, "similar"), "level": "good",
                     })
                     continue
                 user_mean = float(curve[:, index].mean())
@@ -415,6 +446,7 @@ class SwingComparisonV2:
                     "diff": _r(user_mean - ref_mean, 1), "z_score": _r(z),
                     "direction": _direction(user_mean - ref_mean, level), "level": level,
                 })
+                phases[-1]["direction_text"] = direction_text(name, phases[-1]["direction"])
 
             measured = [p for p in phases if p["available"]]
             worst = max(measured, key=lambda p: abs(p["z_score"]), default=None)
@@ -447,6 +479,8 @@ class SwingComparisonV2:
                 "body_part_name": BODY_PART_NAMES[self.handedness].get(BODY_PARTS.get(name, "other"), ""),
                 "description": FEATURE_DESCRIPTIONS.get(name, ""),
                 "unit": FEATURE_UNITS.get(name, "deg"),
+                "direction_labels": dict(zip(("higher", "lower"),
+                                             FEATURE_DIRECTION_LABELS.get(name, ("더 커요", "더 작아요")))),
                 "available": bool(measured),
                 "reliability": _worse(self.reliability, FEATURE_RELIABILITY.get(name, "high")),
                 "level": worst["level"] if worst else "good",
@@ -520,7 +554,8 @@ class SwingComparisonV2:
                     continue
                 deviations.append({
                     "joint": joint["key"], "joint_name": joint["name"], "diff": row["diff"],
-                    "z_score": row["z_score"], "direction": row["direction"], "level": row["level"],
+                    "z_score": row["z_score"], "direction": row["direction"],
+                    "direction_text": row["direction_text"], "level": row["level"],
                 })
             deviations.sort(key=lambda item: abs(item["z_score"]), reverse=True)
 

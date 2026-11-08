@@ -63,6 +63,7 @@ class Issue(BaseModel):
     diff: Optional[float] = None
     z_score: Optional[float] = None
     direction: Direction
+    direction_text: Optional[str] = Field(None, description="화면용 방향 문구. 예) '기준보다 더 펴져 있어요'")
     level: Level
 
 
@@ -97,6 +98,7 @@ class JointPhaseStat(BaseModel):
     diff: Optional[float] = Field(None, description="user_mean - reference_mean")
     z_score: Optional[float] = Field(None, description="기준 스윙들의 편차 대비 차이")
     direction: Direction
+    direction_text: Optional[str] = Field(None, description="화면용 방향 문구. 예) '기준보다 더 펴져 있어요'")
     level: Level
 
 
@@ -127,6 +129,8 @@ class JointFeedback(BaseModel):
     body_part_name: str = Field("", description="화면 표시용 부위 이름. 좌우타에 맞춰 좌/우로 변환됨")
     description: str
     unit: str = Field(description="deg(각도) 또는 body(몸 크기 대비 길이)")
+    direction_labels: Optional[Dict[str, str]] = Field(
+        None, description="higher / lower 일 때 '기준보다' 뒤에 붙일 말. 예) {'higher': '더 펴져 있어요'}")
     available: bool = Field(True, description="이 관절을 비교할 수 있었는지")
     reliability: Reliability = "medium"
     level: Level
@@ -150,6 +154,7 @@ class PhaseDeviation(BaseModel):
     diff: Optional[float] = None
     z_score: Optional[float] = None
     direction: Direction
+    direction_text: Optional[str] = Field(None, description="화면용 방향 문구. 예) '기준보다 더 펴져 있어요'")
     level: Level
 
 

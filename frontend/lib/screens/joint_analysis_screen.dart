@@ -710,7 +710,9 @@ class _FeatureTile extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        _directionText(feature.direction),
+                        feature.directionText != null
+                            ? '${feature.directionText}.'
+                            : _directionText(feature.direction),
                         style: const TextStyle(
                           fontSize: 11.5,
                           color: AppColors.hint,

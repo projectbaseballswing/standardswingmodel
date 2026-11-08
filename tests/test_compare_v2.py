@@ -150,3 +150,23 @@ def test_depth_check_drops_elbows_when_scale_is_abnormal(model, skeleton):
     assert available["lead_knee_angle"] is True
     assert report["overall"]["score"] is not None
     assert any("3D 깊이" in w for w in report["overall"]["quality"]["warnings"])
+
+
+def test_direction_text_uses_feature_specific_wording(model, skeleton):
+    """방향 문구는 피처마다 다르다 (팔꿈치 '펴짐', 회전 '열림'). 값이 비슷하면 '기준과 비슷해요'."""
+    landmarks, fps = skeleton
+    report = SwingComparisonV2(model, landmarks, fps).report()
+    AnalysisReport.model_validate(report)
+    joints = {j["key"]: j for j in report["joints"]}
+    assert joints["lead_elbow_angle"]["direction_labels"] == {"higher": "더 펴져 있어요", "lower": "더 굽혀져 있어요"}
+    assert joints["shoulder_turn"]["direction_labels"]["lower"] == "덜 열려 있어요"
+    for joint in joints.values():
+        for phase in joint["phases"]:
+            if phase["direction"] == "similar":
+                assert phase["direction_text"] == "기준과 비슷해요"
+            else:
+                label = joint["direction_labels"][phase["direction"]]
+                assert phase["direction_text"] == f"기준보다 {label}"
+    for phase in report["phases"]["phases"]:
+        for row in phase["top_deviations"]:
+            assert row["direction_text"].startswith("기준")

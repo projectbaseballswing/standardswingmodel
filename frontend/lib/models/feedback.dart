@@ -79,6 +79,7 @@ class FeatureAnalysis {
     required this.name,
     required this.level,
     required this.direction,
+    this.directionText,
     this.unit = 'deg',
     this.description = '',
     this.impact,
@@ -100,6 +101,10 @@ class FeatureAnalysis {
 
   /// 기준 대비 방향. 'higher' | 'lower' | 'similar'.
   final String direction;
+
+  /// 서버가 피처에 맞게 만든 방향 문구. 예) "기준보다 더 펴져 있어요".
+  /// 0.2.2 이전 기록에는 없어서 null 이면 [direction] 으로 문구를 만든다.
+  final String? directionText;
 
   /// 값 단위. 'deg'(각도) 등.
   final String unit;
@@ -371,12 +376,14 @@ class PhaseDeviation {
     required this.name,
     required this.direction,
     required this.level,
+    this.directionText,
     this.diff,
     this.zScore,
   });
   final String joint;
   final String name;
   final String direction;
+  final String? directionText;
   final String level;
   final double? diff;
   final double? zScore;

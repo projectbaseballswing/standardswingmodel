@@ -27,7 +27,7 @@ class PhaseMetrics extends StatelessWidget {
         _note('주요 관절 차이 (기준 스윙 대비)'),
         for (final deviation in phase.deviations)
           _note(
-            '${deviation.name}: ${_direction(deviation.direction)}'
+            '${deviation.name}: ${deviation.directionText ?? _direction(deviation.direction)}'
             '${deviation.zScore == null ? '' : ' · z ${feedbackNumber(deviation.zScore)}'}',
           ),
       ],
