@@ -832,6 +832,39 @@ class _FeatureDetail extends StatelessWidget {
                 ),
             ],
           ),
+          // LLM 관절 코멘트(scope='full' 일 때만). 없으면 표시하지 않는다.
+          if (feature.comment.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3F0FB),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.auto_awesome,
+                    size: 15,
+                    color: Color(0xFF8A6BEA),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      feature.comment,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        height: 1.5,
+                        color: AppColors.subtitle,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           if (feature.description.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(

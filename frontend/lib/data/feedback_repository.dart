@@ -93,7 +93,9 @@ class FeedbackRepository {
     for (final j in rawJoints.whereType<Map<String, dynamic>>()) {
       if (j['available'] == false || j['reliability'] == 'low') continue;
       final part = (j['body_part'] as String?) ?? 'other';
-      (featuresByPart[part] ??= []).add(_mapFeature(j, eventBased: eventBased));
+      (featuresByPart[part] ??= []).add(
+        _mapFeature(j, eventBased: eventBased, coaching: coaching),
+      );
     }
 
     // 부위(그룹) 단위로 묶는다. 점수는 group_scores.score 실제값.
@@ -162,7 +164,7 @@ class FeedbackRepository {
       available: available,
       reliability: reliability,
       warnings: _strings(_map(overall['quality'])['warnings']),
-      phases: _mapPhases(_map(result['phases'])['phases']),
+      phases: _mapPhases(_map(result['phases'])['phases'], coaching: coaching),
       speedMetrics: _mapSpeed(_map(result['speed'])),
       events: eventBased
           ? _mapEvents(_map(result['phases'])['events'])
@@ -212,25 +214,56 @@ class FeedbackRepository {
       );
     }
 
+    // 관절(피처) key → 코멘트. scope='full' 일 때만 서버가 채워 준다.
+    final joints = <String, String>{};
+    for (final j in (raw['joints'] as List?) ?? const []) {
+      if (j is! Map<String, dynamic>) continue;
+      final key = j['key'];
+      final comment = j['comment'];
+      if (key is! String || key.isEmpty) continue;
+      if (comment is! String || comment.isEmpty) continue;
+      joints[key] = comment;
+    }
+
+    // 구간 key → 구간 코칭(card_line/comment/tip). scope='full' 일 때만.
+    final phases = <String, PhaseCoaching>{};
+    for (final p in (raw['phases'] as List?) ?? const []) {
+      if (p is! Map<String, dynamic>) continue;
+      final key = p['key'];
+      if (key is! String || key.isEmpty) continue;
+      phases[key] = PhaseCoaching(
+        cardLine: (p['card_line'] as String?) ?? '',
+        comment: (p['comment'] as String?) ?? '',
+        tip: (p['tip'] as String?) ?? '',
+      );
+    }
+
     return Coaching(
       overallSummary: summary,
       overallCoach: coach,
       parts: parts,
+      joints: joints,
+      phases: phases,
     );
   }
 
   /// 서버 joints[] 한 건을 세부 항목으로 변환한다.
+  ///
+  /// [coaching] 이 있으면(scope='full') 이 피처 key 에 해당하는 LLM 코멘트를 붙인다.
   FeatureAnalysis _mapFeature(
     Map<String, dynamic> j, {
     required bool eventBased,
+    Coaching? coaching,
   }) {
+    final key = (j['key'] as String?) ?? '';
     return FeatureAnalysis(
-      key: (j['key'] as String?) ?? '',
+      key: key,
       name: (j['name'] as String?) ?? '항목',
       level: (j['level'] as String?) ?? 'good',
       direction: _worstPhaseDirection(j),
       unit: (j['unit'] as String?) ?? 'deg',
       description: (j['description'] as String?) ?? '',
+      comment: coaching?.joints[key] ?? '',
       impact: _measure(j['impact']),
       rangeOfMotion: _measure(j['range_of_motion']),
       series: _series(j['series']),
@@ -334,38 +367,46 @@ class FeedbackRepository {
   Iterable<Map<String, dynamic>> _rows(dynamic v) =>
       v is List ? v.whereType<Map<String, dynamic>>() : const [];
 
-  List<AnalysisPhase> _mapPhases(dynamic raw) => [
+  /// [coaching] 이 있으면(scope='full') 구간 key 로 LLM 코칭(card_line/comment/tip)을 붙인다.
+  List<AnalysisPhase> _mapPhases(dynamic raw, {Coaching? coaching}) => [
     for (final p in _rows(raw))
-      AnalysisPhase(
-        key: p['key'] as String? ?? '',
-        name: p['name'] as String? ?? p['key'] as String? ?? '구간',
-        available: p['available'] != false,
-        reliability: _reliability(p['reliability']),
-        score: p['available'] == false ? null : _number(p['score']),
-        unavailableReason: p['unavailable_reason'] as String?,
-        userDurationMs: p['available'] == false
-            ? null
-            : _number(p['user_duration_ms']),
-        referenceDurationMs: _number(p['reference_duration_ms']),
-        tempoRatio: p['available'] == false ? null : _number(p['tempo_ratio']),
-        tempoLevel: p['available'] == false
-            ? null
-            : p['tempo_level'] as String?,
-        warnings: _strings(p['warnings']),
-        deviations: p['available'] == false
-            ? const []
-            : [
-                for (final d in _rows(p['top_deviations']))
-                  PhaseDeviation(
-                    joint: d['joint'] as String? ?? '',
-                    name: d['joint_name'] as String? ?? '관절',
-                    diff: _number(d['diff']),
-                    zScore: _number(d['z_score']),
-                    direction: d['direction'] as String? ?? 'similar',
-                    level: d['level'] as String? ?? '',
-                  ),
-              ],
-      ),
+      () {
+        final key = p['key'] as String? ?? '';
+        final coach = coaching?.phases[key];
+        return AnalysisPhase(
+          key: key,
+          name: p['name'] as String? ?? p['key'] as String? ?? '구간',
+          available: p['available'] != false,
+          reliability: _reliability(p['reliability']),
+          score: p['available'] == false ? null : _number(p['score']),
+          unavailableReason: p['unavailable_reason'] as String?,
+          userDurationMs: p['available'] == false
+              ? null
+              : _number(p['user_duration_ms']),
+          referenceDurationMs: _number(p['reference_duration_ms']),
+          tempoRatio: p['available'] == false ? null : _number(p['tempo_ratio']),
+          tempoLevel: p['available'] == false
+              ? null
+              : p['tempo_level'] as String?,
+          warnings: _strings(p['warnings']),
+          deviations: p['available'] == false
+              ? const []
+              : [
+                  for (final d in _rows(p['top_deviations']))
+                    PhaseDeviation(
+                      joint: d['joint'] as String? ?? '',
+                      name: d['joint_name'] as String? ?? '관절',
+                      diff: _number(d['diff']),
+                      zScore: _number(d['z_score']),
+                      direction: d['direction'] as String? ?? 'similar',
+                      level: d['level'] as String? ?? '',
+                    ),
+                ],
+          coachCardLine: coach?.cardLine ?? '',
+          coachComment: coach?.comment ?? '',
+          coachTip: coach?.tip ?? '',
+        );
+      }(),
   ];
 
   List<SpeedMetric> _mapSpeed(Map<String, dynamic> raw) => [

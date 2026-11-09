@@ -258,6 +258,80 @@ void main() {
     expect(part.points, ['앞팔 팔꿈치를 더 펴 보세요.']);
   });
 
+  test('full-scope coaching maps joint comment and phase coaching', () async {
+    final body = storedAnalysis();
+    final result = body['result'] as Map<String, dynamic>;
+    result['phases'] = {
+      'phases': [
+        {
+          'key': 'swing',
+          'name': '스윙',
+          'available': true,
+          'score': 70.0,
+          'reliability': 'high',
+        },
+      ],
+    };
+    result['coaching'] = {
+      'overall_summary': 'LLM 종합 요약입니다.',
+      'overall_coach': 'LLM 코치 한마디입니다.',
+      'parts': <Map<String, dynamic>>[],
+      'joints': [
+        {'key': 'lead_elbow_angle', 'comment': '팔꿈치가 기준보다 큽니다.'},
+      ],
+      'phases': [
+        {
+          'key': 'swing',
+          'card_line': '스윙이 조금 빨라요.',
+          'comment': '스윙 구간 템포가 기준보다 빠릅니다.',
+          'tip': '천천히 끝까지 밀어 보세요.',
+        },
+      ],
+    };
+    final repo = repositoryFor((_) async => response(body));
+
+    final feedback = await repo.fetchFeedback('saved-analysis');
+    // 피처(관절) 코멘트가 붙었는지.
+    expect(feedback.items.single.features.single.comment, '팔꿈치가 기준보다 큽니다.');
+    expect(feedback.coaching!.joints['lead_elbow_angle'], '팔꿈치가 기준보다 큽니다.');
+    // 구간 코칭이 붙었는지.
+    final phase = feedback.phases.single;
+    expect(phase.coachCardLine, '스윙이 조금 빨라요.');
+    expect(phase.coachComment, '스윙 구간 템포가 기준보다 빠릅니다.');
+    expect(phase.coachTip, '천천히 끝까지 밀어 보세요.');
+    expect(feedback.coaching!.phases['swing']!.tip, '천천히 끝까지 밀어 보세요.');
+  });
+
+  test('overall-scope coaching leaves joint/phase coaching empty', () async {
+    final body = storedAnalysis();
+    final result = body['result'] as Map<String, dynamic>;
+    result['phases'] = {
+      'phases': [
+        {
+          'key': 'swing',
+          'name': '스윙',
+          'available': true,
+          'score': 70.0,
+          'reliability': 'high',
+        },
+      ],
+    };
+    result['coaching'] = {
+      'overall_summary': 'LLM 종합 요약입니다.',
+      'overall_coach': 'LLM 코치 한마디입니다.',
+      'parts': <Map<String, dynamic>>[],
+    };
+    final repo = repositoryFor((_) async => response(body));
+
+    final feedback = await repo.fetchFeedback('saved-analysis');
+    // joints/phases 가 없으면 피처/구간 코칭은 빈 문자열로 폴백.
+    expect(feedback.items.single.features.single.comment, '');
+    expect(feedback.phases.single.coachCardLine, '');
+    expect(feedback.phases.single.coachTip, '');
+    expect(feedback.coaching!.joints, isEmpty);
+    expect(feedback.coaching!.phases, isEmpty);
+  });
+
   test('missing coaching falls back to rule-based text', () async {
     // 픽스처엔 coaching 키가 없다 → 규칙 기반 문구 유지.
     final repo = repositoryFor((_) async => response(storedAnalysis()));

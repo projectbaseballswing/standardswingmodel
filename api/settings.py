@@ -47,9 +47,10 @@ class Settings:
     # gemini-flash-lite-latest: 코칭 생성은 짧은 JSON 이라 lite 로 충분하다.
     # flash(-latest)는 내부 추론 때문에 45~90초가 걸려 504 가 잦지만, lite 는 ~7초로 끝난다.
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
-    # 코칭 범위: 'overall'(종합+부위) 또는 'full'(관절·구간까지). 기본은 overall.
-    # 유료 등급 전환 후 GEMINI_COACHING_SCOPE=full 로 켜면 관절/구간 서술도 생성된다.
-    coaching_scope: str = os.getenv("GEMINI_COACHING_SCOPE", "overall")
+    # 코칭 범위: 'overall'(종합+부위) 또는 'full'(관절·구간까지). 기본은 full.
+    # full 이면 1콜에 관절(joints)·구간(phases) 서술까지 함께 생성해 프론트가 소비한다.
+    # 무료 등급은 모델당 하루 20콜 제한이 있으니, 아끼려면 GEMINI_COACHING_SCOPE=overall 로 낮춘다.
+    coaching_scope: str = os.getenv("GEMINI_COACHING_SCOPE", "full")
 
 
 settings = Settings()

@@ -81,6 +81,7 @@ class FeatureAnalysis {
     required this.direction,
     this.unit = 'deg',
     this.description = '',
+    this.comment = '',
     this.impact,
     this.rangeOfMotion,
     this.series,
@@ -106,6 +107,10 @@ class FeatureAnalysis {
 
   /// 피처 설명(각도 정의 등).
   final String description;
+
+  /// 이 관절에 대한 LLM(백엔드) 코멘트. 없으면 '' → 화면에서 표시하지 않는다.
+  /// 서버 `coaching.joints[]` 중 key 가 이 피처와 같은 항목의 comment.
+  final String comment;
   final String reliability;
   final bool eventBasedSeries;
 
@@ -268,6 +273,24 @@ class PartCoaching {
   List<String> get points => [...improvePoints, ...keepPoints];
 }
 
+/// LLM(백엔드)이 만든 구간별 코칭. 서버 `coaching.phases[]` 한 건.
+class PhaseCoaching {
+  const PhaseCoaching({
+    this.cardLine = '',
+    this.comment = '',
+    this.tip = '',
+  });
+
+  /// 구간 카드용 짧은 한 줄(상태 중심).
+  final String cardLine;
+
+  /// 구간 상세 서술(수치·가장 벌어진 관절 근거).
+  final String comment;
+
+  /// 구간 개선 실천 팁 한 문장.
+  final String tip;
+}
+
 /// LLM(백엔드)이 만든 코칭 묶음. 서버 응답 result.coaching 을 담는다.
 ///
 /// 생성에 실패했거나(키 없음·504·할당량 초과 등) 서버가 안 주면 null 이고,
@@ -277,6 +300,8 @@ class Coaching {
     required this.overallSummary,
     required this.overallCoach,
     this.parts = const {},
+    this.joints = const {},
+    this.phases = const {},
   });
 
   /// 종합 요약 (점수 옆 분홍 박스).
@@ -287,6 +312,12 @@ class Coaching {
 
   /// 부위 key → 부위별 코칭.
   final Map<String, PartCoaching> parts;
+
+  /// 피처(관절) key → LLM 코멘트. scope='full' 일 때만 채워진다(아니면 비어 있음).
+  final Map<String, String> joints;
+
+  /// 구간 key → LLM 구간 코칭. scope='full' 일 때만 채워진다.
+  final Map<String, PhaseCoaching> phases;
 }
 
 /// 종합 피드백 1건.
@@ -396,6 +427,9 @@ class AnalysisPhase {
     this.tempoLevel,
     this.warnings = const [],
     this.deviations = const [],
+    this.coachCardLine = '',
+    this.coachComment = '',
+    this.coachTip = '',
   });
   final String key;
   final String name;
@@ -409,6 +443,12 @@ class AnalysisPhase {
   final String? tempoLevel;
   final List<String> warnings;
   final List<PhaseDeviation> deviations;
+
+  /// LLM(백엔드) 구간 코칭. 서버 `coaching.phases[]` 중 key 가 같은 항목에서 온다.
+  /// 비어 있으면('') 화면이 기존 규칙 기반 문구로 폴백한다.
+  final String coachCardLine; // 구간 카드용 짧은 한 줄
+  final String coachComment; // 구간 상세 서술(수치·가장 벌어진 관절 근거)
+  final String coachTip; // 구간 개선 실천 팁
 }
 
 class SpeedMetric {
