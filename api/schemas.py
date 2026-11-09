@@ -231,11 +231,22 @@ class PhaseCoaching(BaseModel):
     tip: str = Field(description="구간 개선 실천 팁 한 문장")
 
 
+class CoachFeedback(BaseModel):
+    """'AI 코치의 한마디'를 문제→원인→교정→추천훈련 4단으로 펼친 것."""
+
+    problem: str = Field(description="무엇이 아쉬운지")
+    cause: str = Field(description="왜 그런지")
+    fix: str = Field(description="어떻게 고치면 되는지")
+    drill: str = Field(description="추천 훈련(드릴)")
+
+
 class Coaching(BaseModel):
     """LLM(OpenAI)이 만든 코칭 문장. 생성에 실패하면 응답에서 통째로 빠진다."""
 
     overall_summary: str
     overall_coach: str
+    # LLM 코칭일 때만 채워진다. 규칙 기반 폴백/옛 캐시에는 없을 수 있다.
+    coach_feedback: Optional[CoachFeedback] = None
     parts: List[PartCoaching] = Field(default_factory=list)
     # coaching_scope='full' 일 때만 채워진다. overall 이면 빈 리스트.
     joints: List[JointCoaching] = Field(default_factory=list)
