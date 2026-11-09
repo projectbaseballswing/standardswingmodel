@@ -446,7 +446,10 @@ class _PhaseCard extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              _statusText(phase),
+              // LLM 구간 카드 한 줄이 있으면 그걸, 없으면 측정 상태 문구로 폴백.
+              phase.coachCardLine.isNotEmpty
+                  ? phase.coachCardLine
+                  : _statusText(phase),
               style: const TextStyle(
                 fontSize: 11.5,
                 height: 1.35,
@@ -510,13 +513,7 @@ class _PhaseDetailCard extends StatelessWidget {
           const SizedBox(height: 14),
           PhaseMetrics(phase: phase),
           const SizedBox(height: 14),
-          _TipBox(
-            tip: !phase.available
-                ? '분석되지 않은 구간의 자세는 판정하지 않습니다.'
-                : phase.reliability == 'low'
-                ? '검출 신뢰도가 낮습니다. 측정값은 참고용으로 확인하세요.'
-                : '구간 점수와 소요 시간은 서로 다른 지표입니다. 템포 판정이 보류된 구간은 수치만 참고하세요.',
-          ),
+          _buildTipBox(phase),
         ],
       ),
     );
@@ -557,13 +554,41 @@ class _ScoreBlock extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // 코칭 팁 박스
 // ---------------------------------------------------------------------------
-class _TipBox extends StatelessWidget {
-  const _TipBox({required this.tip});
+/// 구간 상세 팁 박스를 만든다.
+///  - LLM 구간 코칭(tip)이 있으면 코치 서술(comment)+실천 팁(tip)을 보여준다.
+///  - 없으면 기존 측정 상태 안내문으로 폴백한다.
+Widget _buildTipBox(AnalysisPhase phase) {
+  final hasCoach =
+      phase.available && phase.reliability != 'low' && phase.coachTip.isNotEmpty;
+  if (hasCoach) {
+    return _TipBox(
+      title: '코치 팁',
+      comment: phase.coachComment,
+      tip: phase.coachTip,
+    );
+  }
+  return _TipBox(
+    title: '확인 안내',
+    tip: !phase.available
+        ? '분석되지 않은 구간의 자세는 판정하지 않습니다.'
+        : phase.reliability == 'low'
+        ? '검출 신뢰도가 낮습니다. 측정값은 참고용으로 확인하세요.'
+        : '구간 점수와 소요 시간은 서로 다른 지표입니다. 템포 판정이 보류된 구간은 수치만 참고하세요.',
+  );
+}
 
+class _TipBox extends StatelessWidget {
+  const _TipBox({required this.title, this.comment, required this.tip});
+
+  final String title;
+
+  /// 팁 위에 덧붙이는 코치 서술. 없으면 null.
+  final String? comment;
   final String tip;
 
   @override
   Widget build(BuildContext context) {
+    final comment = this.comment;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -574,17 +599,31 @@ class _TipBox extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              _Bulb(),
-              SizedBox(width: 6),
+              const _Bulb(),
+              const SizedBox(width: 6),
               Text(
-                '확인 안내',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 8),
+          if (comment != null && comment.isNotEmpty) ...[
+            Text(
+              comment,
+              style: const TextStyle(
+                fontSize: 12.5,
+                height: 1.5,
+                color: AppColors.subtitle,
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           Text(
             tip,
             style: const TextStyle(
