@@ -285,9 +285,32 @@ class FeedbackRepository {
     return Coaching(
       overallSummary: summary,
       overallCoach: coach,
+      coachFeedback: _mapCoachFeedback(raw['coach_feedback']),
       parts: parts,
       joints: joints,
       phases: phases,
+    );
+  }
+
+  /// "AI 코치의 한마디" 4단 상세. 네 필드가 모두 문자열일 때만 유효로 본다.
+  /// (규칙 기반 폴백/옛 캐시에는 없어서 null → 화면은 한 문장 코멘트로 폴백)
+  CoachFeedback? _mapCoachFeedback(dynamic raw) {
+    if (raw is! Map<String, dynamic>) return null;
+    final problem = raw['problem'];
+    final cause = raw['cause'];
+    final fix = raw['fix'];
+    final drill = raw['drill'];
+    if (problem is! String ||
+        cause is! String ||
+        fix is! String ||
+        drill is! String) {
+      return null;
+    }
+    return CoachFeedback(
+      problem: problem,
+      cause: cause,
+      fix: fix,
+      drill: drill,
     );
   }
 

@@ -291,6 +291,29 @@ class PhaseCoaching {
   final String tip;
 }
 
+/// "AI 코치의 한마디"를 문제→원인→교정→추천훈련 4단으로 펼친 것.
+/// LLM 코칭일 때만 있고, 규칙 기반 폴백이면 null (그땐 한 문장 코멘트를 쓴다).
+class CoachFeedback {
+  const CoachFeedback({
+    required this.problem,
+    required this.cause,
+    required this.fix,
+    required this.drill,
+  });
+
+  /// 무엇이 아쉬운지.
+  final String problem;
+
+  /// 왜 그런지(원인).
+  final String cause;
+
+  /// 어떻게 고치면 되는지(교정).
+  final String fix;
+
+  /// 추천 훈련(드릴).
+  final String drill;
+}
+
 /// LLM(백엔드)이 만든 코칭 묶음. 서버 응답 result.coaching 을 담는다.
 ///
 /// 생성에 실패했거나(키 없음·504·할당량 초과 등) 서버가 안 주면 null 이고,
@@ -299,6 +322,7 @@ class Coaching {
   const Coaching({
     required this.overallSummary,
     required this.overallCoach,
+    this.coachFeedback,
     this.parts = const {},
     this.joints = const {},
     this.phases = const {},
@@ -307,8 +331,11 @@ class Coaching {
   /// 종합 요약 (점수 옆 분홍 박스).
   final String overallSummary;
 
-  /// 종합 코칭 한마디 (AI 코치의 한마디).
+  /// 종합 코칭 한마디 헤드라인 (AI 코치의 한마디 제목 아래 한 줄).
   final String overallCoach;
+
+  /// AI 코치의 한마디 4단 상세(문제/원인/교정/추천훈련). 없으면 null(한 문장만 표시).
+  final CoachFeedback? coachFeedback;
 
   /// 부위 key → 부위별 코칭.
   final Map<String, PartCoaching> parts;
