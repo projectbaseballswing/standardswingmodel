@@ -3,6 +3,7 @@ import 'dart:math';
 import '../api/analysis_api.dart';
 import '../api/auth_api.dart' show ApiException;
 import '../models/feedback.dart';
+import 'session.dart';
 
 /// 종합 피드백 데이터 공급.
 ///
@@ -57,17 +58,40 @@ class FeedbackRepository {
       default:
         throw ApiException('분석 상태를 확인할 수 없습니다.');
     }
+
+    // 같은 회원의 직전 분석과 비교(반복 피드백). 직전이 없거나(첫 스윙)
+    // 권한/네트워크 실패면 비교 없이 프로 기준(첫 피드백)으로 폴백한다.
+    final comparison = await _fetchComparison(analysisId);
+
     try {
-      return _mapReport(body);
+      return _mapReport(body, comparison: comparison);
     } on TypeError {
       throw ApiException('분석 결과의 형식이 올바르지 않습니다.');
+    }
+  }
+
+  /// 직전 분석과의 비교 결과. 직전이 없거나 조회 실패면 null.
+  Future<Map<String, dynamic>?> _fetchComparison(String analysisId) async {
+    final userId = Session.instance.userId;
+    if (userId == null || userId.isEmpty) return null;
+    try {
+      final c = await _api.fetchComparison(userId, analysisId);
+      return c['has_previous'] == true ? c : null;
+    } catch (_) {
+      return null; // 비교는 부가 기능 — 실패해도 첫 피드백은 보여준다.
     }
   }
 
   void dispose() => _api.dispose();
 
   /// 서버 응답을 새 업로드와 과거 기록에 공통으로 사용하는 모델로 변환한다.
-  OverallFeedback _mapReport(Map<String, dynamic> body) {
+  ///
+  /// [comparison] 이 있으면(직전 분석 존재) 이전 점수·이전 대비 LLM 코칭을 얹어
+  /// 반복 피드백(이전 대비 증감)으로 보여준다. 없으면 프로 기준(첫 피드백).
+  OverallFeedback _mapReport(
+    Map<String, dynamic> body, {
+    Map<String, dynamic>? comparison,
+  }) {
     final result = body['result'] as Map<String, dynamic>? ?? const {};
     if (result['overall'] is! Map<String, dynamic>) {
       throw ApiException('종합 분석 결과가 없습니다.');
@@ -84,8 +108,26 @@ class FeedbackRepository {
     final totalScore = available ? _number(overall['score']) : null;
     final reliability = _reliability(overall['reliability']);
 
-    // 백엔드 LLM 코칭. 없거나 형식이 틀리면 null → 규칙 기반 폴백.
-    final coaching = _mapCoaching(result['coaching']);
+    // 백엔드 LLM 코칭.
+    //  - 비교(직전 분석 있음)면 '이전 대비' 코칭을, 아니면 '프로 기준' 코칭을 쓴다.
+    //  - 비교인데 LLM 이 없으면 coaching=null → 규칙 기반(이전 대비 증감) 폴백.
+    final coaching = comparison != null
+        ? _mapCoaching(comparison['coaching'])
+        : _mapCoaching(result['coaching']);
+
+    // 부위별 이전 점수 / 전체 이전 점수(비교일 때만).
+    final previousByPart = <String, double?>{};
+    double? previousTotal;
+    if (comparison != null) {
+      previousTotal = _number(comparison['overall_previous_score']);
+      for (final p in (comparison['parts'] as List?) ?? const []) {
+        if (p is! Map<String, dynamic>) continue;
+        final key = p['key'];
+        if (key is String && key.isNotEmpty) {
+          previousByPart[key] = _number(p['previous_score']);
+        }
+      }
+    }
 
     // 부위별 세부 항목(피처)을 모은다.
     // 신뢰도 낮음(뒷팔 팔꿈치 등)과 미측정 세부 항목은 제외하되 부위 점수는 보존한다.
@@ -112,6 +154,7 @@ class FeedbackRepository {
           label: (g['name'] as String?) ?? '부위',
           part: _partOf(key),
           currentScore: score,
+          previousScore: previousByPart[key],
           available: groupAvailable,
           level: score == null || !groupAvailable || groupReliability == 'low'
               ? 'unavailable'
@@ -188,7 +231,8 @@ class FeedbackRepository {
             ),
       items: items,
       coaching: coaching,
-      // 실제 이전 기록과 비교하지 않았으므로 previousTotalScore는 주지 않는다.
+      // 직전 분석이 있으면 이전 전체 점수를 실어 반복 피드백(증감)을 켠다.
+      previousTotalScore: previousTotal,
     );
   }
 
@@ -524,11 +568,9 @@ class FeedbackRepository {
           status == JointStatus.worsened || status == JointStatus.proBad;
       // LLM 부위 코칭이 있으면 요약/포인트를 그걸로 대체(없으면 규칙 기반).
       // - 측정 불가(limited) 부위는 안내 문구를 써야 하므로 LLM 로 덮지 않는다.
-      // - 반복 피드백(이전 대비 비교)은 LLM 이 "프로 기준" 문장이라 맞지 않는다.
-      //   이땐 delta 기반 규칙 문구(_jointSummary/_jointPoints)를 유지한다.
-      //   (이전 대비 LLM 은 백엔드 반복-피드백 API 가 생기면 별도로 추가.)
-      final partCoaching =
-          (status == JointStatus.limited || feedback.hasComparison)
+      // - feedback.coaching 은 비교면 '이전 대비', 아니면 '프로 기준' 코칭이라
+      //   (리포지토리에서 이미 상황에 맞게 선택됨) 상태 구분 없이 그대로 쓴다.
+      final partCoaching = status == JointStatus.limited
           ? null
           : feedback.coaching?.parts[item.key];
       final llmPoints = partCoaching?.points ?? const <String>[];

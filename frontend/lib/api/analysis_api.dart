@@ -132,6 +132,26 @@ class AnalysisApi {
     return _decode(res);
   }
 
+  /// 현재 분석을 같은 회원의 직전 분석과 비교한다(반복 피드백).
+  ///
+  /// [GET] /api/users/{userId}/analyses/{analysisId}/comparison
+  ///   → ComparisonResponse: {has_previous, overall_previous_score, overall_delta,
+  ///      parts[], phases[], joints[], coaching}
+  /// 직전 분석이 없으면 has_previous=false. 비교 대상/권한이 없으면 404/409 → 예외.
+  /// 호출부(FeedbackRepository)가 실패를 삼켜 첫 피드백으로 폴백한다.
+  Future<Map<String, dynamic>> fetchComparison(
+    String userId,
+    String analysisId,
+  ) async {
+    final res = await _get(
+      _uri(
+        '/api/users/${Uri.encodeComponent(userId)}'
+        '/analyses/${Uri.encodeComponent(analysisId)}/comparison',
+      ),
+    );
+    return _decode(res);
+  }
+
   /// 저장된 원본 영상의 임시 URL. 오류에 서버 본문이나 토큰을 노출하지 않는다.
   Future<AnalysisVideoUrl> getVideoUrl(String analysisId) async {
     http.Response res;

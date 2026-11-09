@@ -6,6 +6,7 @@ import 'package:http/testing.dart';
 import 'package:swing_analysis/api/analysis_api.dart';
 import 'package:swing_analysis/api/auth_api.dart';
 import 'package:swing_analysis/data/feedback_repository.dart';
+import 'package:swing_analysis/data/session.dart';
 import 'package:swing_analysis/models/feedback.dart';
 
 import 'feedback_fixture.dart';
@@ -352,5 +353,88 @@ void main() {
     // overall_summary/overall_coach 가 없으면 통째로 무시 → 규칙 기반.
     expect(feedback.coaching, isNull);
     expect(feedback.summary, contains('스윙 분석 결과'));
+  });
+
+  group('comparison (반복 피드백)', () {
+    setUp(() => Session.instance.userId = 'user-1');
+    tearDown(() => Session.instance.clear());
+
+    Map<String, dynamic> comparisonBody() => {
+      'has_previous': true,
+      'previous_analysis_id': 'prev-1',
+      'overall_previous_score': 70.0,
+      'overall_delta': 7.3,
+      'parts': [
+        {'key': 'lead_arm', 'previous_score': 60.0, 'delta': 3.8},
+      ],
+      'phases': <dynamic>[],
+      'joints': <dynamic>[],
+      'coaching': {
+        'overall_summary': '지난 스윙보다 전체적으로 좋아졌어요.',
+        'overall_coach': '앞팔 안정감을 계속 유지하세요.',
+        'parts': [
+          {
+            'key': 'lead_arm',
+            'summary': '앞팔이 지난번보다 안정됐어요.',
+            'keep_points': ['지금 리듬을 유지해 보세요.'],
+            'improve_points': <String>[],
+          },
+        ],
+      },
+    };
+
+    // 분석 조회와 comparison 조회를 경로로 구분해 응답한다.
+    FeedbackRepository repoWithComparison(Map<String, dynamic> comparison) =>
+        repositoryFor((request) async {
+          if (request.url.path.endsWith('/comparison')) {
+            return response(comparison);
+          }
+          return response(storedAnalysis());
+        });
+
+    test('previous scores and 이전 대비 LLM coaching are applied', () async {
+      final repo = repoWithComparison(comparisonBody());
+      final feedback = await repo.fetchFeedback('saved-analysis');
+
+      // 전체: 이전 점수·증감 활성화.
+      expect(feedback.hasComparison, isTrue);
+      expect(feedback.previousTotalScore, 70.0);
+      expect(feedback.totalDelta, closeTo(7.3, 1e-9));
+      // 부위: 이전 점수 매칭.
+      final item = feedback.items.single;
+      expect(item.previousScore, 60.0);
+      expect(item.delta, closeTo(3.8, 1e-9));
+      // 코칭: '이전 대비' 문장이 요약·부위에 반영.
+      expect(feedback.summary, '지난 스윙보다 전체적으로 좋아졌어요.');
+      expect(feedback.coaching!.parts['lead_arm']!.summary, '앞팔이 지난번보다 안정됐어요.');
+
+      // 부위 상세: 개선(improved) 상태 + 이전 대비 LLM 포인트.
+      final part = repo.buildPartAnalyses(feedback).single;
+      expect(part.status, JointStatus.improved);
+      expect(part.summary, '앞팔이 지난번보다 안정됐어요.');
+      expect(part.points, ['지금 리듬을 유지해 보세요.']);
+    });
+
+    test('has_previous=false falls back to first-feedback (no comparison)',
+        () async {
+      final repo = repoWithComparison({'has_previous': false});
+      final feedback = await repo.fetchFeedback('saved-analysis');
+      expect(feedback.hasComparison, isFalse);
+      expect(feedback.previousTotalScore, isNull);
+      expect(feedback.items.single.previousScore, isNull);
+    });
+
+    test('comparison fetch failure is swallowed (still shows first feedback)',
+        () async {
+      final repo = repositoryFor((request) async {
+        if (request.url.path.endsWith('/comparison')) {
+          return response({'detail': 'nope'}, 500);
+        }
+        return response(storedAnalysis());
+      });
+      final feedback = await repo.fetchFeedback('saved-analysis');
+      expect(feedback.hasComparison, isFalse);
+      expect(feedback.totalScore, 77.3);
+    });
   });
 }
