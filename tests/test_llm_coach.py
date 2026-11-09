@@ -65,7 +65,7 @@ def test_build_llm_input_drops_low_reliability():
 
 def test_generate_coaching_without_key_returns_none():
     # 키가 없으면 네트워크를 타지 않고 바로 None.
-    assert generate_coaching(_report(), api_key="", model="gemini-3.8-flash") is None
+    assert generate_coaching(_report(), api_key="", model="gpt-6-luna") is None
 
 
 def test_generate_coaching_no_parts_returns_none():
@@ -73,7 +73,7 @@ def test_generate_coaching_no_parts_returns_none():
     report["overall"]["group_scores"] = []
     report["joints"] = []
     # 믿을 부위가 없으면 키가 있어도 LLM 을 부르지 않는다.
-    assert generate_coaching(report, api_key="fake-key", model="gemini-3.8-flash") is None
+    assert generate_coaching(report, api_key="fake-key", model="gpt-6-luna") is None
 
 
 # ---------------------------------------------------------------------------
@@ -190,5 +190,5 @@ def test_comparison_input_missing_previous_part_gives_null_delta():
 def test_generate_comparison_coaching_without_key_returns_none():
     current = _report()
     assert generate_comparison_coaching(
-        current, _worse_previous(current), api_key="", model="gemini-flash-lite-latest"
+        current, _worse_previous(current), api_key="", model="gpt-6-luna"
     ) is None
