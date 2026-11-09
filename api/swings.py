@@ -178,7 +178,7 @@ def _comparison_coaching(db: Session, current: Swing, previous: Swing) -> dict |
 
     키가 없거나 생성 실패하면 None → 프론트는 규칙 기반으로 폴백한다.
     """
-    if not settings.gemini_api_key:
+    if not settings.openai_api_key:
         return None
     if not isinstance(current.result, dict) or not isinstance(previous.result, dict):
         return None
@@ -194,8 +194,8 @@ def _comparison_coaching(db: Session, current: Swing, previous: Swing) -> dict |
     coaching = generate_comparison_coaching(
         current.result,
         previous.result,
-        api_key=settings.gemini_api_key,
-        model=settings.gemini_model,
+        api_key=settings.openai_api_key,
+        model=settings.openai_model,
         scope=settings.coaching_scope,
     )
     if coaching is not None:

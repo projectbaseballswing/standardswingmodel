@@ -1,4 +1,4 @@
-"""LLM(Gemini) 기반 코칭 문장 생성.
+"""LLM(OpenAI) 기반 코칭 문장 생성.
 
 `compare_v2` 가 만든 구조화 리포트(dict)를 받아서, 부위별 요약·유지점·개선점과
 전체 요약 문장을 자연어로 만든다. 지금까지 프론트에서 규칙 기반(`_jointSummary`
@@ -26,7 +26,7 @@ GOOD_SCORE = 80
 
 
 # ---------------------------------------------------------------------------
-# 출력 스키마 (Gemini 가 이 모양의 JSON 만 돌려주도록 강제)
+# 출력 스키마 (OpenAI 가 이 모양의 JSON 만 돌려주도록 강제)
 # ---------------------------------------------------------------------------
 class PartCoaching(BaseModel):
     key: str  # 부위 key (예: front_arm). 입력으로 준 것 중 하나.
@@ -228,6 +228,47 @@ FULL_SCOPE_INSTRUCTION = """\
 
 
 # ---------------------------------------------------------------------------
+# OpenAI 호출 (structured outputs 로 Pydantic 스키마 강제)
+# ---------------------------------------------------------------------------
+def _call_openai(
+    *,
+    api_key: str,
+    model: str,
+    system_instruction: str,
+    payload: Dict[str, Any],
+    schema: type[BaseModel],
+    timeout_s: float,
+) -> Optional[Dict[str, Any]]:
+    """OpenAI chat.completions 로 코칭 JSON 을 받아 dict 로 돌려준다. 실패하면 ``None``.
+
+    ``response_format=schema`` 로 모델이 정확히 그 Pydantic 모양의 JSON 만 내도록 강제한다.
+    """
+    try:
+        import json
+
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key, timeout=timeout_s)
+        completion = client.beta.chat.completions.parse(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            response_format=schema,
+            # gpt-6-luna 등 일부 모델은 temperature 기본값(1)만 허용한다. 지정하지 않는다.
+        )
+        parsed = completion.choices[0].message.parsed
+        if parsed is None:
+            logger.warning("OpenAI 코칭 응답을 파싱하지 못했습니다.")
+            return None
+        return parsed.model_dump()
+    except Exception:
+        logger.exception("OpenAI 코칭 생성 실패 — 규칙 기반 폴백으로 넘어갑니다.")
+        return None
+
+
+# ---------------------------------------------------------------------------
 # 진입점
 # ---------------------------------------------------------------------------
 def generate_coaching(
@@ -268,34 +309,14 @@ def generate_coaching(
     schema = CoachingFull if full else Coaching
     system_instruction = SYSTEM_INSTRUCTION + (FULL_SCOPE_INSTRUCTION if full else "")
 
-    try:
-        import json
-
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(timeout=int(timeout_s * 1000)),
-        )
-        response = client.models.generate_content(
-            model=model,
-            contents=json.dumps(payload, ensure_ascii=False),
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                response_schema=schema,
-                temperature=0.4,
-            ),
-        )
-        parsed = response.parsed
-        if parsed is None:
-            logger.warning("Gemini 코칭 응답을 파싱하지 못했습니다.")
-            return None
-        return parsed.model_dump()
-    except Exception:
-        logger.exception("Gemini 코칭 생성 실패 — 규칙 기반 폴백으로 넘어갑니다.")
-        return None
+    return _call_openai(
+        api_key=api_key,
+        model=model,
+        system_instruction=system_instruction,
+        payload=payload,
+        schema=schema,
+        timeout_s=timeout_s,
+    )
 
 
 # ===========================================================================
@@ -518,31 +539,11 @@ def generate_comparison_coaching(
     schema = CoachingFull if full else Coaching
     system_instruction = COMPARISON_SYSTEM_INSTRUCTION + (COMPARISON_FULL_INSTRUCTION if full else "")
 
-    try:
-        import json
-
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(timeout=int(timeout_s * 1000)),
-        )
-        response = client.models.generate_content(
-            model=model,
-            contents=json.dumps(payload, ensure_ascii=False),
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                response_schema=schema,
-                temperature=0.4,
-            ),
-        )
-        parsed = response.parsed
-        if parsed is None:
-            logger.warning("Gemini 비교 코칭 응답을 파싱하지 못했습니다.")
-            return None
-        return parsed.model_dump()
-    except Exception:
-        logger.exception("Gemini 비교 코칭 생성 실패 — 폴백으로 넘어갑니다.")
-        return None
+    return _call_openai(
+        api_key=api_key,
+        model=model,
+        system_instruction=system_instruction,
+        payload=payload,
+        schema=schema,
+        timeout_s=timeout_s,
+    )

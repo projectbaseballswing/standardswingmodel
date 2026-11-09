@@ -232,7 +232,7 @@ class PhaseCoaching(BaseModel):
 
 
 class Coaching(BaseModel):
-    """LLM(Gemini)이 만든 코칭 문장. 생성에 실패하면 응답에서 통째로 빠진다."""
+    """LLM(OpenAI)이 만든 코칭 문장. 생성에 실패하면 응답에서 통째로 빠진다."""
 
     overall_summary: str
     overall_coach: str
