@@ -292,10 +292,11 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('swing-3d-mode')), findsOneWidget);
+    // 모드 토글 제거(S2 단일 표시) → 3D 콘텐츠 표시 여부는 타임라인 슬라이더로 확인.
+    expect(find.byKey(const Key('swing-3d-timeline')), findsOneWidget);
     Session.instance.clear();
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('swing-3d-mode')), findsNothing);
+    expect(find.byKey(const Key('swing-3d-timeline')), findsNothing);
     expect(find.textContaining('로그인 세션이 없습니다'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     api.dispose();

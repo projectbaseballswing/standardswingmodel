@@ -204,6 +204,9 @@ void main() {
       expect(disposals, 1);
       expect(tester.takeException(), isNull);
     },
+    // P0/원본 좌표 전환 비교가 본질 — 모드 토글 보류(S2 단일 표시)로 함께 중단.
+    // 토글 복구 시 skip 해제. (improved 기본 검증은 final 화면 테스트가 커버)
+    skip: true,
   );
 
   testWidgets('P2 can omit all connections while 12 observed joints remain', (
@@ -271,6 +274,9 @@ void main() {
         label,
       );
     },
+    // '모드 전환 시 시간 미초기화' 검증이 토글에 의존 — 모드 토글 보류로 함께 중단.
+    // 토글 복구 시 skip 해제.
+    skip: true,
   );
 }
 

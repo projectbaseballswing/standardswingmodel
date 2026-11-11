@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:swing_analysis/features/swing_3d/domain/pose.dart';
-import 'package:swing_analysis/features/swing_3d/domain/stabilizer.dart';
+// 모드 전환(P0 비교) 검증 보류로 현재 미사용 — 토글 복구 시 함께 복구.
+// import 'package:swing_analysis/features/swing_3d/domain/stabilizer.dart';
 import 'synthetic_pose_fixture.dart';
 import 'package:swing_analysis/features/swing_3d/swing_3d_screen.dart';
 
@@ -80,7 +81,8 @@ void main() {
     'frame 54, 71 and 89 head stays world-fixed under orbit and zoom; raw/P0 retained',
     (tester) async {
       await open(tester);
-      final p0 = PoseStabilizer(clip);
+      // 모드 전환 검증용(P0 비교) — 토글 복구 시 함께 복구.
+      // final p0 = PoseStabilizer(clip);
       for (final index in [54, 71, 89]) {
         await seek(tester, index);
         final head = scene.headPose;
@@ -97,48 +99,28 @@ void main() {
         await tester.tap(find.byTooltip('확대'));
         await tester.pump();
         expect(scene.headPose, head);
-        final camera = [
-          scene.yaw,
-          scene.pitch,
-          scene.distance,
-          scene.cameraTargetY,
-        ];
-        await tester.tap(find.text('안정화 P0').first);
-        await tester.pump();
-        expect([
-          scene.yaw,
-          scene.pitch,
-          scene.distance,
-          scene.cameraTargetY,
-        ], camera);
-        expect(scene.headPose, isNull);
-        expect(
-          scene.positions,
-          p0.frameAt(index).positions.map((p) => p?.toList()).toList(),
-        );
-        await tester.tap(find.text('원본 좌표').first);
-        await tester.pump();
-        expect([
-          scene.yaw,
-          scene.pitch,
-          scene.distance,
-          scene.cameraTargetY,
-        ], camera);
-        expect(scene.headPose, isNull);
-        expect(
-          scene.positions,
-          p0.frameAt(index).rawPositions.map((p) => p?.toList()).toList(),
-        );
-        await tester.tap(find.text('개선 시연').first);
-        await tester.pump();
-        expect([
-          scene.yaw,
-          scene.pitch,
-          scene.distance,
-          scene.cameraTargetY,
-        ], camera);
-        expect(scene.headPose, head);
-        expect(scene.positions, body);
+        // 모드 토글 보류(S2 단일 표시)로 P0/원본/개선 전환 검증은 일시 중단.
+        // 토글 복구 시 camera 캡처와 아래 전환 검증 블록을 함께 복구할 것.
+        // final camera = [
+        //   scene.yaw, scene.pitch, scene.distance, scene.cameraTargetY,
+        // ];
+        // await tester.tap(find.text('안정화 P0').first);
+        // await tester.pump();
+        // expect([scene.yaw, scene.pitch, scene.distance, scene.cameraTargetY], camera);
+        // expect(scene.headPose, isNull);
+        // expect(scene.positions,
+        //     p0.frameAt(index).positions.map((p) => p?.toList()).toList());
+        // await tester.tap(find.text('원본 좌표').first);
+        // await tester.pump();
+        // expect([scene.yaw, scene.pitch, scene.distance, scene.cameraTargetY], camera);
+        // expect(scene.headPose, isNull);
+        // expect(scene.positions,
+        //     p0.frameAt(index).rawPositions.map((p) => p?.toList()).toList());
+        // await tester.tap(find.text('개선 시연').first);
+        // await tester.pump();
+        // expect([scene.yaw, scene.pitch, scene.distance, scene.cameraTargetY], camera);
+        // expect(scene.headPose, head);
+        // expect(scene.positions, body);
       }
       expect(created, 1);
       expect(disposed, 0);
