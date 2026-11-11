@@ -96,17 +96,17 @@ class JobManager:
         pipeline_factory: Callable[[], SwingPipeline],
         reference_fps: float,
         worker_id: str,
-        gemini_api_key: str = "",
-        gemini_model: str = "",
+        openai_api_key: str = "",
+        openai_model: str = "",
         coaching_scope: str = "overall",
         pose_storage_factory=None,
     ):
         self.store = store
         self.reference_fps = reference_fps
         self.worker_id = worker_id
-        # LLM(Gemini) 코칭 문장. 키가 비어 있으면 호출하지 않고 프론트 규칙 기반 폴백을 둔다.
-        self.gemini_api_key = gemini_api_key
-        self.gemini_model = gemini_model
+        # LLM(OpenAI) 코칭 문장. 키가 비어 있으면 호출하지 않고 프론트 규칙 기반 폴백을 둔다.
+        self.openai_api_key = openai_api_key
+        self.openai_model = openai_model
         self.coaching_scope = coaching_scope
         self._pose_storage_factory = pose_storage_factory
         self._pipeline_factory = pipeline_factory
@@ -246,12 +246,12 @@ class JobManager:
         실패해도 분석 자체는 성공으로 둔다. 프론트는 ``coaching`` 이 없으면
         기존 규칙 기반 문장을 그대로 쓴다.
         """
-        if not self.gemini_api_key or not isinstance(job.result, dict):
+        if not self.openai_api_key or not isinstance(job.result, dict):
             return
         coaching = generate_coaching(
             job.result,
-            api_key=self.gemini_api_key,
-            model=self.gemini_model,
+            api_key=self.openai_api_key,
+            model=self.openai_model,
             scope=self.coaching_scope,
         )
         if coaching is not None:

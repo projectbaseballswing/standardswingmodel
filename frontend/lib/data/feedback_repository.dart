@@ -3,6 +3,7 @@ import 'dart:math';
 import '../api/analysis_api.dart';
 import '../api/auth_api.dart' show ApiException;
 import '../models/feedback.dart';
+import 'session.dart';
 
 /// 종합 피드백 데이터 공급.
 ///
@@ -57,17 +58,40 @@ class FeedbackRepository {
       default:
         throw ApiException('분석 상태를 확인할 수 없습니다.');
     }
+
+    // 같은 회원의 직전 분석과 비교(반복 피드백). 직전이 없거나(첫 스윙)
+    // 권한/네트워크 실패면 비교 없이 프로 기준(첫 피드백)으로 폴백한다.
+    final comparison = await _fetchComparison(analysisId);
+
     try {
-      return _mapReport(body);
+      return _mapReport(body, comparison: comparison);
     } on TypeError {
       throw ApiException('분석 결과의 형식이 올바르지 않습니다.');
+    }
+  }
+
+  /// 직전 분석과의 비교 결과. 직전이 없거나 조회 실패면 null.
+  Future<Map<String, dynamic>?> _fetchComparison(String analysisId) async {
+    final userId = Session.instance.userId;
+    if (userId == null || userId.isEmpty) return null;
+    try {
+      final c = await _api.fetchComparison(userId, analysisId);
+      return c['has_previous'] == true ? c : null;
+    } catch (_) {
+      return null; // 비교는 부가 기능 — 실패해도 첫 피드백은 보여준다.
     }
   }
 
   void dispose() => _api.dispose();
 
   /// 서버 응답을 새 업로드와 과거 기록에 공통으로 사용하는 모델로 변환한다.
-  OverallFeedback _mapReport(Map<String, dynamic> body) {
+  ///
+  /// [comparison] 이 있으면(직전 분석 존재) 이전 점수·이전 대비 LLM 코칭을 얹어
+  /// 반복 피드백(이전 대비 증감)으로 보여준다. 없으면 프로 기준(첫 피드백).
+  OverallFeedback _mapReport(
+    Map<String, dynamic> body, {
+    Map<String, dynamic>? comparison,
+  }) {
     final result = body['result'] as Map<String, dynamic>? ?? const {};
     if (result['overall'] is! Map<String, dynamic>) {
       throw ApiException('종합 분석 결과가 없습니다.');
@@ -95,8 +119,26 @@ class FeedbackRepository {
         ),
     ];
 
-    // 백엔드 LLM 코칭. 없거나 형식이 틀리면 null → 규칙 기반 폴백.
-    final coaching = _mapCoaching(result['coaching']);
+    // 백엔드 LLM 코칭.
+    //  - 비교(직전 분석 있음)면 '이전 대비' 코칭을, 아니면 '프로 기준' 코칭을 쓴다.
+    //  - 비교인데 LLM 이 없으면 coaching=null → 규칙 기반(이전 대비 증감) 폴백.
+    final coaching = comparison != null
+        ? _mapCoaching(comparison['coaching'])
+        : _mapCoaching(result['coaching']);
+
+    // 부위별 이전 점수 / 전체 이전 점수(비교일 때만).
+    final previousByPart = <String, double?>{};
+    double? previousTotal;
+    if (comparison != null) {
+      previousTotal = _number(comparison['overall_previous_score']);
+      for (final p in (comparison['parts'] as List?) ?? const []) {
+        if (p is! Map<String, dynamic>) continue;
+        final key = p['key'];
+        if (key is String && key.isNotEmpty) {
+          previousByPart[key] = _number(p['previous_score']);
+        }
+      }
+    }
 
     // 부위별 세부 항목(피처)을 모은다.
     // 신뢰도 낮음(뒷팔 팔꿈치 등)과 미측정 세부 항목은 제외하되 부위 점수는 보존한다.
@@ -104,7 +146,9 @@ class FeedbackRepository {
     for (final j in rawJoints.whereType<Map<String, dynamic>>()) {
       if (j['available'] == false || j['reliability'] == 'low') continue;
       final part = (j['body_part'] as String?) ?? 'other';
-      (featuresByPart[part] ??= []).add(_mapFeature(j, eventBased: eventBased));
+      (featuresByPart[part] ??= []).add(
+        _mapFeature(j, eventBased: eventBased, coaching: coaching),
+      );
     }
 
     // 부위(그룹) 단위로 묶는다. 점수는 group_scores.score 실제값.
@@ -121,6 +165,7 @@ class FeedbackRepository {
           label: (g['name'] as String?) ?? '부위',
           part: _partOf(key),
           currentScore: score,
+          previousScore: previousByPart[key],
           available: groupAvailable,
           level: score == null || !groupAvailable || groupReliability == 'low'
               ? 'unavailable'
@@ -176,6 +221,7 @@ class FeedbackRepository {
       phases: _mapPhases(
         _map(result['phases'])['phases'],
         swingChecks: rotationChecks,
+        coaching: coaching,
       ),
       rotationChecks: rotationChecks,
       postureScore: available ? _number(overall['posture_score']) : null,
@@ -204,7 +250,8 @@ class FeedbackRepository {
             ),
       items: items,
       coaching: coaching,
-      // 실제 이전 기록과 비교하지 않았으므로 previousTotalScore는 주지 않는다.
+      // 직전 분석이 있으면 이전 전체 점수를 실어 반복 피드백(증감)을 켠다.
+      previousTotalScore: previousTotal,
     );
   }
 
@@ -230,22 +277,80 @@ class FeedbackRepository {
       );
     }
 
-    return Coaching(overallSummary: summary, overallCoach: coach, parts: parts);
+    // 관절(피처) key → 코멘트. scope='full' 일 때만 서버가 채워 준다.
+    final joints = <String, String>{};
+    for (final j in (raw['joints'] as List?) ?? const []) {
+      if (j is! Map<String, dynamic>) continue;
+      final key = j['key'];
+      final comment = j['comment'];
+      if (key is! String || key.isEmpty) continue;
+      if (comment is! String || comment.isEmpty) continue;
+      joints[key] = comment;
+    }
+
+    // 구간 key → 구간 코칭(card_line/comment/tip). scope='full' 일 때만.
+    final phases = <String, PhaseCoaching>{};
+    for (final p in (raw['phases'] as List?) ?? const []) {
+      if (p is! Map<String, dynamic>) continue;
+      final key = p['key'];
+      if (key is! String || key.isEmpty) continue;
+      phases[key] = PhaseCoaching(
+        cardLine: (p['card_line'] as String?) ?? '',
+        comment: (p['comment'] as String?) ?? '',
+        tip: (p['tip'] as String?) ?? '',
+      );
+    }
+
+    return Coaching(
+      overallSummary: summary,
+      overallCoach: coach,
+      coachFeedback: _mapCoachFeedback(raw['coach_feedback']),
+      parts: parts,
+      joints: joints,
+      phases: phases,
+    );
+  }
+
+  /// "AI 코치의 한마디" 4단 상세. 네 필드가 모두 문자열일 때만 유효로 본다.
+  /// (규칙 기반 폴백/옛 캐시에는 없어서 null → 화면은 한 문장 코멘트로 폴백)
+  CoachFeedback? _mapCoachFeedback(dynamic raw) {
+    if (raw is! Map<String, dynamic>) return null;
+    final problem = raw['problem'];
+    final cause = raw['cause'];
+    final fix = raw['fix'];
+    final drill = raw['drill'];
+    if (problem is! String ||
+        cause is! String ||
+        fix is! String ||
+        drill is! String) {
+      return null;
+    }
+    return CoachFeedback(
+      problem: problem,
+      cause: cause,
+      fix: fix,
+      drill: drill,
+    );
   }
 
   /// 서버 joints[] 한 건을 세부 항목으로 변환한다.
+  ///
+  /// [coaching] 이 있으면(scope='full') 이 피처 key 에 해당하는 LLM 코멘트를 붙인다.
   FeatureAnalysis _mapFeature(
     Map<String, dynamic> j, {
     required bool eventBased,
+    Coaching? coaching,
   }) {
+    final key = (j['key'] as String?) ?? '';
     return FeatureAnalysis(
-      key: (j['key'] as String?) ?? '',
+      key: key,
       name: (j['name'] as String?) ?? '항목',
       level: (j['level'] as String?) ?? 'good',
       direction: _worstPhaseDirection(j),
       directionText: _worstPhaseDirectionText(j),
       unit: (j['unit'] as String?) ?? 'deg',
       description: (j['description'] as String?) ?? '',
+      comment: coaching?.joints[key] ?? '',
       impact: _measure(j['impact']),
       rangeOfMotion: _measure(j['range_of_motion']),
       series: _series(j['series']),
@@ -371,43 +476,52 @@ class FeedbackRepository {
   Iterable<Map<String, dynamic>> _rows(dynamic v) =>
       v is List ? v.whereType<Map<String, dynamic>>() : const [];
 
+  /// [coaching] 이 있으면(scope='full') 구간 key 로 LLM 코칭(card_line/comment/tip)을 붙인다.
   List<AnalysisPhase> _mapPhases(
     dynamic raw, {
     List<RotationCheck> swingChecks = const [],
+    Coaching? coaching,
   }) => [
     for (final p in _rows(raw))
-      AnalysisPhase(
-        key: p['key'] as String? ?? '',
-        name: p['name'] as String? ?? p['key'] as String? ?? '구간',
-        available: p['available'] != false,
-        reliability: _reliability(p['reliability']),
-        score: p['available'] == false ? null : _number(p['score']),
-        unavailableReason: p['unavailable_reason'] as String?,
-        userDurationMs: p['available'] == false
-            ? null
-            : _number(p['user_duration_ms']),
-        referenceDurationMs: _number(p['reference_duration_ms']),
-        tempoRatio: p['available'] == false ? null : _number(p['tempo_ratio']),
-        tempoLevel: p['available'] == false
-            ? null
-            : p['tempo_level'] as String?,
-        warnings: _strings(p['warnings']),
-        checks: p['key'] == 'swing' ? swingChecks : const [],
-        deviations: p['available'] == false
-            ? const []
-            : [
-                for (final d in _rows(p['top_deviations']))
-                  PhaseDeviation(
-                    joint: d['joint'] as String? ?? '',
-                    name: d['joint_name'] as String? ?? '관절',
-                    diff: _number(d['diff']),
-                    zScore: _number(d['z_score']),
-                    direction: d['direction'] as String? ?? 'similar',
-                    directionText: d['direction_text'] as String?,
-                    level: d['level'] as String? ?? '',
-                  ),
-              ],
-      ),
+      () {
+        final key = p['key'] as String? ?? '';
+        final coach = coaching?.phases[key];
+        return AnalysisPhase(
+          key: key,
+          name: p['name'] as String? ?? p['key'] as String? ?? '구간',
+          available: p['available'] != false,
+          reliability: _reliability(p['reliability']),
+          score: p['available'] == false ? null : _number(p['score']),
+          unavailableReason: p['unavailable_reason'] as String?,
+          userDurationMs: p['available'] == false
+              ? null
+              : _number(p['user_duration_ms']),
+          referenceDurationMs: _number(p['reference_duration_ms']),
+          tempoRatio: p['available'] == false ? null : _number(p['tempo_ratio']),
+          tempoLevel: p['available'] == false
+              ? null
+              : p['tempo_level'] as String?,
+          warnings: _strings(p['warnings']),
+          checks: key == 'swing' ? swingChecks : const [],
+          deviations: p['available'] == false
+              ? const []
+              : [
+                  for (final d in _rows(p['top_deviations']))
+                    PhaseDeviation(
+                      joint: d['joint'] as String? ?? '',
+                      name: d['joint_name'] as String? ?? '관절',
+                      diff: _number(d['diff']),
+                      zScore: _number(d['z_score']),
+                      direction: d['direction'] as String? ?? 'similar',
+                      directionText: d['direction_text'] as String?,
+                      level: d['level'] as String? ?? '',
+                    ),
+                ],
+          coachCardLine: coach?.cardLine ?? '',
+          coachComment: coach?.comment ?? '',
+          coachTip: coach?.tip ?? '',
+        );
+      }(),
   ];
 
   List<SpeedMetric> _mapSpeed(Map<String, dynamic> raw) => [
@@ -525,11 +639,9 @@ class FeedbackRepository {
           status == JointStatus.worsened || status == JointStatus.proBad;
       // LLM 부위 코칭이 있으면 요약/포인트를 그걸로 대체(없으면 규칙 기반).
       // - 측정 불가(limited) 부위는 안내 문구를 써야 하므로 LLM 로 덮지 않는다.
-      // - 반복 피드백(이전 대비 비교)은 LLM 이 "프로 기준" 문장이라 맞지 않는다.
-      //   이땐 delta 기반 규칙 문구(_jointSummary/_jointPoints)를 유지한다.
-      //   (이전 대비 LLM 은 백엔드 반복-피드백 API 가 생기면 별도로 추가.)
-      final partCoaching =
-          (status == JointStatus.limited || feedback.hasComparison)
+      // - feedback.coaching 은 비교면 '이전 대비', 아니면 '프로 기준' 코칭이라
+      //   (리포지토리에서 이미 상황에 맞게 선택됨) 상태 구분 없이 그대로 쓴다.
+      final partCoaching = status == JointStatus.limited
           ? null
           : feedback.coaching?.parts[item.key];
       final llmPoints = partCoaching?.points ?? const <String>[];

@@ -80,27 +80,36 @@ class _MannequinViewState extends State<MannequinView> {
     (7, 9, .070),
     (9, 11, .050),
   ];
+  // 운동선수형 비율(어깨·허벅지 굵게, 손목·발목 가늘게). compare3d 뷰어 RB 와 일치.
   static const _jointRadii = <double>[
-    .065,
-    .065,
-    .048,
-    .048,
-    .036,
-    .036,
-    .067,
-    .067,
-    .053,
-    .053,
-    .041,
-    .041,
+    .085,
+    .085,
+    .050,
+    .050,
+    .033,
+    .033,
+    .076,
+    .076,
+    .058,
+    .058,
+    .039,
+    .039,
   ];
 
   late final _ReportingThreeJS _three;
   late final three.PerspectiveCamera _camera;
   late final three.SphereGeometry _sphere;
   late final three.CylinderGeometry _cylinder;
-  late final three.BufferGeometry _torsoGeometry;
-  late final three.Float32BufferAttribute _torsoVertices;
+  // 사지별 테이퍼 원뿔대(반경은 geom에 baked, 길이만 스케일). 관절 구가 끝을 메워 매끈하게 블렌딩.
+  final _limbGeo = <three.CylinderGeometry>[];
+  // 매끈한 단일 몸통(가슴 넓고 허리 좁고 골반 넓은 프로파일 회전체). compare3d 뷰어와 동일.
+  late final three.LatheGeometry _torsoLathe;
+  // 앞뒤(forward)로 납작하게 눌러 실제 사람 몸통 단면에 가깝게.
+  static const _torsoFlatten = 0.66;
+  // compare3d 룩: 민둥 달걀 머리. 코·눈·뒤통수 원반(얼굴마커)을 끈다.
+  static const _showFaceFeatures = false;
+  // 몸통(Lathe)에 흡수되는 구조용 뼈: 어깨선(0)·좌우 몸통옆(5,6)·골반(7).
+  static const _torsoEdges = {0, 5, 6, 7};
   late final three.Material _ivory;
   late final three.Material _cyan;
   late final three.Material _warning;
@@ -121,6 +130,9 @@ class _MannequinViewState extends State<MannequinView> {
   late final three.Material _directionColor;
   final _guide = three.Group();
   late final three.Mesh _torso;
+  // 배트(손잡이 가늘고 배럴 두꺼운 테이퍼) + 노브. 팔뚝 방향으로 추정 배치.
+  late final three.Mesh _bat;
+  late final three.Mesh _batKnob;
   late final three.Mesh _pelvis;
   late final three.Mesh _head;
   late final three.Mesh _neck;
@@ -144,7 +156,7 @@ class _MannequinViewState extends State<MannequinView> {
         clearAlpha: 1,
         alpha: false,
         antialias: true,
-        enableShadowMap: false,
+        enableShadowMap: true,
         toneMapping: three.NoToneMapping,
         screenResolution: 1.0,
       ),
@@ -191,6 +203,7 @@ class _MannequinViewState extends State<MannequinView> {
   three.Mesh _mesh(three.BufferGeometry geometry, three.Material material) {
     final result = three.Mesh(geometry, material);
     result.visible = false;
+    result.castShadow = true;
     _three.scene.add(result);
     return result;
   }
@@ -199,6 +212,10 @@ class _MannequinViewState extends State<MannequinView> {
     if (!mounted) return;
     _sphere = three.SphereGeometry(1, 20, 14);
     _cylinder = three.CylinderGeometry(1, 1, 1, 16);
+    // 각 사지 = 양 끝 관절 반경으로 테이퍼진 원뿔대. 로컬 +Y 끝(top)=자식관절(b), -Y(bottom)=부모(a).
+    for (final (a, b, _) in _edges) {
+      _limbGeo.add(three.CylinderGeometry(_jointRadii[b], _jointRadii[a], 1, 18));
+    }
     _ivory = _material(MannequinStyle.body);
     _cyan = _material(MannequinStyle.body);
     _warning = _material(MannequinStyle.inactive);
@@ -217,7 +234,28 @@ class _MannequinViewState extends State<MannequinView> {
     );
     final keyLight = three.DirectionalLight(MannequinStyle.keyLight, 1.20);
     keyLight.position.setValues(3, 5, 4);
+    // compare3d 처럼 접지 그림자를 드리운다.
+    keyLight.castShadow = true;
+    keyLight.shadow!.mapSize.setValues(1024, 1024);
+    keyLight.shadow!.bias = -0.0009;
+    final shadowCam = keyLight.shadow!.camera! as three.OrthographicCamera;
+    shadowCam.near = 0.5;
+    shadowCam.far = 25;
+    shadowCam.left = -2;
+    shadowCam.right = 2;
+    shadowCam.top = 2.4;
+    shadowCam.bottom = -2.4;
+    shadowCam.updateProjectionMatrix();
     _three.scene.add(keyLight);
+    // 그림자를 받는 바닥(그림자만 보이는 투명 재질). 가이드 그리드와 같은 평면에 둔다.
+    final groundMaterial = three.ShadowMaterial();
+    groundMaterial.opacity = .30;
+    groundMaterial.transparent = true;
+    _materials.add(groundMaterial);
+    final ground = three.Mesh(three.PlaneGeometry(12, 12), groundMaterial);
+    ground.rotation.x = -math.pi / 2;
+    ground.receiveShadow = true;
+    _guide.add(ground);
     final rimLight = three.DirectionalLight(MannequinStyle.rimLight, .65);
     rimLight.position.setValues(-3, 2, -4);
     _three.scene.add(rimLight);
@@ -230,54 +268,30 @@ class _MannequinViewState extends State<MannequinView> {
       _rawJoints.add(_mesh(_sphere, _rawGhost));
     }
     for (var j = 0; j < _edges.length; j++) {
-      _limbs.add(_mesh(_cylinder, _cyan));
+      _limbs.add(_mesh(_limbGeo[j], _cyan));
       _rawLimbs.add(_mesh(_cylinder, _rawGhost));
     }
-    _torsoVertices = three.Float32BufferAttribute.fromList(
-      List.filled(24, 0.0),
-      3,
+    // 가슴 넓고 허리 좁고 골반 넓은 프로파일(x=반경 m, y=0 골반→1 어깨)을 회전시킨 단일 몸통.
+    _torsoLathe = three.LatheGeometry(
+      <three.Vector>[
+        three.Vector2(0.025, 0.00),
+        three.Vector2(0.120, 0.05),
+        three.Vector2(0.155, 0.15),
+        three.Vector2(0.145, 0.28),
+        three.Vector2(0.125, 0.42),
+        three.Vector2(0.140, 0.55),
+        three.Vector2(0.165, 0.70),
+        three.Vector2(0.158, 0.82),
+        three.Vector2(0.115, 0.92),
+        three.Vector2(0.060, 0.99),
+        three.Vector2(0.028, 1.03),
+      ],
+      segments: 24,
     );
-    _torsoGeometry = three.BufferGeometry();
-    _torsoGeometry.setAttribute(three.Attribute.position, _torsoVertices);
-    _torsoGeometry.setIndex([
-      0,
-      1,
-      2,
-      0,
-      2,
-      3,
-      4,
-      7,
-      6,
-      4,
-      6,
-      5,
-      0,
-      4,
-      5,
-      0,
-      5,
-      1,
-      1,
-      5,
-      6,
-      1,
-      6,
-      2,
-      2,
-      6,
-      7,
-      2,
-      7,
-      3,
-      3,
-      7,
-      4,
-      3,
-      4,
-      0,
-    ]);
-    _torso = _mesh(_torsoGeometry, _ivory);
+    _torso = _mesh(_torsoLathe, _ivory);
+    // 배트: 로컬 +Y 끝(top)=배럴(두꺼움), -Y(bottom)=손잡이(가늘음).
+    _bat = _mesh(three.CylinderGeometry(.042, .016, 1, 16), _ivory);
+    _batKnob = _mesh(_sphere, _ivory);
     _pelvis = _mesh(_sphere, _cyan);
     _head = _mesh(_sphere, _estimated);
     _neck = _mesh(_cylinder, _estimated);
@@ -358,6 +372,86 @@ class _MannequinViewState extends State<MannequinView> {
     );
   }
 
+  // 테이퍼 사지 배치: 반경은 geom 에 baked 되어 있으므로 길이만(그리고 bodyScale 만) 스케일.
+  void _placeLimb(three.Mesh mesh, three.Vector3? a, three.Vector3? b) {
+    if (a == null || b == null) {
+      mesh.visible = false;
+      return;
+    }
+    final delta = b.clone().sub(a);
+    final length = delta.length;
+    if (!length.isFinite || length < 1e-7) {
+      mesh.visible = false;
+      return;
+    }
+    mesh.visible = true;
+    mesh.position.setFrom(a.clone().add(b).scale(.5));
+    mesh.scale.setValues(_scale, length, _scale);
+    mesh.quaternion.setFromUnitVectors(
+      three.Vector3(0, 1, 0),
+      delta.scale(1 / length),
+    );
+  }
+
+  // 단일 Lathe 몸통을 골반→어깨 척추축에 세운다. basis: 로컬 +Y=up, +Z=forward 로 매핑하는 기저.
+  // (앞뒤는 _torsoFlatten 으로 눌러 사람 단면처럼.)
+  void _placeLatheTorso(
+    three.Vector3 shoulders,
+    three.Vector3 hips,
+    three.Quaternion basis,
+  ) {
+    final spineLen = shoulders.clone().sub(hips).length;
+    if (!widget.torsoVisible || !spineLen.isFinite || spineLen < 1e-6) {
+      _torso.visible = false;
+      return;
+    }
+    _torso.visible = true;
+    _torso.position.setFrom(hips);
+    _torso.scale.setValues(_scale, spineLen, _scale * _torsoFlatten);
+    _torso.quaternion.setFrom(basis);
+  }
+
+  // 배트를 양 손목 중점(그립)에서 팔뚝 평균 방향으로 뻗어 배치(손 추정 방식).
+  void _placeBat(List<three.Vector3?> p) {
+    _bat.visible = false;
+    _batKnob.visible = false;
+    final lw = p[4], rw = p[5];
+    if (lw == null || rw == null) return;
+    final grip = lw.clone().add(rw).scale(.5);
+    // 팔뚝 방향(손목 - 팔꿈치)의 평균. 결측 팔은 건너뛴다.
+    final dir = three.Vector3(0, 0, 0);
+    if (p[2] != null) {
+      final la = lw.clone().sub(p[2]!);
+      if (la.length > 1e-6) dir.add(la.normalize());
+    }
+    if (p[3] != null) {
+      final ra = rw.clone().sub(p[3]!);
+      if (ra.length > 1e-6) dir.add(ra.normalize());
+    }
+    if (dir.length < 1e-5) return;
+    dir.normalize();
+    // 배트 길이는 어깨폭에 비례(실제 배트 ≈ 어깨폭 2.3배).
+    final shoulderW = (p[0] != null && p[1] != null)
+        ? p[0]!.distanceTo(p[1]!)
+        : .35;
+    final len = (2.3 * shoulderW).clamp(.40, 1.20).toDouble();
+    final barrel = grip.clone().addScaled(dir, len);
+    final knobEnd = grip.clone().addScaled(dir, -.05);
+    final center = knobEnd.clone().add(barrel).scale(.5);
+    _bat.visible = true;
+    _bat.position.setFrom(center);
+    _bat.scale.setValues(_scale, knobEnd.distanceTo(barrel), _scale);
+    _bat.quaternion.setFromUnitVectors(three.Vector3(0, 1, 0), dir);
+    _batKnob.visible = true;
+    _batKnob.position.setFrom(knobEnd);
+    _batKnob.scale.setValues(.03 * _scale, .03 * _scale, .03 * _scale);
+    // 양손 그립: 배트를 쥔 양손을 그립(손목 중점)으로 모아 손잡이에 포개 쥐게 한다.
+    for (final hand in _hands) {
+      if (!hand.visible) continue;
+      hand.position.addScaled(grip.clone().sub(hand.position), .5);
+    }
+  }
+
   void _syncScene() {
     if (!_sceneBuilt || !mounted) return;
     final p = List.generate(12, (j) => _point(widget.positions, j));
@@ -382,15 +476,26 @@ class _MannequinViewState extends State<MannequinView> {
       }
     }
     for (var j = 0; j < _edges.length; j++) {
-      final (a, b, radius) = _edges[j];
-      _placeSegment(_limbs[j], p[a], p[b], radius * _scale);
+      final (a, b, _) = _edges[j];
+      _placeLimb(_limbs[j], p[a], p[b]);
       _limbs[j].visible =
           _limbs[j].visible &&
           (widget.edgeVisible == null || widget.edgeVisible![j]);
+      // 몸통이 Lathe 로 그려질 때는 어깨선·몸통옆·골반 뼈(0,5,6,7)를 숨겨
+      // compare3d 처럼 매끈한 단일 몸통만 보이게 한다.
+      if (widget.torsoVisible && _torsoEdges.contains(j)) {
+        _limbs[j].visible = false;
+      }
       _limbs[j].material = _warn(a) || _warn(b) ? _warning : _cyan;
       _placeSegment(_rawLimbs[j], raw[a], raw[b], .012 * _scale);
     }
     _syncTorsoAndEstimates(p);
+    if (widget.showEstimates) {
+      _placeBat(p);
+    } else {
+      _bat.visible = false;
+      _batKnob.visible = false;
+    }
     if (!widget.torsoVisible) {
       _torso.visible = false;
       _pelvis.visible = false;
@@ -509,42 +614,18 @@ class _MannequinViewState extends State<MannequinView> {
         pq != null) {
       final shoulders = p[0]!.clone().add(p[1]!).scale(.5);
       final hips = p[6]!.clone().add(p[7]!).scale(.5);
-      final corners = [p[0]!, p[1]!, p[7]!, p[6]!];
-      for (var side = 0; side < 2; side++) {
-        for (var j = 0; j < 4; j++) {
-          // Preserve the measured four corners; shoulder and pelvic thickness
-          // follow separate bases. Thickness itself is illustrative.
-          final normal = j < 2 ? sf : pf;
-          final v = corners[j].clone().addScaled(
-            normal,
-            (side == 0 ? 1 : -1) * .085 * _scale,
-          );
-          _torsoVertices.setXYZ(side * 4 + j, v.x, v.y, v.z);
-        }
-      }
-      _torsoVertices.needsUpdate = true;
-      _torsoGeometry.computeVertexNormals();
-      _torsoGeometry.computeBoundingSphere();
-      _torso.visible = widget.torsoVisible;
+      // 측정된 어깨 기저(로컬 +Y=up, +Z=forward)에 매끈한 Lathe 몸통을 세운다.
+      _placeLatheTorso(shoulders, hips, sq);
       _torso.material = orientation['body_mode'] == 'directional'
           ? _ivory
           : _neutralColor;
-      _pelvis.visible = widget.torsoVisible;
-      _pelvis.position.setFrom(hips);
-      _pelvis.scale.setValues(
-        math.max(.08 * _scale, p[6]!.distanceTo(p[7]!) * .64),
-        .105 * _scale,
-        .12 * _scale,
-      );
-      _pelvis.quaternion.setFrom(pq);
-      _pelvis.material = orientation['body_mode'] == 'directional'
-          ? _cyan
-          : _neutralColor;
+      // 골반은 단일 몸통 프로파일(아래가 넓음)에 포함되므로 별도 구를 숨긴다.
+      _pelvis.visible = false;
       if (widget.showEstimates && widget.torsoVisible) {
-        final headCenter = shoulders.clone().addScaled(up, .235 * _scale);
+        final headCenter = shoulders.clone().addScaled(up, .200 * _scale);
         _head.visible = true;
         _head.position.setFrom(headCenter);
-        _head.scale.setValues(.105 * _scale, .135 * _scale, .105 * _scale);
+        _head.scale.setValues(.090 * _scale, .114 * _scale, .090 * _scale);
         final suppliedAxes = widget.headPose?['axes'];
         final headAxes = validHeadAxes(suppliedAxes) ? suppliedAxes : null;
         final hq = _orientationBasis(headAxes) ?? sq;
@@ -564,7 +645,7 @@ class _MannequinViewState extends State<MannequinView> {
           shoulders.clone().addScaled(up, .13 * _scale),
           .044 * _scale,
         );
-        if (directional) {
+        if (directional && _showFaceFeatures) {
           for (var i = 0; i < 4; i++) {
             _face[i].visible = true;
             _face[i].quaternion.setFrom(hq);
@@ -673,37 +754,16 @@ class _MannequinViewState extends State<MannequinView> {
           basis = three.Quaternion().setFromRotationMatrix(
             three.Matrix4().makeBasis(right, up, normal),
           );
-          // Actual shoulder/hip corners; only thickness is an illustrative size.
-          final corners = [p[0]!, p[1]!, p[7]!, p[6]!];
-          for (var side = 0; side < 2; side++) {
-            for (var j = 0; j < 4; j++) {
-              final v = corners[j].clone().addScaled(
-                normal,
-                (side == 0 ? 1 : -1) * .085 * _scale,
-              );
-              _torsoVertices.setXYZ(side * 4 + j, v.x, v.y, v.z);
-            }
-          }
-          _torsoVertices.needsUpdate = true;
-          _torsoGeometry.computeVertexNormals();
-          _torsoGeometry.computeBoundingSphere();
-          _torso.visible = true;
+          _placeLatheTorso(shoulders, hips, basis);
           _torso.material = [0, 1, 6, 7].any(_warn) ? _warning : _ivory;
-          _pelvis.visible = true;
-          _pelvis.position.setFrom(hips);
-          _pelvis.scale.setValues(
-            math.max(.08 * _scale, p[6]!.distanceTo(p[7]!) * .64),
-            .105 * _scale,
-            .12 * _scale,
-          );
-          _pelvis.quaternion.setFrom(basis);
-          _pelvis.material = _warn(6) || _warn(7) ? _warning : _cyan;
+          // 골반구는 단일 Lathe 몸통에 포함되므로 숨긴다.
+          _pelvis.visible = false;
           if (widget.showEstimates) {
             _head.visible = true;
             _head.position.setFrom(
-              shoulders.clone().addScaled(up, .235 * _scale),
+              shoulders.clone().addScaled(up, .200 * _scale),
             );
-            _head.scale.setValues(.105 * _scale, .135 * _scale, .105 * _scale);
+            _head.scale.setValues(.090 * _scale, .114 * _scale, .090 * _scale);
             _head.quaternion.setFrom(basis);
             _placeSegment(
               _neck,

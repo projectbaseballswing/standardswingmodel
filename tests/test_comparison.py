@@ -155,7 +155,7 @@ def test_comparison_endpoint_returns_and_caches_coaching(mock_client, monkeypatc
     # 네트워크 대신 가짜 생성기 + 키가 있는 것처럼 (Settings는 frozen이라 통째 교체).
     from dataclasses import replace
 
-    monkeypatch.setattr(swings, "settings", replace(swings.settings, gemini_api_key="test-key"))
+    monkeypatch.setattr(swings, "settings", replace(swings.settings, openai_api_key="test-key"))
     monkeypatch.setattr(swings, "generate_comparison_coaching", fake_gen)
 
     owner = f"cmp-{uuid.uuid4().hex}"

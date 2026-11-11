@@ -198,7 +198,10 @@ class _FeedbackBody extends StatelessWidget {
                 const SizedBox(height: 12),
                 ..._buildCategorySections(feedback),
                 const SizedBox(height: 12),
-                _CoachCard(comment: feedback.coachComment),
+                _CoachCard(
+                  comment: feedback.coachComment,
+                  detail: feedback.coaching?.coachFeedback,
+                ),
                 if (feedback.speedMetrics.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   SpeedFeedbackCard(metrics: feedback.speedMetrics),
@@ -716,38 +719,36 @@ class _ItemRow extends StatelessWidget {
             children: [
               // 이름 + 점수
               if (delta != null)
-                // 반복 피드백: 이름  72 → 80  (+8)
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Text(
-                      item.label,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
+                // 반복 피드백: 이름  72 → 80점  (+8) — 길면 줄바꿈된다.
+                Text.rich(
+                  TextSpan(
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${item.previousScore} → ${feedbackNumber(item.currentScore)}점',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                    children: [
+                      TextSpan(text: item.label),
+                      TextSpan(
+                        text:
+                            '  ${feedbackNumber(item.previousScore)} → ${feedbackNumber(item.currentScore)}점',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '(${delta > 0 ? '+' : ''}$delta)',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: delta > 0
-                            ? const Color(0xFF2E9E5B)
-                            : (delta < 0 ? AppColors.primary : AppColors.hint),
+                      TextSpan(
+                        text:
+                            '  (${delta > 0 ? '+' : ''}${feedbackNumber(delta)})',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: delta > 0
+                              ? const Color(0xFF2E9E5B)
+                              : (delta < 0 ? AppColors.primary : AppColors.hint),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 )
               else
                 // 이전 비교 없음: 이름 - 81점 (길면 줄바꿈)
@@ -794,19 +795,26 @@ class _ItemRow extends StatelessWidget {
 // AI 코치의 한마디
 // ---------------------------------------------------------------------------
 class _CoachCard extends StatelessWidget {
-  const _CoachCard({required this.comment});
+  const _CoachCard({required this.comment, this.detail});
 
+  /// 한 문장 코칭(헤드라인/폴백).
   final String comment;
+
+  /// 4단 상세(문제/원인/교정/추천훈련). 없으면 한 문장만 보여준다.
+  final CoachFeedback? detail;
+
+  static const _accent = Color(0xFF8A6BEA);
 
   @override
   Widget build(BuildContext context) {
+    final cf = detail;
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: const [
-              Icon(Icons.auto_awesome, size: 16, color: Color(0xFF8A6BEA)),
+              Icon(Icons.auto_awesome, size: 16, color: _accent),
               SizedBox(width: 6),
               Text(
                 'AI 코치의 한마디',
@@ -815,12 +823,91 @@ class _CoachCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
+          // 헤드라인 한 줄 (항상 표시)
           Text(
             comment,
             style: const TextStyle(
               fontSize: 12.5,
               height: 1.5,
               color: AppColors.subtitle,
+            ),
+          ),
+          // 4단 상세가 있으면 아래에 펼친다.
+          if (cf != null) ...[
+            const SizedBox(height: 14),
+            _CoachStep(
+              icon: Icons.search,
+              label: '무엇이 아쉬운지',
+              text: cf.problem,
+            ),
+            _CoachStep(
+              icon: Icons.help_outline,
+              label: '왜 그럴까요',
+              text: cf.cause,
+            ),
+            _CoachStep(
+              icon: Icons.build_outlined,
+              label: '이렇게 고쳐봐요',
+              text: cf.fix,
+            ),
+            _CoachStep(
+              icon: Icons.sports_baseball_outlined,
+              label: '추천 훈련',
+              text: cf.drill,
+              isLast: true,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// AI 코치 4단 중 한 단계. 아이콘 + 라벨 + 본문.
+class _CoachStep extends StatelessWidget {
+  const _CoachStep({
+    required this.icon,
+    required this.label,
+    required this.text,
+    this.isLast = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String text;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: isLast ? 0 : 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 15, color: _CoachCard._accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: _CoachCard._accent,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  text,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    height: 1.5,
+                    color: AppColors.subtitle,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

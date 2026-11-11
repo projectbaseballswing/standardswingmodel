@@ -292,17 +292,18 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('swing-3d-mode')), findsOneWidget);
+    // 모드 토글 제거(S2 단일 표시) → 3D 콘텐츠 표시 여부는 타임라인 슬라이더로 확인.
+    expect(find.byKey(const Key('swing-3d-timeline')), findsOneWidget);
     Session.instance.clear();
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('swing-3d-mode')), findsNothing);
+    expect(find.byKey(const Key('swing-3d-timeline')), findsNothing);
     expect(find.textContaining('로그인 세션이 없습니다'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     api.dispose();
   });
 
   test(
-    'palette has high body/head/direction contrast on shared background',
+    'uniform grey palette stays lighter than the shared background',
     () {
       double luminance(int rgb) {
         double f(int shift) {
@@ -315,21 +316,21 @@ void main() {
         return .2126 * f(16) + .7152 * f(8) + .0722 * f(0);
       }
 
-      for (final value in [
+      // compare3d 뷰어 룩: 몸/머리/방향/비활성을 하나의 밝은 회색으로 통일한다.
+      // (의미별 색 대비는 의도적으로 제거했으므로 각 값은 서로 같다.)
+      final bodyParts = [
         MannequinStyle.body,
         MannequinStyle.head,
         MannequinStyle.direction,
         MannequinStyle.inactive,
-      ]) {
-        expect(
-          (luminance(value) + .05) /
-              (luminance(MannequinStyle.background) + .05),
-          greaterThan(4.5),
-        );
+      ];
+      for (final value in bodyParts) {
+        expect(value, MannequinStyle.body);
       }
+      // 균일 회색이라도 중간 회색 배경보다는 밝아 마네킹이 또렷이 보여야 한다.
       expect(
-        luminance(MannequinStyle.head),
-        greaterThan(luminance(MannequinStyle.body)),
+        luminance(MannequinStyle.body),
+        greaterThan(luminance(MannequinStyle.background)),
       );
     },
   );
