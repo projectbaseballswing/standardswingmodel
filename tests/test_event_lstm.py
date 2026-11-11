@@ -59,3 +59,34 @@ def test_event_model_keeps_order_on_real_swing():
     order = [v for v in order if v is not None]
     assert order == sorted(order)
     assert with_model.impact is not None and rules.impact is not None
+
+
+class _FixedModel:
+    """정해진 값을 돌려주는 가짜 LSTM."""
+
+    def __init__(self, events):
+        self.events = events
+        self.use_events = ["foot_plant", "swing_start", "impact"]
+
+    def predict(self, pixel, fps, clip_start=0, clip_end=None):
+        return {k: self.events.get(k) for k in EVENT_KEYS}
+
+
+def test_rule_events_are_found_around_lstm_anchors():
+    # 규칙 이벤트(로딩, 앞발 들기, 팔로우 종료)는 LSTM 이 정한 착지/임팩트를 기준점으로 찾아 순서가 어긋나지 않는다
+    files = sorted(SKELETON_DIR.glob("*.npz")) if SKELETON_DIR.exists() else []
+    if not files:
+        pytest.skip("스켈레톤 데이터가 없습니다.")
+    data = np.load(files[0], allow_pickle=True)
+    fps = float(json.loads(str(data["meta_json"]))["fps"])
+    pixel = data["landmarks_pixel"].astype(float)
+    rules = detect_events(pixel, fps, use_event_model=False)
+    shifted = {"foot_plant": rules.foot_plant - 6, "swing_start": rules.foot_plant - 6, "impact": rules.impact + 3}
+
+    events = detect_events(pixel, fps, event_model=_FixedModel(shifted))
+    assert (events.foot_plant, events.swing_start, events.impact) == tuple(shifted.values())
+    order = [events.load_start, events.foot_lift, events.foot_plant, events.swing_start, events.impact, events.follow_end]
+    order = [v for v in order if v is not None]
+    assert order == sorted(order)
+    assert events.follow_end > events.impact
+    assert not any("순서" in w for w in events.warnings)

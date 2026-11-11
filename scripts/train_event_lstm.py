@@ -42,6 +42,9 @@ from feedback.events import detect_events  # noqa: E402
 from scripts.make_event_test_split import player_of  # noqa: E402
 
 SIGMA = 1.0  # 정답 프레임 주변 확률 분포 폭 (모델 프레임 단위)
+# LSTM 값을 쓸 이벤트. 검증 27개로 고르면 흔들려서 선수 단위 5겹 교차 검증(라벨 약 150개, 시드 3개)으로 정했다
+# (docs/lstm-event-model.md). 앞발 들기는 LSTM 착지에서 거꾸로 찾는 규칙이 나았다.
+CV_USE_EVENTS = ["foot_plant", "swing_start", "impact", "follow_end"]
 POS_WEIGHT = 8.0  # 이벤트 프레임은 전체의 몇 % 뿐이라 양성 쪽 손실을 키운다
 
 
@@ -215,6 +218,8 @@ def main() -> None:
     parser.add_argument("--val-ratio", type=float, default=0.2, help="학습용 라벨 중 검증에 쓸 선수 비율")
     parser.add_argument("--threshold", type=float, default=0.2, help="앞발 들기/착지가 '있다'고 볼 최소 확률")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--use-events", default=",".join(CV_USE_EVENTS),
+                        help="LSTM 값을 쓸 이벤트 (쉼표로). 'auto' 면 검증 결과로 고른다")
     parser.add_argument("--no-save", action="store_true")
     args = parser.parse_args()
 
@@ -265,11 +270,13 @@ def main() -> None:
     val_lstm = score(val, [predict_torch(model, it, mean, std, args.threshold, device) for it in val])
     val_rule = score(val, [it["rule"] for it in val])
     # 검증 표본이 작아 동점이 자주 난다. 동점이면 LSTM 을 쓴다 (시드 3개 시험에서 LSTM 이 같거나 나았다).
-    use_events = [k for k in EVENT_KEYS if val_lstm[k][0] >= val_rule[k][0]]
+    auto_events = [k for k in EVENT_KEYS if val_lstm[k][0] >= val_rule[k][0]]
+    use_events = auto_events if args.use_events == "auto" else [k for k in args.use_events.split(",") if k]
     print("\n[검증 (선수 %d명, 스윙 %d개)]  ±2프레임 이내 비율" % (len(val_players), len(val)))
     for k in EVENT_KEYS:
         print(f"  {k:12s} 규칙 {val_rule[k][0]:4.0%}  LSTM {val_lstm[k][0]:4.0%}  (n={val_lstm[k][2]})"
-              + ("  -> LSTM 사용" if k in use_events else ""))
+              + ("  -> LSTM 사용" if k in use_events else "")
+              + ("" if (k in auto_events) == (k in use_events) else "  (검증 결과와 다름: 교차 검증 기준)"))
 
     payload = export(model, mean.astype(np.float32), std.astype(np.float32), args.layers, use_events, args.threshold)
     numpy_version = numpy_model(payload)
