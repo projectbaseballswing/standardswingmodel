@@ -77,12 +77,11 @@ void main() {
           .onChanged!(clip.timestamps[71]);
       await tester.pump();
       expect(find.textContaining('프레임 71 / 99'), findsOneWidget);
-      await tester.tap(find.text('원본 좌표').first);
-      await tester.pump();
-      expect(
-        scene.positions,
-        p0.frameAt(71).rawPositions.map((v) => v?.toList()).toList(),
-      );
+      // 모드 토글 보류(S2 단일 표시)로 '원본 좌표' 전환 검증은 일시 중단.
+      // await tester.tap(find.text('원본 좌표').first);
+      // await tester.pump();
+      // expect(scene.positions,
+      //     p0.frameAt(71).rawPositions.map((v) => v?.toList()).toList());
       await tester.tap(find.byTooltip('다음 프레임'));
       await tester.pump();
       expect(find.textContaining('프레임 72 / 99'), findsOneWidget);
@@ -143,6 +142,9 @@ void main() {
       expect(scene.positions.where((p) => p != null).length, 12);
       expect(find.byKey(const Key('swing-3d-empty')), findsNothing);
     },
+    // 본질적으로 P0→원본 좌표 전환 검증 — 모드 토글 보류(S2 단일 표시)로 함께 중단.
+    // 토글 복구 시 skip 해제.
+    skip: true,
   );
 
   testWidgets('missing raw frame and invalid root are not renderer failures', (

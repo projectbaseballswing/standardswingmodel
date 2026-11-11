@@ -400,7 +400,7 @@ class _Swing3dScreenState extends State<Swing3dScreen>
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFF0D4),
+                          color: const Color(0xFFF7F7F7),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Column(
@@ -484,27 +484,29 @@ class _Swing3dScreenState extends State<Swing3dScreen>
         orientation['shoulder'] != null &&
         orientation['pelvis'] != null;
     return [
-      SegmentedButton<SwingDisplayMode>(
-        key: const Key('swing-3d-mode'),
-        segments: [
-          if (clip.directional != null || clip.finalMotion != null)
-            const ButtonSegment(
-              value: SwingDisplayMode.improved,
-              label: Text('개선 시연'),
-            ),
-          const ButtonSegment(
-            value: SwingDisplayMode.p0,
-            label: Text('안정화 P0'),
-          ),
-          const ButtonSegment(
-            value: SwingDisplayMode.raw,
-            label: Text('원본 좌표'),
-          ),
-        ],
-        selected: {_mode},
-        onSelectionChanged: (values) => setState(() => _mode = values.single),
-      ),
-      const SizedBox(height: 12),
+      // S2(개선 시연) 단일 표시. 모드 전환 토글은 아래처럼 보류(주석)한다.
+      // 복구하려면 아래 SegmentedButton 블록 주석을 해제하면 된다.
+      // SegmentedButton<SwingDisplayMode>(
+      //   key: const Key('swing-3d-mode'),
+      //   segments: [
+      //     if (clip.directional != null || clip.finalMotion != null)
+      //       const ButtonSegment(
+      //         value: SwingDisplayMode.improved,
+      //         label: Text('개선 시연'),
+      //       ),
+      //     const ButtonSegment(
+      //       value: SwingDisplayMode.p0,
+      //       label: Text('안정화 P0'),
+      //     ),
+      //     const ButtonSegment(
+      //       value: SwingDisplayMode.raw,
+      //       label: Text('원본 좌표'),
+      //     ),
+      //   ],
+      //   selected: {_mode},
+      //   onSelectionChanged: (values) => setState(() => _mode = values.single),
+      // ),
+      // const SizedBox(height: 12),
       _scene(
         frame,
         positions,
