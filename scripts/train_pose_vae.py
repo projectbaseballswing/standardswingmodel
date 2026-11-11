@@ -29,8 +29,8 @@ import torch.nn as nn
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from feedback.pose_vae import (  # noqa: E402
-    DEFAULT_POSE_VAE_PATH, N_BONES, PHASE_KEYS, SEQ_LEN, VAE_VERSION, PoseVAE, angle_deg, model_inputs,
-    phase_directions, time_inputs,
+    DEFAULT_POSE_VAE_PATH, GATE_FULL, GATE_START, N_BONES, PHASE_KEYS, SEQ_LEN, VAE_VERSION, PoseVAE, angle_deg,
+    model_inputs, phase_directions, time_inputs,
 )
 from feedback.reference_motion import BONE_NAMES, PHASE_POINTS, bone_vectors, load_reference_motion, user_motion  # noqa: E402
 from scripts.build_reference_model import load_labels, phase_windows, swing_events  # noqa: E402
@@ -128,12 +128,29 @@ def train(model, items, epochs, beta, lr, rng):
             print(f"  epoch {epoch + 1:4d} loss {total / len(items):.4f}", flush=True)
 
 
+def numpy_vae(model) -> PoseVAE:
+    weights = {k: v.detach().cpu().numpy().astype(np.float64) for k, v in model.state_dict().items()
+               if not k.startswith("logvar") and k != "time"}
+    return PoseVAE(weights=weights, metadata={})
+
+
+def floor_of(vae: PoseVAE, items: list[dict]) -> np.ndarray:
+    """(80, 11) 실수 없는 프로 스윙에서 VAE 가 시점·뼈마다 보통(중앙값) 바꾸는 각도. 최소 2도."""
+    changes = np.full((len(items), SEQ_LEN, N_BONES), np.nan)
+    for i, it in enumerate(items):
+        c = angle_deg(vae.reconstruct(it["dirs"], it["mask"]), it["dirs"])
+        c[~it["mask"]] = np.nan
+        changes[i] = c
+    return np.maximum(np.nan_to_num(np.nanmedian(changes, axis=0), nan=2.0), 2.0)
+
+
 def export(model, latent, hidden, beta, swings, players) -> dict:
     payload = {f"w_{k}": v.detach().cpu().numpy().astype(np.float32) for k, v in model.state_dict().items()
                if not k.startswith("logvar") and k != "time"}
     payload["metadata_json"] = np.asarray(json.dumps({
         "version": VAE_VERSION, "built_on": date.today().isoformat(), "latent": latent, "hidden": hidden,
         "beta": beta, "swings_used": swings, "players_used": players, "bones": BONE_NAMES, "phases": PHASE_KEYS,
+        "gate": [GATE_START, GATE_FULL],
     }, ensure_ascii=False))
     return payload
 
@@ -195,15 +212,18 @@ def evaluate(vae: PoseVAE, items: list[dict]) -> dict:
         spread[p * PHASE_POINTS:(p + 1) * PHASE_POINTS] = np.maximum(np.asarray(ref.phases[key].spread_deg), 5.0)
 
     result = {}
-    style_vae, style_ref = [], []
+    style = {"vae": [], "vae_raw": [], "reference": [], "applied": []}
     for it in items:
         m = it["mask"]
-        style_vae.append(angle_deg(vae.improve(it["dirs"], m), it["dirs"])[m].mean())
-        style_ref.append(angle_deg(ref_dirs, it["dirs"])[m].mean())
-    result["style"] = {"vae_deg": float(np.mean(style_vae)), "reference_deg": float(np.mean(style_ref))}
+        improved, applied = vae.improve(it["dirs"], m)
+        style["vae"].append(angle_deg(improved, it["dirs"])[m].mean())
+        style["vae_raw"].append(angle_deg(vae.reconstruct(it["dirs"], m), it["dirs"])[m].mean())
+        style["reference"].append(angle_deg(ref_dirs, it["dirs"])[m].mean())
+        style["applied"].append(applied[m].mean())
+    result["style"] = {k: float(np.mean(v)) for k, v in style.items()}
 
     for fault in FAULTS:
-        rows = {"vae": [], "clamp": []}
+        rows = {"vae": [], "vae_raw": [], "clamp": []}
         for it in items:
             m = it["mask"]
             faulty, touched = inject(it["dirs"], fault)
@@ -211,8 +231,8 @@ def evaluate(vae: PoseVAE, items: list[dict]) -> dict:
             if not touched.any():
                 continue
             other = m[:, None] & ~np.isin(np.arange(N_BONES), [B[n] for n, *_ in fault[1]])[None]
-            clean_vae = vae.improve(it["dirs"], m)
-            for name, fixed, base in [("vae", vae.improve(faulty, m), clean_vae),
+            for name, fixed, base in [("vae", vae.improve(faulty, m)[0], vae.improve(it["dirs"], m)[0]),
+                                      ("vae_raw", vae.reconstruct(faulty, m), vae.reconstruct(it["dirs"], m)),
                                       ("clamp", clamp_to_band(faulty, m, ref_dirs, spread),
                                        clamp_to_band(it["dirs"], m, ref_dirs, spread))]:
                 rows[name].append([
@@ -227,12 +247,12 @@ def evaluate(vae: PoseVAE, items: list[dict]) -> dict:
 
 def print_eval(res: dict) -> None:
     s = res["style"]
-    print(f"\n[스타일 보존] 실수 없는 프로 스윙을 넣었을 때 원래 스윙과 평균 차이: VAE {s['vae_deg']:.1f}도 "
-          f"(모두에게 같은 대표 자세였다면 {s['reference_deg']:.1f}도)")
+    print(f"\n[스타일 보존] 실수 없는 프로 스윙이 바뀌는 정도: 적용 기준 {s['vae']:.1f}도 (적용 시점 {s['applied']:.0%}) / "
+          f"기준 없이 {s['vae_raw']:.1f}도 / 모두에게 같은 대표 자세 {s['reference']:.1f}도")
     print("\n[실수 복원] 넣은 실수 -> 고친 뒤 원래 스윙과 차이 (실수 없을 때 바닥) | 다른 뼈가 덩달아 바뀐 정도  (도)")
     for name, _, *_ in FAULTS:
         line = f"  {name:12s}"
-        for method, label in [("vae", "VAE"), ("clamp", "단순 계산")]:
+        for method, label in [("vae", "VAE"), ("vae_raw", "기준 없이"), ("clamp", "단순 계산")]:
             size, after, floor, other = res[name][method]
             line += f"   {label} {size:4.1f} -> {after:4.1f} ({floor:4.1f}) | {other:3.1f}"
         print(line)
@@ -269,9 +289,8 @@ def main() -> None:
 
     model = SeqVAE(args.hidden, args.latent)
     train(model, train_items, args.epochs, args.beta, 2e-3, rng)
-    vae = PoseVAE(weights={k[2:]: v.astype(np.float64) for k, v in
-                           export(model, args.latent, args.hidden, args.beta, 0, 0).items() if k.startswith("w_")},
-                  metadata={})
+    vae = numpy_vae(model)
+    vae.floor_deg = floor_of(vae, train_items)
     res = evaluate(vae, val_items)
     print_eval(res)
 
@@ -281,7 +300,7 @@ def main() -> None:
         x = torch.tensor(model_inputs(check["dirs"], check["mask"])[None], dtype=torch.float32)
         mu, _ = model.encode(x, torch.tensor(check["mask"][None], dtype=torch.float32))
         torch_out = model.decode(mu)[0].numpy()
-    assert np.allclose(torch_out, vae.improve(check["dirs"], check["mask"]), atol=1e-4)
+    assert np.allclose(torch_out, vae.reconstruct(check["dirs"], check["mask"]), atol=1e-4)
 
     used = train_items
     if args.final:
@@ -289,8 +308,11 @@ def main() -> None:
         model = SeqVAE(args.hidden, args.latent)
         train(model, items, args.epochs, args.beta, 2e-3, rng)
         used = items
+        vae = numpy_vae(model)
+        vae.floor_deg = floor_of(vae, items)
     if not args.no_save:
         payload = export(model, args.latent, args.hidden, args.beta, len(used), len({it["player"] for it in used}))
+        payload["floor_deg"] = vae.floor_deg.astype(np.float32)
         payload["validation_json"] = np.asarray(json.dumps(res, ensure_ascii=False))
         np.savez_compressed(args.out, **payload)
         print("\n저장:", args.out)

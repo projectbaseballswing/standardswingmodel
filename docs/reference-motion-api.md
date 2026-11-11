@@ -56,10 +56,22 @@ GET /api/analyses/{analysis_id}/reference-motion
         "timestamps_s": [0.5667, ...],               // frames / fps
         "joints": [[[x, y, z] x 12] x 20],           // 사용자 실제 자세
         "root": [[x, y, z] x 20]                     // 임팩트를 못 찾으면 null
+      },
+      "improved": {                                  // VAE 개선 자세. user 가 null 이거나 모델이 없으면 null
+        "joints": [[[x, y, z] x 12] x 20],           // 사용자 스윙을 프로다운 스윙으로 고친 자세 (사용자 체형)
+        "change_deg": [[뼈 11개] x 20],              // 사용자 자세에서 바뀐 각도(도). 뼈 순서는 bones 와 같다
+        "applied": [0.0, ..., 1.0]                   // 20개, 0 = 사용자 자세 그대로, 1 = 고친 자세
       }
     },
     ...  // transition, swing, follow
-  ]
+  ],
+  "improvement": {                                   // 모델이 없으면 null
+    "version": "pose-vae-v1",
+    "largest_changes": [                             // 많이 바뀐 (구간, 뼈) 최대 5개. 고칠 곳이 없으면 []
+      {"phase": "stride", "phase_name": "스트라이드", "bone": "lead_thigh", "bone_name": "앞다리 허벅지",
+       "max_change_deg": 34.5, "at_point": 9}        // at_point = 가장 많이 바뀐 시점 번호
+    ]
+  }
 }
 ```
 
@@ -134,11 +146,26 @@ GET /api/analyses/{analysis_id}/reference-motion
 `spread_deg` 는 그 시점에 프로들끼리 뼈 방향이 얼마나 다른지다. 큰 곳(예: 스트라이드 중 앞다리)은 프로마다 스타일이 달라서,
 기준 자세와 다르다고 틀린 동작은 아니다. 화면에서 기준 자세를 흐리게 그리거나 범위로 보여줄 때 쓸 수 있다.
 
+## 개선 자세 (`improved`)
+
+사용자 스윙을 VAE 로 '프로다운' 스윙으로 옮긴 자세다. 기준 스켈레톤(`reference`)은 모두에게 같은 프로 대표 자세지만,
+개선 자세는 사용자마다 다르다. 사용자 체형과 프로에게도 흔한 스타일은 그대로 두고, 프로들이 하지 않는 움직임이 있는
+순간만 고친다. 점수에는 쓰지 않는다. 만드는 법과 검증은 docs/pose-vae.md.
+
+- 좌표, 관절 순서, 시점은 `user` 와 같다. `user.joints` 와 `improved.joints` 를 같은 시점끼리 겹쳐 그리면
+  "내 스윙 vs 고친 내 스윙" 이 된다. 뼈 길이는 사용자 뼈 길이(중앙값)라 체형이 같다.
+- `applied` 가 0 인 시점은 사용자 자세와 거의 같다 (뼈 길이만 중앙값으로 맞춘 차이). 1 에 가까운 시점이 고친 순간이다.
+  화면에서 강조하거나 그 순간만 개선 자세를 보여줄 때 쓴다.
+- `change_deg` 는 뼈마다 바뀐 각도라, 어느 부위가 바뀌었는지 색으로 표시할 때 쓸 수 있다.
+- `improvement.largest_changes` 는 문구용 요약이다. 예: "스트라이드에서 앞다리 허벅지가 가장 많이 달라요".
+- 프로 영상으로만 학습했고, 뒷팔꿈치 높이 같은 일부 실수는 잘 고치지 못한다 (docs/pose-vae.md).
+
 ## 다시 만들기
 
 ```
 python scripts/build_reference_model.py      # 점수 기준 (라벨이 늘었을 때)
 python scripts/build_reference_motion.py     # 기준 동작 -> data/reference_motion.npz
+python scripts/train_pose_vae.py --final      # 개선 자세 모델 -> feedback/pose_vae.npz (약 20분)
 ```
 
 같은 스윙 선택 규칙을 쓰므로 기준 모델을 다시 만들면 기준 동작도 다시 만든다.

@@ -423,6 +423,7 @@ class UserPose(BaseModel):
 class ImprovedPose(BaseModel):
     joints: List[List[Point3]] = Field(description="[시점][관절] VAE 개선 자세. 사용자 뼈 길이(체형)로 조립, 좌표는 user 와 같다")
     change_deg: List[List[float]] = Field(description="[시점][뼈] 사용자 자세에서 바뀐 각도(도). 뼈 순서는 bones 와 같다")
+    applied: List[float] = Field(description="[시점] 개선 적용 정도. 0 = 사용자 자세 그대로, 1 = 프로다운 자세로 고침")
 
 
 class ImprovementChange(BaseModel):
@@ -436,7 +437,7 @@ class ImprovementChange(BaseModel):
 
 class Improvement(BaseModel):
     version: str
-    largest_changes: List[ImprovementChange] = Field(description="많이 바뀐 순서로 (구간, 뼈) 5개")
+    largest_changes: List[ImprovementChange] = Field(description="많이 바뀐 순서로 (구간, 뼈) 최대 5개. 고칠 곳이 없으면 빈 목록")
 
 
 class MotionPhase(BaseModel):

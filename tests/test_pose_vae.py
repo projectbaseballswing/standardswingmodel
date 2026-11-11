@@ -49,10 +49,38 @@ def test_improved_motion_keeps_user_bone_lengths_and_skips_missing_phase():
         assert joints.shape == (20, 12, 3)
         assert np.allclose(np.linalg.norm(bone_vectors(joints), axis=-1), user_lengths, atol=0.01)
         assert np.asarray(phase["change_deg"]).shape == (20, N_BONES)
+        assert len(phase["applied"]) == 20 and all(a == 1.0 for a in phase["applied"])  # 기준 정보가 없으면 전부 적용
 
     changes = [c["max_change_deg"] for c in result["largest_changes"]]
     assert len(changes) == 5 and changes == sorted(changes, reverse=True)
     assert all(c["phase"] != "stride" and c["bone_name"] for c in result["largest_changes"])
+
+
+def test_gate_keeps_user_pose_when_nothing_is_unusual():
+    # VAE 가 바꾸려는 정도가 '보통' 수준이면 적용하지 않고 사용자 자세를 그대로 둔다
+    phases = _stored_phases()
+    dirs, mask = phase_directions(phases)
+    model = _random_vae()
+    model.floor_deg = np.full((SEQ_LEN, N_BONES), 180.0)
+    improved, applied = model.improve(dirs, mask)
+    assert np.allclose(applied, 0.0)
+    assert np.allclose(improved[mask], dirs[mask])
+    result = improved_motion(model, phases)
+    assert result["largest_changes"] == []
+
+
+def test_gate_applies_only_around_unusual_moments():
+    phases = _stored_phases()
+    dirs, mask = phase_directions(phases)
+    model = _random_vae()
+    from feedback.pose_vae import angle_deg
+    change = angle_deg(model.reconstruct(dirs, mask), dirs)
+    floor = np.full((SEQ_LEN, N_BONES), 180.0)
+    floor[45] = np.maximum(change[45] / 10, 0.1)  # 스윙 구간 한 시점만 '보통보다 훨씬 크게' 바뀌는 상황
+    model.floor_deg = floor
+    _, applied = model.improve(dirs, mask)
+    assert applied[45] > 0.5
+    assert applied[:40].max() == 0 and applied[60:].max() == 0  # 다른 구간은 그대로
 
 
 def test_reference_motion_endpoint_includes_improved_pose(mock_client):
@@ -63,7 +91,7 @@ def test_reference_motion_endpoint_includes_improved_pose(mock_client):
     created = mock_client.post("/api/analyses", files={"video": ("swing.mp4", VIDEO_BYTES, "video/mp4")},
                                data={"handedness": "right"})
     body = mock_client.get(f"/api/analyses/{created.json()['analysis_id']}/reference-motion").json()
-    assert body["improvement"]["largest_changes"]
+    assert isinstance(body["improvement"]["largest_changes"], list)  # 프로 샘플이면 비어 있을 수 있다
     for phase in body["phases"]:
         if phase["user"] is None:
             assert phase["improved"] is None
