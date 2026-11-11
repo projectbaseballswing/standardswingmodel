@@ -97,3 +97,24 @@ def test_reference_motion_endpoint_includes_improved_pose(mock_client):
             assert phase["improved"] is None
         else:
             assert np.asarray(phase["improved"]["joints"]).shape == np.asarray(phase["user"]["joints"]).shape
+
+
+def test_shadow_scores_are_stored_but_not_returned(monkeypatch):
+    # VAE 거리는 결과에 기록만 하고 API 응답(AnalysisReport)에는 나가지 않는다
+    import json
+    from pathlib import Path
+
+    import feedback.pose_vae as pose_vae
+    from api.jobs import _attach_shadow_scores
+    from api.schemas import AnalysisReport
+
+    model = _random_vae()
+    model.floor_deg = np.full((SEQ_LEN, N_BONES), 5.0)
+    monkeypatch.setattr(pose_vae, "load_pose_vae", lambda *a, **k: model)
+
+    result = json.loads(Path("api/fixtures/analysis_sample.json").read_text(encoding="utf-8"))
+    _attach_shadow_scores(result)
+    scores = result["shadow_scores"]["pose_vae"]
+    assert {"version", "change_deg", "ratio_rms", "applied", "points"} <= set(scores)
+    assert scores["change_deg"] >= 0 and 0 <= scores["applied"] <= 1
+    assert "shadow_scores" not in AnalysisReport.model_validate(result).model_dump()

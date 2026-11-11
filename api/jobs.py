@@ -64,6 +64,23 @@ def _attach_motion(result: Dict[str, Any], skeleton, events) -> None:
         result["motion"] = user_motion(skeleton.landmarks_pixel, skeleton.fps, events.as_dict())
     except Exception:
         logger.warning("reference motion skipped", exc_info=True)
+    _attach_shadow_scores(result)
+
+
+def _attach_shadow_scores(result: Dict[str, Any]) -> None:
+    """VAE 거리 점수 후보를 기록만 한다 (API 응답에는 나가지 않음, docs/pose-vae.md '점수 반영').
+    기존 점수와 실제 사용자 데이터로 나란히 비교한 뒤 점수 반영을 정한다."""
+    phases = (result.get("motion") or {}).get("phases")
+    if not phases:
+        return
+    try:
+        from feedback.pose_vae import load_pose_vae, shadow_scores
+
+        model = load_pose_vae()
+        if model is not None:
+            result["shadow_scores"] = {"pose_vae": shadow_scores(model, phases)}
+    except Exception:
+        logger.warning("shadow scores skipped", exc_info=True)
 
 
 def _now() -> datetime:

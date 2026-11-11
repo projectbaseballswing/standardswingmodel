@@ -189,3 +189,26 @@ def improved_motion(model: PoseVAE, phases: Dict[str, Any]) -> Optional[Dict[str
                             "at_point": int(change[sl, b].argmax())})
     summary.sort(key=lambda s: -s["max_change_deg"])
     return {"version": model.metadata.get("version", VAE_VERSION), "phases": out, "largest_changes": summary[:5]}
+
+
+def shadow_scores(model: PoseVAE, phases: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """VAE 거리 (기록용, 사용자에게 보여주지 않는다). 기존 자세 점수와 실제 사용자 데이터로 비교하려고 남긴다.
+
+    change_deg  개선 자세(적용 기준 포함)와 사용자 자세의 평균 각도 차이. 고칠 게 많을수록 크다.
+    ratio_rms   VAE 가 다시 만든 스윙과의 차이를 '보통 바뀌는 정도' 로 나눈 값의 RMS (적용 기준 없이).
+    applied     개선 자세를 적용한 시점 비율.
+    """
+    dirs, mask = phase_directions(phases)
+    if not mask.any():
+        return None
+    improved, applied = model.improve(dirs, mask)
+    out: Dict[str, Any] = {
+        "version": model.metadata.get("version", VAE_VERSION),
+        "change_deg": round(float(angle_deg(improved, dirs)[mask].mean()), 3),
+        "applied": round(float(applied[mask].mean()), 3),
+        "points": int(mask.sum()),
+    }
+    if model.floor_deg is not None:
+        ratio = angle_deg(model.reconstruct(dirs, mask), dirs) / model.floor_deg
+        out["ratio_rms"] = round(float(np.sqrt(np.mean(ratio[mask] ** 2))), 3)
+    return out
