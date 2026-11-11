@@ -11,6 +11,8 @@
     landmarks        (T, 12, 3)  몸 기준 좌표계로 정규화된 관절 좌표
     landmarks_pixel  (T, 12, 3)  원본 프레임 좌표
     visibility       (T, 12)     관절별 검출 신뢰도
+    landmarks_world  (T, 12, 3)  MediaPipe 월드 좌표 (미터, 골반 중심 원점, 축은 카메라 기준).
+                                 3D 보존에 실패한 영상은 이 키가 없다 (meta_json.world_error 에 이유)
     meta_json                    fps, 프레임 수, 좌우타, 기존 방식의 임팩트 프레임 등
 
 이어서 실행할 수 있다(이미 저장된 영상은 건너뜀).
@@ -99,13 +101,19 @@ def main() -> None:
                 "impact_frame_hand_speed": impact_idx,
                 "max_missing_gap": result.max_missing_gap,
             }
-            np.savez_compressed(
-                out_path,
-                landmarks=result.landmarks.astype(np.float32),
-                landmarks_pixel=result.landmarks_pixel.astype(np.float32),
-                visibility=result.visibility.astype(np.float32),
-                meta_json=json.dumps(meta, ensure_ascii=False),
-            )
+            arrays = {
+                "landmarks": result.landmarks.astype(np.float32),
+                "landmarks_pixel": result.landmarks_pixel.astype(np.float32),
+                "visibility": result.visibility.astype(np.float32),
+            }
+            # 이미지 z 는 크기가 보장되지 않는다 (feedback/swing_features.py 의 DEPTH_SCALE 참고).
+            # 같은 추론의 월드 좌표를 함께 남겨 깊이 비교와 영상별 배율 점검에 쓴다.
+            capture = result.pose3d_capture
+            if capture is not None and len(capture["world_raw"]) == n_frames:
+                arrays["landmarks_world"] = np.asarray(capture["world_raw"], dtype=np.float32)
+            else:
+                meta["world_error"] = (result.pose3d_error or {}).get("code", "WORLD_FRAME_MISMATCH")
+            np.savez_compressed(out_path, **arrays, meta_json=json.dumps(meta, ensure_ascii=False))
             row.update(
                 fps=round(result.fps, 2),
                 n_frames=n_frames,
@@ -115,6 +123,7 @@ def main() -> None:
                 frames_after_impact=n_frames - impact_idx,
                 mean_visibility=round(float(np.nanmean(result.visibility)), 3),
                 max_missing_gap=result.max_missing_gap,
+                has_world="landmarks_world" in arrays,
             )
             done += 1
         except PipelineError as exc:
@@ -139,7 +148,7 @@ def main() -> None:
         fieldnames = [
             "video_id", "status", "handedness", "fps", "n_frames", "duration_s",
             "impact_frame", "frames_before_impact", "frames_after_impact",
-            "mean_visibility", "max_missing_gap", "error",
+            "mean_visibility", "max_missing_gap", "has_world", "error",
         ]
         summary = Path(args.summary)
         summary.parent.mkdir(parents=True, exist_ok=True)

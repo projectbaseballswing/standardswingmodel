@@ -92,7 +92,7 @@ def _phase_lines(phases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "reference": p.get("reference_mean"),
                 "diff": p.get("diff"),
                 "level": p.get("level"),
-                "direction": _direction_ko(p.get("direction", "")),
+                "direction": p.get("direction_text") or _direction_ko(p.get("direction", "")),
             }
         )
     return lines
@@ -130,7 +130,7 @@ def _phase_summary(phase: Dict[str, Any]) -> Dict[str, Any]:
             {
                 "name": top.get("joint_name"),
                 "diff": top.get("diff"),
-                "direction": _direction_ko(top.get("direction", "")),
+                "direction": top.get("direction_text") or _direction_ko(top.get("direction", "")),
             }
             if top
             else None
@@ -188,6 +188,12 @@ def build_llm_input(report: Dict[str, Any], *, scope: str = "overall") -> Dict[s
         "overall_score": overall.get("score"),
         "reliability": overall.get("reliability"),
         "parts": list(parts.values()),
+        # 몸통 회전 확인. 통과 못 한 것만 넘긴다 (failed). 점수에 반영된 것은 affects_score=true.
+        "rotation_issues": [
+            {"name": c.get("name"), "message": c.get("message"), "affects_score": c.get("affects_score")}
+            for c in overall.get("rotation_checks") or []
+            if c.get("passed") is False
+        ],
     }
 
     if scope == "full":
@@ -250,6 +256,9 @@ SYSTEM_INSTRUCTION = (
     드릴은 일반적인 야구 타격 코칭 지식에서 가져와도 된다(데이터에 없어도 됨). 단 problem·
     fix 와 맞아떨어지는 것으로 고른다.
 - 입력으로 받은 부위(key)에 대해서만 쓴다. 없는 부위를 만들지 않는다.
+- rotation_issues 는 착지부터 임팩트까지 몸통 회전에서 걸린 항목이다. 있으면 몸통(torso)
+  부위 improve_points 에 반영하고, affects_score 가 true 인 항목(몸통이 거의 돌지 않음)은
+  가장 먼저 고칠 점이라 overall_coach 로 삼는다.
 """
 )
 
@@ -466,7 +475,7 @@ def _compare_phases(current: Dict[str, Any], previous: Dict[str, Any]) -> List[D
                     {
                         "name": top.get("joint_name"),
                         "diff": top.get("diff"),
-                        "direction": _direction_ko(top.get("direction", "")),
+                        "direction": top.get("direction_text") or _direction_ko(top.get("direction", "")),
                     }
                     if top
                     else None

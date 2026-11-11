@@ -27,6 +27,8 @@ class Quality(BaseModel):
     max_missing_gap: Optional[int] = Field(None, description="타자 bbox 최대 연속 결측 프레임 수")
     nan_ratio: Optional[float] = None
     joint_visibility: Dict[str, float] = Field(default_factory=dict)
+    depth_scale: Optional[float] = Field(
+        None, description="이미지 z -> 월드 z 배율. 프로 영상은 0.27~0.35. 0.25~0.36 을 벗어나면 깊이를 쓰는 항목(팔꿈치 각도, 어깨/골반 회전)을 빼고 분석")
     warnings: List[str] = Field(default_factory=list)
 
 
@@ -61,14 +63,30 @@ class Issue(BaseModel):
     diff: Optional[float] = None
     z_score: Optional[float] = None
     direction: Direction
+    direction_text: Optional[str] = Field(None, description="화면용 방향 문구. 예) '기준보다 더 펴져 있어요'")
     level: Level
+
+
+class RotationCheck(BaseModel):
+    key: str = Field(description="hip_opens / shoulder_opens / plant_separation / separation_releases")
+    name: str
+    passed: Optional[bool] = Field(None, description="측정하지 못하면 null")
+    value: Optional[float] = Field(None, description="착지->임팩트 회전량, 또는 착지 때 꼬임(도)")
+    unit: str = "deg"
+    affects_score: bool = Field(description="true 인 확인(골반, 어깨)이 모두 실패하면 자세 점수에 상한이 걸린다")
+    pro_pass_rate: float = Field(description="프로 스윙 중 통과한 비율")
+    message: str = Field(description="화면용 문장")
 
 
 class OverallFeedback(BaseModel):
     model_version: str = Field(description="비교 모델 버전. 값의 의미가 바뀌면 올라간다")
     available: bool = Field(True, description="이 피드백을 계산할 수 있었는지")
     reliability: Reliability = Field("medium", description="값의 신뢰도")
-    score: Optional[float] = Field(None, description="0~100. 프로 선수 스윙이 기준과 보통 떨어진 거리를 80점으로 환산")
+    score: Optional[float] = Field(None, description="0~100. 0.2.1 부터 자세 점수 70% + 속도 점수 30%. 평균적인 프로가 80점")
+    posture_score: Optional[float] = Field(None, description="자세만 본 점수. 프로 선수 스윙이 기준과 보통 떨어진 거리를 80점으로 환산")
+    speed_score: Optional[float] = Field(None, description="최대 손 속도 점수. 프로 중앙값 80점, 상위 10% 100점")
+    posture_capped: bool = Field(False, description="골반과 어깨가 모두 돌지 않아 자세 점수에 상한(40점)이 걸렸는지")
+    rotation_checks: List[RotationCheck] = Field(default_factory=list, description="착지->임팩트 몸통 회전 확인")
     distance: Optional[float] = Field(None, description="기준 템플릿과의 거리")
     typical_pro_distance: Optional[float] = Field(None, description="80점에 해당하는 거리")
     group_scores: List[GroupScore]
@@ -93,6 +111,7 @@ class JointPhaseStat(BaseModel):
     diff: Optional[float] = Field(None, description="user_mean - reference_mean")
     z_score: Optional[float] = Field(None, description="기준 스윙들의 편차 대비 차이")
     direction: Direction
+    direction_text: Optional[str] = Field(None, description="화면용 방향 문구. 예) '기준보다 더 펴져 있어요'")
     level: Level
 
 
@@ -123,10 +142,12 @@ class JointFeedback(BaseModel):
     body_part_name: str = Field("", description="화면 표시용 부위 이름. 좌우타에 맞춰 좌/우로 변환됨")
     description: str
     unit: str = Field(description="deg(각도) 또는 body(몸 크기 대비 길이)")
+    direction_labels: Optional[Dict[str, str]] = Field(
+        None, description="higher / lower 일 때 '기준보다' 뒤에 붙일 말. 예) {'higher': '더 펴져 있어요'}")
     available: bool = Field(True, description="이 관절을 비교할 수 있었는지")
     reliability: Reliability = "medium"
     level: Level
-    worst_phase: str
+    worst_phase: Optional[str] = Field(None, description="가장 많이 벌어진 구간. available=false 면 null")
     impact: Optional[JointImpact] = None
     range_of_motion: Optional[RangeOfMotion] = None
     phases: List[JointPhaseStat]
@@ -146,6 +167,7 @@ class PhaseDeviation(BaseModel):
     diff: Optional[float] = None
     z_score: Optional[float] = None
     direction: Direction
+    direction_text: Optional[str] = Field(None, description="화면용 방향 문구. 예) '기준보다 더 펴져 있어요'")
     level: Level
 
 
@@ -367,3 +389,87 @@ class Health(BaseModel):
     mock: bool = Field(False, description="목업 모드 여부. true 면 고정된 샘플 응답을 돌려준다")
     template_path: str
     video_pipeline_loaded: bool
+
+
+# ----------------------------------------------------------------------
+# 기준 동작 (시각화용, 점수와 무관)
+# ----------------------------------------------------------------------
+Point3 = List[float]  # [x, y, z]
+
+
+class MotionBone(BaseModel):
+    name: str
+    length: float = Field(description="표준 체형의 뼈 길이 (몸통 길이 = 1). 기준 스켈레톤은 늘 이 길이")
+
+
+class ReferencePose(BaseModel):
+    joints: List[List[Point3]] = Field(description="[시점][관절] = [x, y, z]. 관절 순서는 joint_names")
+    root: List[Point3] = Field(description="[시점] 임팩트 순간 골반 중심 기준 골반 중심 위치 (프로 중앙값)")
+    spread_deg: List[List[float]] = Field(
+        description="[시점][뼈] 프로들 사이에서 뼈 방향이 퍼진 정도(도, 중앙값). 클수록 프로마다 다른 부분. 뼈 순서는 bones"
+    )
+    swings_used: int
+
+
+class UserPose(BaseModel):
+    start_frame: int
+    end_frame: int
+    frames: List[float] = Field(description="[시점] 분석 영상의 프레임 번호 (소수 = 두 프레임 사이). /pose-3d 프레임 번호와 같다")
+    timestamps_s: List[float] = Field(description="[시점] frames / fps (초)")
+    joints: List[List[Point3]] = Field(description="[시점][관절] 사용자 실제 좌표. 뼈 길이는 사용자 체형 그대로")
+    root: Optional[List[Point3]] = Field(None, description="[시점] 임팩트 순간 골반 중심 기준 골반 중심 위치. 임팩트를 못 찾으면 null")
+
+
+class ImprovedPose(BaseModel):
+    joints: List[List[Point3]] = Field(description="[시점][관절] VAE 개선 자세. 사용자 뼈 길이(체형)로 조립, 좌표는 user 와 같다")
+    change_deg: List[List[float]] = Field(description="[시점][뼈] 사용자 자세에서 바뀐 각도(도). 뼈 순서는 bones 와 같다")
+    applied: List[float] = Field(description="[시점] 개선 적용 정도. 0 = 사용자 자세 그대로, 1 = 프로다운 자세로 고침")
+
+
+class ImprovementChange(BaseModel):
+    phase: str
+    phase_name: str
+    bone: str
+    bone_name: str
+    max_change_deg: float = Field(description="이 구간에서 이 뼈가 가장 많이 바뀐 각도(도)")
+    at_point: int = Field(description="가장 많이 바뀐 시점 번호 (progress 번호)")
+
+
+class Improvement(BaseModel):
+    version: str
+    largest_changes: List[ImprovementChange] = Field(description="많이 바뀐 순서로 (구간, 뼈) 최대 5개. 고칠 곳이 없으면 빈 목록")
+
+
+class MotionPhase(BaseModel):
+    key: str
+    name: str
+    start_event: str
+    end_event: str
+    progress: List[float] = Field(description="[시점] 구간 진행률 0~1. 기준과 사용자가 같은 시점끼리 대응")
+    reference: Optional[ReferencePose] = None
+    user: Optional[UserPose] = Field(None, description="사용자 영상에 이 구간이 없으면 null (예: 앞발 들기가 잘린 영상)")
+    improved: Optional[ImprovedPose] = Field(
+        None, description="VAE 개선 자세: 사용자 스윙을 프로다운 스윙으로 옮긴 자세. 사용자 구간이 없거나 모델이 없으면 null")
+
+
+class ReferenceMotionResponse(BaseModel):
+    """프로 대표 스켈레톤과, 같은 좌표·같은 시점으로 맞춘 사용자 스켈레톤.
+
+    점수에는 쓰지 않는다. 기준 스켈레톤은 특정 선수가 아니라 프로 스윙들의 뼈 방향 중 가장 많이 몰린 방향을
+    표준 체형에 이어 붙여 만든 자세다. 좌표 규칙은 coordinate_convention, 자세한 설명은 docs/reference-motion-api.md.
+    """
+
+    analysis_id: str
+    version: str
+    method: str
+    reference_model_version: Optional[str] = None
+    handedness: Optional[str] = Field(None, description="right/left. 좌타는 좌표가 좌우반전(우타 기준)되어 있다")
+    coordinate_convention: Dict[str, str]
+    joint_names: List[str]
+    draw_edges: List[List[int]] = Field(description="화면에 그릴 선 (joint_names 번호 쌍)")
+    bones: List[MotionBone]
+    fps: Optional[float] = None
+    frame_count: Optional[int] = None
+    events: Dict[str, Optional[int]] = Field(default_factory=dict, description="이벤트 프레임 번호")
+    phases: List[MotionPhase]
+    improvement: Optional[Improvement] = Field(None, description="개선 자세 요약. 모델 파일(feedback/pose_vae.npz)이 없으면 null")

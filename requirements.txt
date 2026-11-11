@@ -6,3 +6,4 @@ opencv-python
 mediapipe<1  # 1.0.x 는 pose_landmarker.task 로드 시 크래시
 ultralytics
 lap  # ultralytics 추적기(model.track)가 사용
+torch  # LSTM 이벤트 모델 학습(scripts/train_event_lstm.py)에만. 서버 추론은 NumPy (feedback/event_lstm.py)

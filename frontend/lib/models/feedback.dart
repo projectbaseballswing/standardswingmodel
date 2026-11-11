@@ -79,6 +79,7 @@ class FeatureAnalysis {
     required this.name,
     required this.level,
     required this.direction,
+    this.directionText,
     this.unit = 'deg',
     this.description = '',
     this.comment = '',
@@ -101,6 +102,10 @@ class FeatureAnalysis {
 
   /// 기준 대비 방향. 'higher' | 'lower' | 'similar'.
   final String direction;
+
+  /// 서버가 피처에 맞게 만든 방향 문구. 예) "기준보다 더 펴져 있어요".
+  /// 0.2.2 이전 기록에는 없어서 null 이면 [direction] 으로 문구를 만든다.
+  final String? directionText;
 
   /// 값 단위. 'deg'(각도) 등.
   final String unit;
@@ -363,6 +368,10 @@ class OverallFeedback {
     this.phases = const [],
     this.speedMetrics = const [],
     this.events = const [],
+    this.rotationChecks = const [],
+    this.postureScore,
+    this.speedScore,
+    this.postureCapped = false,
     this.coaching,
   });
 
@@ -379,6 +388,16 @@ class OverallFeedback {
   final String reliability;
   final List<String> warnings;
   final List<AnalysisPhase> phases;
+
+  /// 종합 점수 = 자세 70% + 속도 30%. 0.2.1 이전 기록에는 없어서 null.
+  final double? postureScore;
+  final double? speedScore;
+
+  /// 골반과 어깨가 모두 돌지 않아 자세 점수에 상한(40점)이 걸렸는지.
+  final bool postureCapped;
+
+  /// 착지 → 임팩트 몸통 회전 확인. 0.2.2 이전 기록에는 없다.
+  final List<RotationCheck> rotationChecks;
   final List<SpeedMetric> speedMetrics;
   final List<SwingEvent> events;
 
@@ -429,15 +448,37 @@ class PhaseDeviation {
     required this.name,
     required this.direction,
     required this.level,
+    this.directionText,
     this.diff,
     this.zScore,
   });
   final String joint;
   final String name;
   final String direction;
+  final String? directionText;
   final String level;
   final double? diff;
   final double? zScore;
+}
+
+/// 착지 → 임팩트 몸통 회전 확인 하나. 서버 `overall.rotation_checks[]`.
+class RotationCheck {
+  const RotationCheck({
+    required this.key,
+    required this.name,
+    required this.message,
+    this.passed,
+    this.affectsScore = false,
+  });
+  final String key;
+  final String name;
+
+  /// 통과 여부. 측정하지 못하면 null.
+  final bool? passed;
+
+  /// true 인 확인(골반, 어깨)이 모두 실패하면 자세 점수에 상한이 걸린다.
+  final bool affectsScore;
+  final String message;
 }
 
 class AnalysisPhase {
@@ -454,6 +495,7 @@ class AnalysisPhase {
     this.tempoLevel,
     this.warnings = const [],
     this.deviations = const [],
+    this.checks = const [],
     this.coachCardLine = '',
     this.coachComment = '',
     this.coachTip = '',
@@ -470,6 +512,9 @@ class AnalysisPhase {
   final String? tempoLevel;
   final List<String> warnings;
   final List<PhaseDeviation> deviations;
+
+  /// 이 구간 카드에 보여줄 몸통 회전 확인. 스윙 구간에만 채운다.
+  final List<RotationCheck> checks;
 
   /// LLM(백엔드) 구간 코칭. 서버 `coaching.phases[]` 중 key 가 같은 항목에서 온다.
   /// 비어 있으면('') 화면이 기존 규칙 기반 문구로 폴백한다.

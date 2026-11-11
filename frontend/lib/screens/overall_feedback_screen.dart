@@ -473,6 +473,90 @@ class _ScoreCard extends StatelessWidget {
               ),
             ),
           ),
+          if (feedback.postureScore != null || feedback.speedScore != null) ...[
+            const SizedBox(height: 14),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: _SubScore(
+                    label: '자세',
+                    weight: '70%',
+                    score: feedback.postureScore,
+                    note: feedback.postureCapped
+                        ? '상한 40점 적용 · 몸통 회전 부족'
+                        : '프로 선수 자세와 얼마나 비슷한지',
+                    capped: feedback.postureCapped,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _SubScore(
+                    label: '속도',
+                    weight: '30%',
+                    score: feedback.speedScore,
+                    note: '임팩트 때 손 속도. 프로 중간이 80점',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 종합 점수를 이루는 자세/속도 점수 한 칸.
+class _SubScore extends StatelessWidget {
+  const _SubScore({
+    required this.label,
+    required this.weight,
+    required this.score,
+    required this.note,
+    this.capped = false,
+  });
+
+  final String label;
+  final String weight;
+  final double? score;
+  final String note;
+  final bool capped;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: capped ? const Color(0xFFFDECEC) : AppColors.fieldFill,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$label 점수 · 반영 $weight',
+            style: const TextStyle(fontSize: 11.5, color: AppColors.hint),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            score == null ? '-' : feedbackNumber(score),
+            style: TextStyle(
+              fontSize: 22,
+              height: 1.1,
+              fontWeight: FontWeight.w800,
+              color: capped ? AppColors.primary : AppColors.subtitle,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            score == null ? '측정하지 못했어요' : note,
+            style: TextStyle(
+              fontSize: 11,
+              height: 1.35,
+              color: capped ? const Color(0xFFC0514F) : AppColors.hint,
+            ),
+          ),
         ],
       ),
     );

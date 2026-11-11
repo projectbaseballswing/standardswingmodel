@@ -158,7 +158,9 @@ def test_comparison_input_full_includes_joints_and_phases():
     assert payload["joints"], "관절 비교가 있어야 한다"
     assert payload["phases"], "구간 비교가 있어야 한다"
     # 이전 diff를 2배로 벌려놨으니 현재가 프로에 더 가까움 → gap_narrowed > 0.
-    narrowed = [j["gap_narrowed"] for j in payload["joints"] if j["gap_narrowed"] is not None]
+    # 현재 차이가 0 이면 2배로 벌려도 0 이라 개선 폭도 0 이다. 그런 관절은 뺀다.
+    narrowed = [j["gap_narrowed"] for j in payload["joints"]
+                if j["gap_narrowed"] is not None and j["current_diff"]]
     assert narrowed and all(v > 0 for v in narrowed)
     # 구간 점수는 이전이 10점 낮으므로 '개선'.
     for ph in payload["phases"]:

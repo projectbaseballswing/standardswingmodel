@@ -104,3 +104,93 @@ def test_missing_phase_is_marked_unavailable(model, skeleton):
     # 분석 불가 구간이 있어도 신뢰도만 낮아질 뿐 전체 응답은 유효해야 한다
     AnalysisReport.model_validate(comparison.report())
     assert comparison.reliability in ("low", "medium")
+
+
+def test_report_survives_joint_missing_whole_video(model, skeleton):
+    """관절 하나가 영상 내내 1프레임만 잡혀도 분석이 실패하지 않고, 그 항목만 측정 불가로 내려간다."""
+    landmarks, fps = skeleton
+    broken = landmarks.copy()
+    broken[1:, 2, :] = np.nan  # 앞 팔꿈치
+    comparison = SwingComparisonV2(model, broken, fps, quality={"nan_ratio": 0.0, "joint_visibility": {}})
+    report = comparison.report(include_series=True)
+    AnalysisReport.model_validate(report)
+
+    elbow = next(j for j in report["joints"] if j["key"] == "lead_elbow_angle")
+    assert elbow["available"] is False
+    assert report["overall"]["score"] is not None
+    assert any("앞팔 팔꿈치" in w for w in report["overall"]["quality"]["warnings"])
+
+
+def _world_with_depth_scale(landmarks, depth_scale):
+    """x, y 는 그대로 두고 z 만 배율을 바꾼 가짜 월드 좌표. 이미지 z -> 월드 z 배율이 depth_scale 이 된다."""
+    world = landmarks.copy()
+    world[..., 2] *= depth_scale
+    return world
+
+
+def test_depth_check_keeps_elbows_when_scale_is_normal(model, skeleton):
+    landmarks, fps = skeleton
+    comparison = SwingComparisonV2(model, landmarks, fps, world_landmarks=_world_with_depth_scale(landmarks, 0.30))
+    report = comparison.report()
+    assert report["overall"]["quality"]["depth_scale"] == pytest.approx(0.30, abs=0.01)
+    elbow = next(j for j in report["joints"] if j["key"] == "lead_elbow_angle")
+    assert elbow["available"] is True
+
+
+def test_depth_check_drops_elbows_when_scale_is_abnormal(model, skeleton):
+    """배율이 프로 범위 밖이면 깊이를 쓰는 항목(팔꿈치, 회전)만 측정 불가로 빼고, 나머지는 그대로 분석한다."""
+    landmarks, fps = skeleton
+    comparison = SwingComparisonV2(model, landmarks, fps, world_landmarks=_world_with_depth_scale(landmarks, 1.0))
+    report = comparison.report(include_series=True)
+    AnalysisReport.model_validate(report)
+
+    available = {j["key"]: j["available"] for j in report["joints"]}
+    assert available["lead_elbow_angle"] is False and available["rear_elbow_angle"] is False
+    assert available["hip_shoulder_separation"] is False
+    assert available["lead_knee_angle"] is True
+    assert report["overall"]["score"] is not None
+    assert any("3D 깊이" in w for w in report["overall"]["quality"]["warnings"])
+
+
+def test_direction_text_uses_feature_specific_wording(model, skeleton):
+    """방향 문구는 피처마다 다르다 (팔꿈치 '펴짐', 회전 '열림'). 값이 비슷하면 '기준과 비슷해요'."""
+    landmarks, fps = skeleton
+    report = SwingComparisonV2(model, landmarks, fps).report()
+    AnalysisReport.model_validate(report)
+    joints = {j["key"]: j for j in report["joints"]}
+    assert joints["lead_elbow_angle"]["direction_labels"] == {"higher": "더 펴져 있어요", "lower": "더 굽혀져 있어요"}
+    assert joints["shoulder_turn"]["direction_labels"]["lower"] == "덜 열려 있어요"
+    for joint in joints.values():
+        for phase in joint["phases"]:
+            if phase["direction"] == "similar":
+                assert phase["direction_text"] == "기준과 비슷해요"
+            else:
+                label = joint["direction_labels"][phase["direction"]]
+                assert phase["direction_text"] == f"기준보다 {label}"
+    for phase in report["phases"]["phases"]:
+        for row in phase["top_deviations"]:
+            assert row["direction_text"].startswith("기준")
+
+
+def test_rotation_checks_cap_posture_when_torso_does_not_turn(model, skeleton):
+    """골반과 어깨를 착지 자세에 고정하고 팔만 움직이면 회전 확인에 걸려 자세 점수에 상한이 걸린다."""
+    from feedback.compare_v2 import ROTATION_FAIL_POSTURE_CAP
+    from feedback.events import LEAD_HIP, LEAD_SHOULDER, REAR_HIP, REAR_SHOULDER
+
+    landmarks, fps = skeleton
+    normal = SwingComparisonV2(model, landmarks, fps).report()
+    AnalysisReport.model_validate(normal)
+    checks = {c["key"]: c for c in normal["overall"]["rotation_checks"]}
+    assert set(checks) == {"hip_opens", "shoulder_opens", "plant_separation", "separation_releases"}
+
+    comparison = SwingComparisonV2(model, landmarks, fps)
+    plant = comparison.events.foot_plant
+    assert plant is not None
+    torso = [LEAD_SHOULDER, REAR_SHOULDER, LEAD_HIP, REAR_HIP]
+    frozen = landmarks.copy()
+    frozen[:, torso] = landmarks[plant, torso]
+    report = SwingComparisonV2(model, frozen, fps).report()
+    AnalysisReport.model_validate(report)
+    checks = {c["key"]: c for c in report["overall"]["rotation_checks"]}
+    assert checks["hip_opens"]["passed"] is False and checks["shoulder_opens"]["passed"] is False
+    assert report["overall"]["posture_score"] <= ROTATION_FAIL_POSTURE_CAP

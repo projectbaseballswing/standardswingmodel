@@ -20,10 +20,31 @@ import numpy as np
 
 from feedback.events import SwingEvents, detect_events
 from feedback.reference_model import PHASE_EVENTS, SPEED_METRICS, TIMING_NAMES, ReferenceModel
-from feedback.swing_features import FEATURE_NAMES_KO, FEATURE_UNITS, compute_features, hand_speed
+from feedback.swing_features import (
+    DEPTH_FEATURES,
+    DEPTH_SCALE_RANGE,
+    FEATURE_NAMES_KO,
+    FEATURE_UNITS,
+    compute_features,
+    estimate_depth_scale,
+    hand_speed,
+)
 
 # 점수: 기준 스윙이 평균에서 떨어진 거리(typical_distance)를 80점으로 둔다
 SCORE_AT_TYPICAL = 0.8
+# 거리를 제곱해서 환산한다. 1제곱이면 프로 스윙을 '가만히 서 있는 자세'로 바꿔도 70점이 나왔다.
+# 2제곱이면 프로 보통 거리의 1.5배 -> 60점, 2배 -> 41점.
+SCORE_EXPONENT = 2.0
+# 종합 점수 = 자세 점수와 손 속도 점수의 가중 평균. 자세 곡선은 시간 정규화돼 있어서
+# 속도가 빠지면 느리거나 거의 안 움직인 스윙도 높은 점수를 받는다.
+SPEED_SCORE_WEIGHT = 0.3
+
+# 회전 확인: 착지 -> 임팩트 사이 몸통이 실제로 돌았는지 본다 (프로 649개 통과율).
+#   골반이 열림 98%, 어깨가 열림 99%   -> 둘 다 실패하면 자세 점수 상한 (팔로만 치거나 거꾸로 된 동작)
+#   착지 때 꼬임 89%, 꼬임이 풀림 91% -> 프로도 10% 는 걸려서 점수에는 넣지 않고 피드백만 준다
+# 어느 쪽이 먼저 가장 빨리 도는지(순서)는 30fps 에서 잴 수 없다 (프로 58% 가 같은 프레임).
+ROTATION_OPEN_MIN_DEG = 5.0
+ROTATION_FAIL_POSTURE_CAP = 40.0
 
 # 자세 차이 판정 (단위: 기준 스윙들의 편차)
 LEVEL_CAUTION, LEVEL_WARNING = 1.0, 2.0
@@ -45,6 +66,7 @@ BODY_PARTS = {
     "rear_knee_angle": "rear_leg",
     "torso_lean": "torso", "shoulder_tilt": "torso", "hip_tilt": "torso",
     "shoulder_x_from_hip": "torso", "shoulder_y_from_hip": "torso",
+    "shoulder_turn": "torso", "hip_turn": "torso", "hip_shoulder_separation": "torso",
 }
 
 # 화면에 보여줄 부위 이름. 좌타 영상은 좌우반전해서 분석하므로 앞/뒤가 좌우로 바뀐다.
@@ -60,12 +82,17 @@ BODY_PART_ORDER = ["lead_arm", "rear_arm", "torso", "lead_leg", "rear_leg"]
 # 피처별 신뢰도. 영상 200개 분포와 관절 검출 신뢰도로 정했다.
 #   low    뒷팔 팔꿈치: 20도 미만의 불가능한 각도가 17% (가려진 뒤쪽 팔을 잘 못 잡는다)
 #   medium 손목에 의존하는 값들 (손목 검출 신뢰도 0.84), 앞팔 팔꿈치(불가능한 각도 3%)
+#   medium 회전(어깨/골반 회전, 꼬임): 깊이를 한 대의 카메라로 추정한 값. 월드 좌표와 3~4도 차이,
+#          임팩트 골반 회전은 월드보다 약 5도 크게 나온다.
 #   high   무릎·골반·어깨 기반 (검출 신뢰도 0.99 이상, 비현실값 0%)
 FEATURE_RELIABILITY = {
     "rear_elbow_angle": "low",
     "lead_elbow_angle": "medium",
     "hand_x_from_shoulder": "medium",
     "hand_y_from_shoulder": "medium",
+    "shoulder_turn": "medium",
+    "hip_turn": "medium",
+    "hip_shoulder_separation": "medium",
 }
 RELIABILITY_ORDER = {"low": 0, "medium": 1, "high": 2}
 
@@ -87,7 +114,42 @@ FEATURE_DESCRIPTIONS = {
     "lead_ankle_y_from_hip": "골반 기준 앞발의 높이.",
     "shoulder_x_from_hip": "골반 기준 상체의 앞뒤 쏠림.",
     "shoulder_y_from_hip": "골반 기준 상체의 높이.",
+    "shoulder_turn": "가슴이 투수 쪽으로 얼마나 돌아갔는지(열렸는지). 준비 자세에서는 옆으로 서 있다가 "
+                     "스윙하면서 투수를 향해 돌아간다. 촬영 방향에 따라 값이 통째로 조금 밀릴 수 있다.",
+    "hip_turn": "골반(배꼽)이 투수 쪽으로 얼마나 돌아갔는지(열렸는지). 타격의 힘은 팔보다 하체와 몸통이 "
+                "도는 데서 나온다. 촬영 방향에 따라 값이 통째로 조금 밀릴 수 있다.",
+    "hip_shoulder_separation": "골반과 어깨가 돈 정도의 차이. 앞발이 닿을 때 골반은 돌기 시작하고 어깨는 "
+                               "덜 돈 상태(꼬임)를 만들었다가, 그 꼬임을 풀면서 힘을 싣는다. 촬영 방향과 무관.",
 }
+
+
+# 기준보다 값이 클 때(higher) / 작을 때(lower) 화면에 보여줄 말. "기준보다 ___." 로 읽힌다.
+# 화면 좌표에서 +x 가 투수 쪽이다 (프로 98.5%: 앞 어깨가 +x). 기울기 +는 뒤 어깨/골반이 내려간 쪽.
+FEATURE_DIRECTION_LABELS = {
+    "lead_elbow_angle": ("더 펴져 있어요", "더 굽혀져 있어요"),
+    "rear_elbow_angle": ("더 펴져 있어요", "더 굽혀져 있어요"),
+    "lead_knee_angle": ("더 펴져 있어요", "더 굽혀져 있어요"),
+    "rear_knee_angle": ("더 펴져 있어요", "더 굽혀져 있어요"),
+    "torso_lean": ("투수 쪽으로 더 기울어 있어요", "포수 쪽으로 더 기울어 있어요"),
+    "shoulder_tilt": ("뒤 어깨가 더 내려가 있어요", "앞 어깨가 더 내려가 있어요"),
+    "hip_tilt": ("뒤 골반이 더 내려가 있어요", "앞 골반이 더 내려가 있어요"),
+    "hand_x_from_shoulder": ("투수 쪽으로 더 나가 있어요", "포수 쪽으로 더 들어가 있어요"),
+    "hand_y_from_shoulder": ("더 높아요", "더 낮아요"),
+    "lead_ankle_x_from_hip": ("더 멀리 나가 있어요", "덜 나가 있어요"),
+    "lead_ankle_y_from_hip": ("더 높이 들려 있어요", "더 낮아요"),
+    "shoulder_x_from_hip": ("투수 쪽으로 더 쏠려 있어요", "포수 쪽으로 더 남아 있어요"),
+    "shoulder_y_from_hip": ("더 높아요", "더 낮아요"),
+    "shoulder_turn": ("더 열려 있어요", "덜 열려 있어요"),
+    "hip_turn": ("더 열려 있어요", "덜 열려 있어요"),
+    "hip_shoulder_separation": ("꼬임이 덜해요 (어깨가 더 열림)", "꼬임이 더 커요 (어깨가 더 닫힘)"),
+}
+
+
+def direction_text(name: str, direction: str) -> str:
+    if direction == "similar":
+        return "기준과 비슷해요"
+    higher, lower = FEATURE_DIRECTION_LABELS.get(name, ("더 커요", "더 작아요"))
+    return f"기준보다 {higher if direction == 'higher' else lower}"
 
 
 def _r(value: float, digits: int = 2) -> Optional[float]:
@@ -99,7 +161,23 @@ def _r(value: float, digits: int = 2) -> Optional[float]:
 def distance_to_score(distance: float, typical: float) -> Optional[float]:
     if not np.isfinite(distance) or typical <= 0:
         return None
-    return round(100.0 * SCORE_AT_TYPICAL ** (distance / typical), 1)
+    return round(100.0 * SCORE_AT_TYPICAL ** ((distance / typical) ** SCORE_EXPONENT), 1)
+
+
+def speed_to_score(speed: float, median: float, p90: float) -> Optional[float]:
+    """최대 손 속도 -> 점수. 프로 중앙값이 80점, 프로 상위 10%가 100점, 정지가 0점."""
+    if speed is None or not np.isfinite(speed) or median <= 0:
+        return None
+    if speed <= median:
+        return round(80.0 * speed / median, 1)
+    return round(80.0 + 20.0 * min(1.0, (speed - median) / max(p90 - median, 1e-6)), 1)
+
+
+def _rms(values: np.ndarray) -> float:
+    """측정된 값만으로 낸 RMS. 측정된 값이 없으면 nan."""
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    return float(np.sqrt(np.mean(finite ** 2))) if len(finite) else float("nan")
 
 
 def level_of(z: float, caution: float = LEVEL_CAUTION, warning: float = LEVEL_WARNING) -> str:
@@ -132,6 +210,7 @@ class SwingComparisonV2:
         clip_start: int = 0,
         clip_end: Optional[int] = None,
         handedness: str = "right",
+        world_landmarks: Optional[np.ndarray] = None,
     ):
         self.model = model
         self.handedness = handedness if handedness in BODY_PART_NAMES else "right"
@@ -141,6 +220,24 @@ class SwingComparisonV2:
         self.events: SwingEvents = detect_events(self.landmarks, self.fps, clip_start, clip_end)
         self.features = compute_features(self.landmarks)
         self.speed = hand_speed(self.landmarks, self.fps)
+        # 관절이 영상 전체에서 1프레임 이하로만 잡히면 보간할 수 없어 그 관절로 만든 피처가 통째로 빈다.
+        # 이런 피처는 측정 불가로 빼고 나머지로 비교한다.
+        self.undetected_features = {
+            index for index in range(self.features.shape[1]) if not np.isfinite(self.features[:, index]).any()
+        }
+        # 월드 좌표가 있으면 이 영상의 깊이 배율을 재서, 프로 범위를 벗어나면 깊이를 쓰는 피처를 뺀다.
+        # 월드 좌표는 이 점검에만 쓰고 피처 값에는 넣지 않는다.
+        self.depth_scale: Optional[float] = None
+        self.depth_dropped: set = set()
+        if world_landmarks is not None:
+            self.depth_scale = estimate_depth_scale(self.landmarks, world_landmarks)
+            low, high = DEPTH_SCALE_RANGE
+            if self.depth_scale is not None and not low <= self.depth_scale <= high:
+                self.depth_dropped = {
+                    model.feature_index(name) for name in DEPTH_FEATURES if name in model.feature_names
+                } - self.undetected_features
+                self.features[:, sorted(self.depth_dropped)] = np.nan
+        self.missing_features = self.undetected_features | self.depth_dropped
 
         self.user_curves: Dict[str, np.ndarray] = {}
         self.diff_z: Dict[str, np.ndarray] = {}
@@ -163,7 +260,8 @@ class SwingComparisonV2:
         missing = len(PHASE_EVENTS) - len(self.user_curves)
         if missing >= 2 or nan_ratio >= 0.2 or worst < 0.4:
             return "low"
-        if missing >= 1 or nan_ratio >= 0.05 or worst < 0.6 or self.events.zoom_frame is not None:
+        if (missing >= 1 or nan_ratio >= 0.05 or worst < 0.6 or self.events.zoom_frame is not None
+                or self.missing_features):
             return "medium"
         return "high"
 
@@ -174,7 +272,7 @@ class SwingComparisonV2:
     def _overall_distance(self) -> float:
         if not self.diff_z:
             return float("nan")
-        return float(np.sqrt(np.mean(np.concatenate([z.ravel() for z in self.diff_z.values()]) ** 2)))
+        return _rms(np.concatenate([z.ravel() for z in self.diff_z.values()]))
 
     # ------------------------------------------------------------------
     # 종합
@@ -199,7 +297,7 @@ class SwingComparisonV2:
             if len(members) < 2:
                 part_reliability = _worse(part_reliability, "medium")
 
-            values = groups.get(part)
+            values = [v for v in groups.get(part, []) if np.isfinite(v)]
             if not values:
                 group_scores.append({"key": part, "name": names.get(part, part), "available": False,
                                      "reliability": "low", "feature_count": len(members),
@@ -220,9 +318,9 @@ class SwingComparisonV2:
         frame_distances, worst = [], None
         for key in PHASE_EVENTS:
             z = self.diff_z.get(key)
-            values = np.sqrt(np.mean(z**2, axis=1)) if z is not None else np.full(self.model.points, np.nan)
+            values = np.array([_rms(row) for row in z]) if z is not None else np.full(self.model.points, np.nan)
             frame_distances.extend(values.tolist())
-            if z is not None:
+            if np.isfinite(values).any():
                 peak = float(np.nanmax(values))
                 if worst is None or peak > worst[1]:
                     worst = (key, peak, int(np.nanargmax(values)))
@@ -233,13 +331,44 @@ class SwingComparisonV2:
         missing = [self.model.phases[k].name for k in PHASE_EVENTS if k not in self.user_curves and k in self.model.phases]
         if missing:
             warnings.append(f"영상에 담기지 않아 분석하지 못한 구간: {', '.join(missing)}")
+        def names(indices) -> str:
+            return ", ".join(FEATURE_NAMES_KO.get(self.model.feature_names[i], self.model.feature_names[i])
+                             for i in sorted(indices))
+
+        if self.undetected_features:
+            warnings.append(f"관절이 검출되지 않아 분석하지 못한 항목: {names(self.undetected_features)}")
+        if self.depth_dropped:
+            warnings.append(f"3D 깊이 추정이 불안정해 분석하지 못한 항목: {names(self.depth_dropped)}. "
+                            "타자 옆쪽에서 몸 전체가 보이게 다시 촬영해 보세요.")
+        if self.depth_scale is not None:
+            quality["depth_scale"] = round(self.depth_scale, 3)
         quality["warnings"] = warnings
+
+        posture_score = distance_to_score(distance, self.model.typical_distance)
+        speed_score = None
+        if self.model.peak_speed_reference is not None:
+            speed_score = speed_to_score(self._peak_hand_speed(), *self.model.peak_speed_reference)
+        checks = self.rotation_checks()
+        # 골반과 어깨가 둘 다 안 돌았을 때만 건다. 하나만 보면 이벤트 검출이 어긋난 프로 영상도 6% 걸린다 (둘 다: 3%).
+        gates = [c for c in checks if c["affects_score"]]
+        posture_capped = (posture_score is not None and posture_score > ROTATION_FAIL_POSTURE_CAP
+                          and bool(gates) and all(c["passed"] is False for c in gates))
+        if posture_capped:
+            posture_score = ROTATION_FAIL_POSTURE_CAP
+            warnings.append(f"몸통이 거의 돌지 않아 자세 점수를 {ROTATION_FAIL_POSTURE_CAP:.0f}점으로 제한했습니다.")
+        score = posture_score
+        if posture_score is not None and speed_score is not None:
+            score = round((1 - SPEED_SCORE_WEIGHT) * posture_score + SPEED_SCORE_WEIGHT * speed_score, 1)
 
         return {
             "model_version": self.model.model_version,
             "available": self.available,
             "reliability": self.reliability,
-            "score": distance_to_score(distance, self.model.typical_distance),
+            "score": score,
+            "posture_score": posture_score,
+            "posture_capped": posture_capped,
+            "rotation_checks": checks,
+            "speed_score": speed_score,
             "distance": _r(distance, 3),
             "typical_pro_distance": _r(self.model.typical_distance, 3),
             "group_scores": group_scores,
@@ -268,6 +397,7 @@ class SwingComparisonV2:
                     "type": "joint_angle",
                     "joint": joint["key"],
                     "joint_name": joint["name"],
+                    "direction_text": phase["direction_text"],
                     "phase": phase["phase"],
                     "phase_name": phase["phase_name"],
                     "user": phase["user_mean"],
@@ -316,12 +446,13 @@ class SwingComparisonV2:
                 curve = self.user_curves.get(key)
                 if phase is None:
                     continue
-                if curve is None:
+                if curve is None or index in self.missing_features:
                     phases.append({
                         "phase": key, "phase_name": phase.name, "available": False,
                         "user_mean": None, "reference_mean": _r(float(phase.mean[:, index].mean()), 1),
                         "reference_std": _r(float(phase.std[:, index].mean()), 1),
-                        "diff": None, "z_score": None, "direction": "similar", "level": "good",
+                        "diff": None, "z_score": None, "direction": "similar",
+                        "direction_text": direction_text(name, "similar"), "level": "good",
                     })
                     continue
                 user_mean = float(curve[:, index].mean())
@@ -335,13 +466,14 @@ class SwingComparisonV2:
                     "diff": _r(user_mean - ref_mean, 1), "z_score": _r(z),
                     "direction": _direction(user_mean - ref_mean, level), "level": level,
                 })
+                phases[-1]["direction_text"] = direction_text(name, phases[-1]["direction"])
 
             measured = [p for p in phases if p["available"]]
             worst = max(measured, key=lambda p: abs(p["z_score"]), default=None)
 
             # 임팩트 순간 = 스윙 구간의 마지막 지점
             impact = None
-            if "swing" in self.user_curves:
+            if "swing" in self.user_curves and index not in self.missing_features:
                 user_value = float(self.user_curves["swing"][-1, index])
                 ref_value = float(self.model.phases["swing"].mean[-1, index])
                 z = float(self.diff_z["swing"][-1, index])
@@ -351,7 +483,7 @@ class SwingComparisonV2:
                 }
 
             rom = None
-            if self.user_curves:
+            if self.user_curves and index not in self.missing_features:
                 user_all = np.concatenate([c[:, index] for c in self.user_curves.values()])
                 ref_all = np.concatenate([self.model.phases[k].mean[:, index] for k in self.user_curves])
                 rom = {
@@ -367,6 +499,8 @@ class SwingComparisonV2:
                 "body_part_name": BODY_PART_NAMES[self.handedness].get(BODY_PARTS.get(name, "other"), ""),
                 "description": FEATURE_DESCRIPTIONS.get(name, ""),
                 "unit": FEATURE_UNITS.get(name, "deg"),
+                "direction_labels": dict(zip(("higher", "lower"),
+                                             FEATURE_DIRECTION_LABELS.get(name, ("더 커요", "더 작아요")))),
                 "available": bool(measured),
                 "reliability": _worse(self.reliability, FEATURE_RELIABILITY.get(name, "high")),
                 "level": worst["level"] if worst else "good",
@@ -431,7 +565,7 @@ class SwingComparisonV2:
                 phase_warnings.append("선수마다 편차가 커서 템포를 판정하지 않았습니다. 수치만 참고하세요.")
             else:
                 tempo_level = level_of(tempo_z, TEMPO_CAUTION, TEMPO_WARNING)
-            distance = float(np.sqrt(np.mean(self.diff_z[key] ** 2)))
+            distance = _rms(self.diff_z[key])
 
             deviations = []
             for joint in joints:
@@ -440,7 +574,8 @@ class SwingComparisonV2:
                     continue
                 deviations.append({
                     "joint": joint["key"], "joint_name": joint["name"], "diff": row["diff"],
-                    "z_score": row["z_score"], "direction": row["direction"], "level": row["level"],
+                    "z_score": row["z_score"], "direction": row["direction"],
+                    "direction_text": row["direction_text"], "level": row["level"],
                 })
             deviations.sort(key=lambda item: abs(item["z_score"]), reverse=True)
 
@@ -500,15 +635,19 @@ class SwingComparisonV2:
     # ------------------------------------------------------------------
     # 속도
     # ------------------------------------------------------------------
+    def _peak_hand_speed(self) -> Optional[float]:
+        """임팩트 앞 5프레임 ~ 뒤 2프레임의 최대 손 속도. 기준 모델을 만들 때와 같은 범위다."""
+        if self.events.impact is None:
+            return None
+        window = self.speed[max(0, self.events.impact - 5):min(len(self.speed), self.events.impact + 3)]
+        return float(np.max(window)) if len(window) else None
+
     def speed_feedback(self) -> Dict[str, Any]:
         events = self.events
         measured: Dict[str, Optional[float]] = {"swing_time_ms": None, "peak_hand_speed": None, "plant_to_impact_ms": None}
         if events.impact is not None and events.swing_start is not None:
             measured["swing_time_ms"] = (events.impact - events.swing_start) / self.fps * 1000
-        if events.impact is not None:
-            window = self.speed[max(0, events.impact - 5):min(len(self.speed), events.impact + 3)]
-            if len(window):
-                measured["peak_hand_speed"] = float(np.max(window))
+        measured["peak_hand_speed"] = self._peak_hand_speed()
         if events.impact is not None and events.foot_plant is not None:
             measured["plant_to_impact_ms"] = (events.impact - events.foot_plant) / self.fps * 1000
 
@@ -538,6 +677,50 @@ class SwingComparisonV2:
         }
 
     # ------------------------------------------------------------------
+    def rotation_checks(self) -> List[Dict[str, Any]]:
+        """착지 -> 임팩트 사이 몸통 회전 확인 4개. 측정할 수 없으면 passed=None."""
+        plant, impact = self.events.foot_plant, self.events.impact
+
+        def at(feature: str, frame: Optional[int]) -> Optional[float]:
+            if feature not in self.model.feature_names or frame is None or not 0 <= frame < len(self.features):
+                return None
+            index = self.model.feature_index(feature)
+            value = float(self.features[frame, index])
+            return value if index not in self.missing_features and np.isfinite(value) else None
+
+        def delta(feature: str) -> Optional[float]:
+            start, end = at(feature, plant), at(feature, impact)
+            return None if start is None or end is None else end - start
+
+        def check(key, name, value, passed, affects_score, pro_rate, ok, bad):
+            measured = value is not None
+            return {
+                "key": key, "name": name, "passed": bool(passed) if measured else None,
+                "value": _r(value, 1), "unit": "deg", "affects_score": affects_score,
+                "pro_pass_rate": pro_rate,
+                "message": (ok if passed else bad) if measured else f"{name}을(를) 측정하지 못했어요.",
+            }
+
+        hip, shoulder = delta("hip_turn"), delta("shoulder_turn")
+        sep_plant, sep_release = at("hip_shoulder_separation", plant), delta("hip_shoulder_separation")
+        f = lambda v: f"{abs(v):.0f}" if v is not None else ""
+        return [
+            check("hip_opens", "골반 회전", hip, hip is not None and hip > ROTATION_OPEN_MIN_DEG, True, 0.98,
+                  f"착지부터 임팩트까지 골반이 {f(hip)}도 돌아갔어요.",
+                  "착지부터 임팩트까지 골반이 거의 돌지 않았어요. 하체를 돌리면서 쳐 보세요."),
+            check("shoulder_opens", "어깨 회전", shoulder,
+                  shoulder is not None and shoulder > ROTATION_OPEN_MIN_DEG, True, 0.99,
+                  f"착지부터 임팩트까지 어깨가 {f(shoulder)}도 돌아갔어요.",
+                  "착지부터 임팩트까지 어깨가 거의 돌지 않았어요. 팔로만 치지 말고 몸통을 돌려 보세요."),
+            check("plant_separation", "착지 때 꼬임", sep_plant, sep_plant is not None and sep_plant < 0, False, 0.89,
+                  f"앞발이 닿을 때 어깨가 골반보다 {f(sep_plant)}도 덜 돌아가 꼬임이 있어요.",
+                  "앞발이 닿을 때 어깨가 골반만큼 돌아가 있어 꼬임이 없어요. 어깨를 조금 더 닫아 두세요."),
+            check("separation_releases", "꼬임 풀기", sep_release,
+                  sep_release is not None and sep_release > 0, False, 0.91,
+                  "임팩트까지 꼬임이 풀리면서 어깨가 골반을 따라 돌았어요.",
+                  "임팩트까지 꼬임이 풀리지 않았어요. 골반이 먼저 돈 뒤 어깨가 따라 돌게 해 보세요."),
+        ]
+
     def report(self, include_series: bool = False) -> Dict[str, Any]:
         joints = self.joints(include_series=include_series)
         return {
