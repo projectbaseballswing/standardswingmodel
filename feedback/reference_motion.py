@@ -294,8 +294,8 @@ def user_motion(pixel_landmarks: np.ndarray, fps: float, events: Dict[str, Optio
 
 
 def motion_response(analysis_id: str, stored: Dict[str, Any], motion: ReferenceMotion,
-                    handedness: Optional[str] = None) -> Dict[str, Any]:
-    """저장된 사용자 동작 + 기준 동작 -> API 응답."""
+                    handedness: Optional[str] = None, improved: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """저장된 사용자 동작 + 기준 동작 (+ VAE 개선 자세, feedback/pose_vae.py) -> API 응답."""
     progress = np.linspace(0.0, 1.0, motion.points)
     phases = []
     for key in PHASE_EVENTS:
@@ -314,6 +314,7 @@ def motion_response(analysis_id: str, stored: Dict[str, Any], motion: ReferenceM
                 "swings_used": ref.count,
             },
             "user": user,
+            "improved": None if improved is None else improved["phases"].get(key),
         })
     return {
         "analysis_id": analysis_id,
@@ -332,4 +333,7 @@ def motion_response(analysis_id: str, stored: Dict[str, Any], motion: ReferenceM
         "frame_count": stored.get("frame_count"),
         "events": stored.get("events") or {},
         "phases": phases,
+        "improvement": None if improved is None else {
+            k: v for k, v in improved.items() if k != "phases"
+        },
     }

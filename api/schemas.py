@@ -409,6 +409,25 @@ class UserPose(BaseModel):
     root: Optional[List[Point3]] = Field(None, description="[시점] 임팩트 순간 골반 중심 기준 골반 중심 위치. 임팩트를 못 찾으면 null")
 
 
+class ImprovedPose(BaseModel):
+    joints: List[List[Point3]] = Field(description="[시점][관절] VAE 개선 자세. 사용자 뼈 길이(체형)로 조립, 좌표는 user 와 같다")
+    change_deg: List[List[float]] = Field(description="[시점][뼈] 사용자 자세에서 바뀐 각도(도). 뼈 순서는 bones 와 같다")
+
+
+class ImprovementChange(BaseModel):
+    phase: str
+    phase_name: str
+    bone: str
+    bone_name: str
+    max_change_deg: float = Field(description="이 구간에서 이 뼈가 가장 많이 바뀐 각도(도)")
+    at_point: int = Field(description="가장 많이 바뀐 시점 번호 (progress 번호)")
+
+
+class Improvement(BaseModel):
+    version: str
+    largest_changes: List[ImprovementChange] = Field(description="많이 바뀐 순서로 (구간, 뼈) 5개")
+
+
 class MotionPhase(BaseModel):
     key: str
     name: str
@@ -417,6 +436,8 @@ class MotionPhase(BaseModel):
     progress: List[float] = Field(description="[시점] 구간 진행률 0~1. 기준과 사용자가 같은 시점끼리 대응")
     reference: Optional[ReferencePose] = None
     user: Optional[UserPose] = Field(None, description="사용자 영상에 이 구간이 없으면 null (예: 앞발 들기가 잘린 영상)")
+    improved: Optional[ImprovedPose] = Field(
+        None, description="VAE 개선 자세: 사용자 스윙을 프로다운 스윙으로 옮긴 자세. 사용자 구간이 없거나 모델이 없으면 null")
 
 
 class ReferenceMotionResponse(BaseModel):
@@ -439,3 +460,4 @@ class ReferenceMotionResponse(BaseModel):
     frame_count: Optional[int] = None
     events: Dict[str, Optional[int]] = Field(default_factory=dict, description="이벤트 프레임 번호")
     phases: List[MotionPhase]
+    improvement: Optional[Improvement] = Field(None, description="개선 자세 요약. 모델 파일(feedback/pose_vae.npz)이 없으면 null")

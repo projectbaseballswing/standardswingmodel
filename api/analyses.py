@@ -354,4 +354,16 @@ def get_reference_motion(request: Request, analysis_id: str):
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "기준 동작 파일(data/reference_motion.npz)이 없습니다.")
     job = _jobs(request).get(analysis_id)
     handedness = (job.input or {}).get("handedness") if job is not None else None
-    return motion_response(analysis_id, stored, motion, handedness=handedness)
+    return motion_response(analysis_id, stored, motion, handedness=handedness, improved=_improved_motion(stored))
+
+
+def _improved_motion(stored: dict):
+    """VAE 개선 자세. 모델 파일이 없거나 계산에 실패하면 None (나머지 응답은 그대로)."""
+    try:
+        from feedback.pose_vae import improved_motion, load_pose_vae
+
+        model = load_pose_vae()
+        return None if model is None else improved_motion(model, stored.get("phases") or {})
+    except Exception:
+        logger.warning("improved motion skipped", exc_info=True)
+        return None
