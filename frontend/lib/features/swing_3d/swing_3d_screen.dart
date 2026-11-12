@@ -53,10 +53,20 @@ class Swing3dScreen extends StatefulWidget {
     required this.loader,
     this.sceneBuilder,
     this.dataWarnings = const [],
+    this.phaseFrames,
+    this.phasePartLevels,
+    this.handedness = 'right',
   });
   final SwingClipLoader loader;
   final SwingSceneBuilder? sceneBuilder;
   final List<String> dataWarnings;
+
+  /// 품질 색뼈대용(선택). 구간→[시작,끝] 프레임 경계.
+  final Map<String, List<int>>? phaseFrames;
+
+  /// 구간→(부위→level). 재생 프레임의 구간을 찾아 그 부위색을 마네킹에 입힌다.
+  final Map<String, Map<String, String>>? phasePartLevels;
+  final String handedness;
 
   @override
   State<Swing3dScreen> createState() => _Swing3dScreenState();
@@ -70,6 +80,7 @@ class _Swing3dScreenState extends State<Swing3dScreen>
   ModalRoute<dynamic>? _route;
   String? _loadError, _renderError;
   bool _loading = true, _ready = false, _playing = false;
+  bool _bonesOnly = false; // 뼈대만 보기(마네킹 숨김)
   SwingDisplayMode _mode = SwingDisplayMode.p0;
   bool get _stable => _mode == SwingDisplayMode.p0;
   double _speed = 1;
@@ -239,6 +250,31 @@ class _Swing3dScreenState extends State<Swing3dScreen>
     });
   }
 
+  // 재생 프레임이 속한 구간. 범위 밖은 가까운 구간(앞은 첫 구간, 뒤는 마지막).
+  static const _phaseOrder = ['stride', 'transition', 'swing', 'follow'];
+  String? _phaseOf(int index) {
+    final pf = widget.phaseFrames;
+    if (pf == null) return null;
+    String? first, last;
+    for (final k in _phaseOrder) {
+      final b = pf[k];
+      if (b == null || b.length < 2) continue;
+      first ??= k;
+      last = k;
+      if (index >= b[0] && index <= b[1]) return k;
+    }
+    if (first != null && index < pf[first]![0]) return first;
+    return last;
+  }
+
+  // 현재 프레임의 부위별 품질 level. 데이터 없으면 null(색뼈대 비표시).
+  Map<String, String>? _partLevelsFor(int index) {
+    final levels = widget.phasePartLevels;
+    if (levels == null) return null;
+    final phase = _phaseOf(index);
+    return phase == null ? null : levels[phase];
+  }
+
   String? _emptyReason(StabilizedFrame frame, List<Vec3?> positions) {
     if (positions.any((point) => point != null)) return null;
     if (frame.source.finiteJointCount == 0) {
@@ -317,6 +353,9 @@ class _Swing3dScreenState extends State<Swing3dScreen>
                     key: ValueKey(_generation),
                     positions: scene.positions,
                     jointWarnings: scene.warnings,
+                    partLevels: _partLevelsFor(index),
+                    handedness: widget.handedness,
+                    bonesOnly: _bonesOnly,
                     orientation: scene.orientation,
                     headPose: scene.headPose,
                     edgeVisible: scene.edgeVisible,
@@ -595,6 +634,13 @@ class _Swing3dScreenState extends State<Swing3dScreen>
               _distance = 3.6;
             }),
             icon: const Icon(Icons.restart_alt),
+          ),
+          IconButton(
+            key: const Key('swing-3d-bones-only'),
+            tooltip: _bonesOnly ? '마네킹 보기' : '뼈대만 보기',
+            isSelected: _bonesOnly,
+            onPressed: () => setState(() => _bonesOnly = !_bonesOnly),
+            icon: const Icon(Icons.polyline),
           ),
         ],
       ),

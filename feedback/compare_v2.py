@@ -729,4 +729,10 @@ class SwingComparisonV2:
             "joints": joints,
             "phases": self.phases(joints=joints),
             "speed": self.speed_feedback(),
+            # 구간별 프레임 경계. 재생 프레임 → 구간 매핑에 쓴다(마네킹 품질 색코딩 등).
+            "phase_frames": {
+                key: [int(getattr(self.events, start)), int(getattr(self.events, end))]
+                for key, (start, end) in PHASE_EVENTS.items()
+                if getattr(self.events, start) is not None and getattr(self.events, end) is not None
+            },
         }
