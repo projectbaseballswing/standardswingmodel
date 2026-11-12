@@ -1,3 +1,5 @@
+import bisect
+
 import cv2
 import numpy as np
 import pandas as pd
@@ -17,6 +19,96 @@ def _score_weight(p_area, min_bat_dist, center_dist,
     3. center dist : 화면 중앙부에 위치한 객체
     '''
     return (p_area * area_weight) - (min_bat_dist * bat_dist_weight) - (center_dist * center_dist_weight)
+
+# 트랙 복원 임계값
+STITCH_MAX_SEAM_GAP = 5          # 인접 트랙 경계의 최대 끊김(프레임)
+STITCH_CENTER_RATIO = 0.6        # 중심 이동 허용치 = 박스폭 × 이 비율
+STITCH_AREA_RATIO = 2.0          # 경계 면적비 허용 상한(역수에도 적용)
+STITCH_OVERLAP_MIN_FRAMES = 2    # 겹침 판정에 필요한 최소 공통 프레임 수
+
+
+def _box_w(row):
+    c = row['coords']
+    return abs(c[2] - c[0]) if isinstance(c, (list, tuple)) and len(c) >= 4 else None
+
+
+def _same_person(a_rows, b_rows):
+    '''
+    두 player 트랙(track_id)이 '같은 사람'인지 공간 정보로 판정한다.
+
+    - 시간이 겹치는 경우(유령 중복 트랙 가능): 겹치는 프레임에서 두 박스가
+      공간적으로 거의 같은 위치면(중심거리 중앙값이 박스폭 대비 작음) 같은 사람,
+      멀면 다른 사람(예: 투수·포수)으로 본다.
+    - 시간이 안 겹치고 인접한 경우: 가장 가까운 프레임 쌍의 경계에서
+      중심 이동이 작고(박스폭 비례) 면적비가 비슷하면 같은 사람으로 본다.
+    '''
+    shared = set(a_rows) & set(b_rows)
+    if len(shared) >= STITCH_OVERLAP_MIN_FRAMES:
+        dists, widths = [], []
+        for f in shared:
+            ar, br = a_rows[f], b_rows[f]
+            dists.append(((ar['cx'] - br['cx']) ** 2 + (ar['cy'] - br['cy']) ** 2) ** 0.5)
+            bw = _box_w(ar) or _box_w(br)
+            if bw:
+                widths.append(bw)
+        if not widths:
+            return False
+        return float(np.median(dists)) <= STITCH_CENTER_RATIO * float(np.median(widths))
+    if shared:
+        return False  # 겹치긴 하는데 표본이 너무 적으면 보수적으로 병합 안 함
+
+    # 인접 경계: 두 트랙에서 가장 가까운 프레임 쌍을 찾는다(감싸는 구조도 처리)
+    a_sorted = sorted(a_rows)
+    seam = None  # (gap, a_frame, b_frame)
+    for bf in b_rows:
+        pos = bisect.bisect_left(a_sorted, bf)
+        for j in (pos - 1, pos):
+            if 0 <= j < len(a_sorted):
+                af = a_sorted[j]
+                g = abs(af - bf)
+                if seam is None or g < seam[0]:
+                    seam = (g, af, bf)
+    if seam is None:
+        return False
+    gap, af, bf = seam
+    if gap > STITCH_MAX_SEAM_GAP:
+        return False
+    ar, br = a_rows[af], b_rows[bf]
+    dist = ((ar['cx'] - br['cx']) ** 2 + (ar['cy'] - br['cy']) ** 2) ** 0.5
+    bw = _box_w(ar) or _box_w(br)
+    if bw is None or dist > STITCH_CENTER_RATIO * bw:
+        return False
+    a1, a2 = ar['area'], br['area']
+    if a1 <= 0 or a2 <= 0 or max(a1 / a2, a2 / a1) > STITCH_AREA_RATIO:
+        return False
+    return True
+
+
+def _reconstruct_person(rows_by_id, anchor_id):
+    '''
+    배트 근접 점수로 '타자'를 식별한 anchor_id 를 기준으로, 같은 사람의 조각난/중복된
+    track_id 들을 모아 한 사람으로 복원한다. 겹치는 트랙(유령 중복)과 인접 트랙 모두
+    _same_person 판정으로만 묶으므로, 다른 사람(투수·포수 등)은 끼지 않는다.
+
+    [return] 같은 사람으로 묶인 track_id 들을 '커버리지 내림차순'으로 정렬한 리스트.
+             앞쪽(가장 긴 트랙)을 우선으로 프레임을 채우기 위함.
+    '''
+    person = {anchor_id}
+    changed = True
+    while changed:
+        changed = False
+        for tid, rows in rows_by_id.items():
+            if tid in person:
+                continue
+            if any(_same_person(rows_by_id[p], rows) for p in person):
+                person.add(tid)
+                changed = True
+    ordered = sorted(person, key=lambda t: -len(rows_by_id[t]))
+    if len(ordered) > 1:
+        print(f"트랙 복원: anchor={anchor_id} + {[t for t in ordered if t != anchor_id]} "
+              f"→ {len(ordered)}개 트랙을 한 사람으로 병합")
+    return ordered
+
 
 def track_target_player(model, frames, player_cls=2, bat_cls=0):
     '''
@@ -129,17 +221,38 @@ def track_target_player(model, frames, player_cls=2, bat_cls=0):
         if bat_id_counts:
             player_associated_bats[player_id] = max(bat_id_counts, key=bat_id_counts.get)
         
-    target_player_id = max(score_board, key=score_board.get)
-    # target_bat_id = player_associated_bats.get(target_player_id, None)
+    # 배트 근접 점수로 '타자(사람)'를 식별한다. 이 선정 자체는 신뢰할 수 있지만,
+    # 트래커가 ID를 갈아타거나 유령 중복 트랙을 만들면 이 anchor 트랙이 일부 구간
+    # (예: 컨택 순간)만 남는다. 아래에서 같은 사람의 트랙 전체를 복원한다.
+    anchor_player_id = max(score_board, key=score_board.get)
+    # target_bat_id = player_associated_bats.get(anchor_player_id, None)
+
+    # --- 타자 트랙 복원: anchor 와 같은 사람인 track_id 들을 모아 스윙 전체를 복원 ---
+    # 겹치는 트랙(유령 중복)은 공간 근접으로, 인접 트랙은 경계 연속성으로 판정해
+    # '같은 사람'일 때만 병합한다(투수·포수 등 다른 사람은 공간적으로 멀어 제외됨).
+    rows_by_id = {
+        tid: {int(r['frame']): r for _, r in g.iterrows()}
+        for tid, g in df_players.groupby('track_id')
+    }
+    person_ids = _reconstruct_person(rows_by_id, anchor_player_id)
 
     # Player와 Bat 좌표 데이터 병합 및 딕셔너리 반환
     print("[3] 타겟 Player & Bat 데이터 정리")
-    
+
     # 1. 뼈대 생성 (1 ~ 전체 프레임)
     base_df = pd.DataFrame({'frame': range(1, frame_idx + 1)})
-    
+
     # 2. Player 데이터 완성
-    target_p_df = df_players[df_players['track_id'] == target_player_id][['frame', 'coords']]
+    #    같은 사람으로 묶인 트랙들을 '커버리지 우선'으로 프레임마다 하나씩 채운다.
+    #    (가장 긴 트랙을 기본으로, 그 트랙이 비는 프레임만 다른 트랙으로 보충)
+    chosen = {}  # frame -> coords
+    for tid in person_ids:
+        for f, r in rows_by_id[tid].items():
+            if f not in chosen:
+                chosen[f] = r['coords']
+    target_p_df = pd.DataFrame(
+        [{'frame': f, 'coords': chosen[f]} for f in sorted(chosen)]
+    )
     merged_p_df = pd.merge(base_df, target_p_df, on='frame', how='left')
     
     p_coords_list = [c if isinstance(c, list) else [np.nan] * 4 for c in merged_p_df['coords']]
