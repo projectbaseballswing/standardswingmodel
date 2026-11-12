@@ -284,6 +284,10 @@ class AnalysisReport(BaseModel):
     coaching: Optional[Coaching] = Field(
         None, description="LLM 코칭 문장. 없으면 프론트가 규칙 기반으로 채운다."
     )
+    phase_frames: Dict[str, List[int]] = Field(
+        default_factory=dict,
+        description="구간별 프레임 경계 {phase: [start, end]}. 재생 프레임→구간 매핑용(마네킹 품질 색코딩).",
+    )
 
 
 class AnalysisError(BaseModel):

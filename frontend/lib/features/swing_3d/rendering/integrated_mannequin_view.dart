@@ -27,6 +27,9 @@ class MannequinView extends StatefulWidget {
     this.footModes,
     this.footDirections,
     this.showEstimates = true,
+    this.partLevels,
+    this.handedness = 'right',
+    this.bonesOnly = false,
     this.yaw = 0.45,
     this.pitch = 0.12,
     this.distance = 3.6,
@@ -47,6 +50,16 @@ class MannequinView extends StatefulWidget {
   /// Optional independent world-space head policy. Null preserves legacy H0;
   /// an explicit neutral policy suppresses facial direction markers.
   final Map<String, dynamic>? headPose;
+  /// 품질 색뼈대: 현재 프레임 구간의 부위별 level(good/caution/warning).
+  /// null 이면 색뼈대를 그리지 않는다(기존 동작 그대로).
+  /// 키: lead_arm, rear_arm, lead_leg, rear_leg, torso.
+  final Map<String, String>? partLevels;
+
+  /// 좌/우 관절을 lead/rear 로 매핑할 타격 방향('right' | 'left').
+  final String handedness;
+
+  /// true 면 마네킹(솔리드) 메시를 숨기고 색뼈대(+배트)만 보여준다.
+  final bool bonesOnly;
   final double cameraTargetY;
   final bool showAxes;
   final ValueChanged<Map<String, dynamic>>? onDiagnostics;
@@ -118,6 +131,13 @@ class _MannequinViewState extends State<MannequinView> {
   final _materials = <three.Material>[];
   final _joints = <three.Mesh>[];
   final _limbs = <three.Mesh>[];
+  // 품질 색뼈대: 두꺼운 튜브(14) + 색 관절점(13). unlit + depthTest off 로 마네킹 위 겹침.
+  // 굵기는 compare3d 뷰어에서 맞춘 값과 동일.
+  // 겹침(마네킹 위) 기본 굵기 / '뼈대만' 모드에선 더 굵게.
+  static const _qBoneR = 0.0095, _qBoneROnly = 0.015, _qDotR = 0.0285;
+  final _qBones = <three.Mesh>[];
+  final _qDots = <three.Mesh>[];
+  late final three.Material _lvlGood, _lvlCaution, _lvlWarning, _lvlNone;
   final _rawJoints = <three.Mesh>[];
   final _rawLimbs = <three.Mesh>[];
   final _hands = <three.Mesh>[];
@@ -312,9 +332,43 @@ class _MannequinViewState extends State<MannequinView> {
       _axisLines.add(_mesh(_cylinder, material));
       _axisTips.add(_mesh(_sphere, material));
     }
+    // 품질 색뼈대용 unlit 재질(선명한 신호등 색) + 메시 풀.
+    _lvlGood = _overlayMat(0x2ECC40); // 선명한 초록
+    _lvlCaution = _overlayMat(0xFFB300); // 선명한 노랑/앰버
+    _lvlWarning = _overlayMat(0xFF2D2D); // 선명한 빨강
+    _lvlNone = _overlayMat(0x9AA3AD);
+    for (var i = 0; i < 14; i++) {
+      final m = three.Mesh(_cylinder, _lvlNone)
+        ..visible = false
+        ..castShadow = false
+        ..renderOrder = 20;
+      _three.scene.add(m);
+      _qBones.add(m);
+    }
+    for (var i = 0; i < 13; i++) {
+      final m = three.Mesh(_sphere, _lvlNone)
+        ..visible = false
+        ..castShadow = false
+        ..renderOrder = 21;
+      _three.scene.add(m);
+      _qDots.add(m);
+    }
     _createGuide();
     _sceneBuilt = true;
     _syncScene();
+  }
+
+  // 품질 색뼈대용 unlit 재질: 조명 영향 없는 순색 + depthTest off(항상 위에 겹침).
+  three.Material _overlayMat(int color) {
+    final m = three.MeshBasicMaterial.fromMap({
+      'color': color,
+      'transparent': true,
+      'opacity': 1.0,
+    });
+    m.depthTest = false;
+    m.depthWrite = false;
+    _materials.add(m);
+    return m;
   }
 
   void _createGuide() {
@@ -452,6 +506,133 @@ class _MannequinViewState extends State<MannequinView> {
     }
   }
 
+  // 각 뼈(14=EDGES12+척추+목)의 부위. 좌/우 관절은 타격방향으로 lead/rear.
+  List<String> _boneParts(bool isLeft) {
+    final la = isLeft ? 'rear_arm' : 'lead_arm';
+    final ra = isLeft ? 'lead_arm' : 'rear_arm';
+    final ll = isLeft ? 'rear_leg' : 'lead_leg';
+    final rl = isLeft ? 'lead_leg' : 'rear_leg';
+    return ['torso', la, la, ra, ra, 'torso', 'torso', 'torso',
+      ll, ll, rl, rl, 'torso', 'torso'];
+  }
+
+  // 각 관절(12)의 부위. 어깨·골반=torso, 팔꿈치/손목=팔, 무릎/발목=다리.
+  List<String> _jointParts(bool isLeft) {
+    final la = isLeft ? 'rear_arm' : 'lead_arm';
+    final ra = isLeft ? 'lead_arm' : 'rear_arm';
+    final ll = isLeft ? 'rear_leg' : 'lead_leg';
+    final rl = isLeft ? 'lead_leg' : 'rear_leg';
+    return ['torso', 'torso', la, ra, la, ra, 'torso', 'torso', ll, rl, ll, rl];
+  }
+
+  three.Material _lvlMat(String part, Map<String, String> levels) {
+    switch (levels[part]) {
+      case 'warning':
+        return _lvlWarning;
+      case 'caution':
+        return _lvlCaution;
+      case 'good':
+        return _lvlGood;
+      default:
+        return _lvlNone;
+    }
+  }
+
+  // 품질 색뼈대: 두꺼운 튜브 + 색 관절점을 부위×구간 level 색으로(마네킹 위 겹침).
+  void _syncQualityBones(List<three.Vector3?> p) {
+    // partLevels 가 있거나 '뼈대만' 모드면 색뼈대를 그린다. (레벨 없으면 전부 회색)
+    if (widget.partLevels == null && !widget.bonesOnly) {
+      for (final m in _qBones) {
+        m.visible = false;
+      }
+      for (final m in _qDots) {
+        m.visible = false;
+      }
+      return;
+    }
+    final levels = widget.partLevels ?? const <String, String>{};
+    final isLeft = widget.handedness == 'left';
+    final bparts = _boneParts(isLeft), jparts = _jointParts(isLeft);
+    three.Vector3? mid(int i, int j) {
+      final a = p[i], b = p[j];
+      return (a != null && b != null) ? a.clone().add(b).scale(.5) : null;
+    }
+
+    final sh = mid(0, 1), hp = mid(6, 7);
+    three.Vector3? head;
+    if (sh != null) {
+      final up = hp != null ? sh.clone().sub(hp) : three.Vector3(0, 1, 0);
+      final ul = up.length;
+      if (ul > 1e-6) head = sh.clone().addScaled(up.scale(1 / ul), 0.22);
+    }
+    final segs = <List<three.Vector3?>>[
+      for (final (a, b, _) in _edges) [p[a], p[b]],
+      [sh, hp],
+      [sh, head],
+    ];
+    final r = (widget.bonesOnly ? _qBoneROnly : _qBoneR) * _scale;
+    for (var k = 0; k < _qBones.length; k++) {
+      if (k < segs.length) {
+        _placeSegment(_qBones[k], segs[k][0], segs[k][1], r);
+        if (_qBones[k].visible) _qBones[k].material = _lvlMat(bparts[k], levels);
+      } else {
+        _qBones[k].visible = false;
+      }
+    }
+    final dr = _qDotR * _scale;
+    for (var i = 0; i < 12; i++) {
+      final pt = p[i];
+      if (pt != null) {
+        _qDots[i]
+          ..visible = true
+          ..position.setFrom(pt)
+          ..scale.setValues(dr, dr, dr)
+          ..material = _lvlMat(jparts[i], levels);
+      } else {
+        _qDots[i].visible = false;
+      }
+    }
+    final dh = _qDots[12];
+    if (head != null) {
+      dh
+        ..visible = true
+        ..position.setFrom(head)
+        ..scale.setValues(dr, dr, dr)
+        ..material = _lvlMat('torso', levels);
+    } else {
+      dh.visible = false;
+    }
+  }
+
+  // '뼈대만' 모드: 마네킹 솔리드 메시를 모두 숨긴다. 색뼈대·관절점·배트는 유지.
+  void _hideMannequinMeshes() {
+    for (final m in _joints) {
+      m.visible = false;
+    }
+    for (final m in _limbs) {
+      m.visible = false;
+    }
+    for (final m in _rawJoints) {
+      m.visible = false;
+    }
+    for (final m in _rawLimbs) {
+      m.visible = false;
+    }
+    for (final m in _hands) {
+      m.visible = false;
+    }
+    for (final m in _feet) {
+      m.visible = false;
+    }
+    for (final m in _face) {
+      m.visible = false;
+    }
+    _torso.visible = false;
+    _pelvis.visible = false;
+    _head.visible = false;
+    _neck.visible = false;
+  }
+
   void _syncScene() {
     if (!_sceneBuilt || !mounted) return;
     final p = List.generate(12, (j) => _point(widget.positions, j));
@@ -490,6 +671,7 @@ class _MannequinViewState extends State<MannequinView> {
       _placeSegment(_rawLimbs[j], raw[a], raw[b], .012 * _scale);
     }
     _syncTorsoAndEstimates(p);
+    _syncQualityBones(p);
     if (widget.showEstimates) {
       _placeBat(p);
     } else {
@@ -506,6 +688,7 @@ class _MannequinViewState extends State<MannequinView> {
       _hands[0].visible = _hands[0].visible && widget.edgeVisible![2];
       _hands[1].visible = _hands[1].visible && widget.edgeVisible![4];
     }
+    if (widget.bonesOnly) _hideMannequinMeshes();
     _guide.scale.setValues(_scale, _scale, _scale);
     _guide.position.y = -1.05 * _scale;
     _syncCamera();
