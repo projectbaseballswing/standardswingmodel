@@ -53,10 +53,14 @@ void main() {
       expect(find.text('분석 좌표 · Synthetic left60'), findsOneWidget);
       expect(clip.frameCount, 100);
       final p0 = PoseStabilizer(clip);
-      expect(
-        scene.positions,
-        p0.frameAt(0).positions.map((v) => v?.toList()).toList(),
-      );
+      // 표시 좌표 = 안정화 P0에 표시 전용 ±N 가우시안 평활(결측 보존)을 얹은 값.
+      final expected0 = gaussianSmoothedPositions(
+        (i) => p0.frameAt(i).positions,
+        0,
+        clip.frameCount,
+        kDefaultSwingSmoothWindow,
+      ).map((p) => p?.toList()).toList();
+      expect(scene.positions, expected0);
       final original = scene.positions;
       await tester.tap(find.byKey(const Key('swing-3d-play')));
       await tester.pump();
