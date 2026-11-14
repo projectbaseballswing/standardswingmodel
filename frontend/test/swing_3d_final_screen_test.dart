@@ -56,11 +56,23 @@ void main() {
       expect(scene.mode, SwingDisplayMode.improved);
       for (var i = 0; i < clip.frameCount; i++) {
         await seek(tester, i);
+        // 표시 좌표 = S2 소스에 표시 전용 ±N 가우시안 평활(결측 보존)을 얹은 값.
+        final expectedPositions = gaussianSmoothedPositions(
+          motion.positionsAt,
+          i,
+          clip.frameCount,
+          kDefaultSwingSmoothWindow,
+        ).map((p) => p?.toList()).toList();
+        expect(scene.positions, expectedPositions);
         expect(
-          scene.positions,
-          motion.positionsAt(i).map((p) => p?.toList()).toList(),
+          scene.orientation,
+          gaussianSmoothedOrientation(
+            motion.directional.frameAt,
+            i,
+            clip.frameCount,
+            kDefaultSwingSmoothWindow,
+          ),
         );
-        expect(scene.orientation, motion.directional.frameAt(i));
         expect(scene.headPose, motion.headAt(i));
         expect(scene.edgeVisible, motion.directional.edgesAt(i));
         expect(scene.torsoVisible, motion.directional.torsoAt(i));
