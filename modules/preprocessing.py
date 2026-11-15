@@ -27,13 +27,22 @@ def _interpolate_coordinates(df):
         return None, 0
 
     # 1. 연속 결측 프레임(Max Gap) 최대값 계산
+    #    앞/뒤(리드인·리드아웃) 결측은 제외하고, 타자가 처음 등장한 뒤부터
+    #    마지막으로 잡히기 전까지의 '내부' 연속 결측만 센다.
+    #    (셋업 전 걸어 들어오는 구간이나 스윙 후 남는 구간은 놓침으로 치지 않음)
     ref_col = coord_cols[0]
     is_missing = result_df[ref_col].isna()
-    
-    if not is_missing.any():
+
+    valid_idx = np.where(~is_missing.to_numpy())[0]
+    if len(valid_idx) == 0:
       max_missing_gap = 0
     else:
-      max_missing_gap = int(is_missing.groupby((~is_missing).cumsum()).sum().max())
+      first, last = valid_idx[0], valid_idx[-1]
+      interior = is_missing.iloc[first:last + 1]
+      if not interior.any():
+        max_missing_gap = 0
+      else:
+        max_missing_gap = int(interior.groupby((~interior).cumsum()).sum().max())
             
     # 2. 선형 보간 수행
     # method='linear': 점과 점 사이를 직선으로 채움

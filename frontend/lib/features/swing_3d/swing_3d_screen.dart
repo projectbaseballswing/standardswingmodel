@@ -14,6 +14,78 @@ typedef SwingSceneBuilder = Widget Function(BuildContext, SwingSceneState);
 
 enum SwingDisplayMode { improved, p0, raw }
 
+/// 떨림 보정 기본 강도(±프레임 반창). 슬라이더 기본값이자 테스트 기대값 기준.
+const int kDefaultSwingSmoothWindow = 5;
+
+/// 표시 전용 ±[halfWindow] 프레임 가우시안 평활(sigma = halfWindow/2).
+/// 중앙 프레임에 존재하는 관절만 평활하고, 결측(중앙 null)은 이웃에서 채우지 않고 보존한다.
+/// 소스/채점 좌표는 바꾸지 않는다. halfWindow<=0 이면 원본을 그대로 돌려준다.
+List<Vec3?> gaussianSmoothedPositions(
+  List<Vec3?> Function(int) sourceAt,
+  int index,
+  int frameCount,
+  int halfWindow,
+) {
+  final base = sourceAt(index);
+  if (halfWindow <= 0) return base;
+  final sigma = math.max(halfWindow / 2, 0.5);
+  return List<Vec3?>.generate(base.length, (j) {
+    if (base[j] == null) return null; // 결측 보존
+    double sx = 0, sy = 0, sz = 0, sw = 0;
+    for (var k = -halfWindow; k <= halfWindow; k++) {
+      final t = index + k;
+      if (t < 0 || t >= frameCount) continue;
+      final p = sourceAt(t)[j];
+      if (p == null) continue;
+      final w = math.exp(-(k * k) / (2 * sigma * sigma));
+      sx += p.x * w;
+      sy += p.y * w;
+      sz += p.z * w;
+      sw += w;
+    }
+    return sw > 0 ? Vec3(sx / sw, sy / sw, sz / sw) : base[j];
+  });
+}
+
+/// 표시 전용 몸통 방향(어깨/골반 basis) 가우시안 평활. 축 벡터(x/up/forward)를
+/// 이웃 프레임과 가중평균 후 정규화한다(소각 근사). 중앙 프레임에 해당 축이 없으면
+/// 그대로 둔다. body_mode·feet·head 등 나머지 키는 중앙 프레임 값을 유지한다.
+Map<String, dynamic>? gaussianSmoothedOrientation(
+  Map<String, dynamic>? Function(int) frameAt,
+  int index,
+  int frameCount,
+  int halfWindow,
+) {
+  final base = frameAt(index);
+  if (base == null || halfWindow <= 0) return base;
+  final sigma = math.max(halfWindow / 2, 0.5);
+  final result = Map<String, dynamic>.from(base);
+  for (final seg in const ['shoulder', 'pelvis']) {
+    final center = base[seg];
+    if (center is! Map) continue; // 비방향 프레임은 평활 안 함
+    final smoothedSeg = Map<String, dynamic>.from(center);
+    for (final axis in const ['x', 'up', 'forward']) {
+      if (center[axis] is! List) continue;
+      double sx = 0, sy = 0, sz = 0;
+      for (var k = -halfWindow; k <= halfWindow; k++) {
+        final t = index + k;
+        if (t < 0 || t >= frameCount) continue;
+        final s = frameAt(t)?[seg];
+        final v = s is Map ? s[axis] : null;
+        if (v is! List) continue;
+        final w = math.exp(-(k * k) / (2 * sigma * sigma));
+        sx += (v[0] as num).toDouble() * w;
+        sy += (v[1] as num).toDouble() * w;
+        sz += (v[2] as num).toDouble() * w;
+      }
+      final len = math.sqrt(sx * sx + sy * sy + sz * sz);
+      if (len > 1e-9) smoothedSeg[axis] = [sx / len, sy / len, sz / len];
+    }
+    result[seg] = smoothedSeg;
+  }
+  return result;
+}
+
 /// Rendering input is separate from the controls so widget tests can inspect
 /// real coordinates without pretending a test canvas validates GPU rendering.
 class SwingSceneState {
@@ -53,10 +125,20 @@ class Swing3dScreen extends StatefulWidget {
     required this.loader,
     this.sceneBuilder,
     this.dataWarnings = const [],
+    this.phaseFrames,
+    this.phasePartLevels,
+    this.handedness = 'right',
   });
   final SwingClipLoader loader;
   final SwingSceneBuilder? sceneBuilder;
   final List<String> dataWarnings;
+
+  /// 품질 색뼈대용(선택). 구간→[시작,끝] 프레임 경계.
+  final Map<String, List<int>>? phaseFrames;
+
+  /// 구간→(부위→level). 재생 프레임의 구간을 찾아 그 부위색을 마네킹에 입힌다.
+  final Map<String, Map<String, String>>? phasePartLevels;
+  final String handedness;
 
   @override
   State<Swing3dScreen> createState() => _Swing3dScreenState();
@@ -70,6 +152,8 @@ class _Swing3dScreenState extends State<Swing3dScreen>
   ModalRoute<dynamic>? _route;
   String? _loadError, _renderError;
   bool _loading = true, _ready = false, _playing = false;
+  bool _bonesOnly = false; // 뼈대만 보기(마네킹 숨김)
+  int _smoothWindow = kDefaultSwingSmoothWindow; // 떨림 보정 강도(±프레임), 0=끔
   SwingDisplayMode _mode = SwingDisplayMode.p0;
   bool get _stable => _mode == SwingDisplayMode.p0;
   double _speed = 1;
@@ -239,6 +323,31 @@ class _Swing3dScreenState extends State<Swing3dScreen>
     });
   }
 
+  // 재생 프레임이 속한 구간. 범위 밖은 가까운 구간(앞은 첫 구간, 뒤는 마지막).
+  static const _phaseOrder = ['stride', 'transition', 'swing', 'follow'];
+  String? _phaseOf(int index) {
+    final pf = widget.phaseFrames;
+    if (pf == null) return null;
+    String? first, last;
+    for (final k in _phaseOrder) {
+      final b = pf[k];
+      if (b == null || b.length < 2) continue;
+      first ??= k;
+      last = k;
+      if (index >= b[0] && index <= b[1]) return k;
+    }
+    if (first != null && index < pf[first]![0]) return first;
+    return last;
+  }
+
+  // 현재 프레임의 부위별 품질 level. 데이터 없으면 null(색뼈대 비표시).
+  Map<String, String>? _partLevelsFor(int index) {
+    final levels = widget.phasePartLevels;
+    if (levels == null) return null;
+    final phase = _phaseOf(index);
+    return phase == null ? null : levels[phase];
+  }
+
   String? _emptyReason(StabilizedFrame frame, List<Vec3?> positions) {
     if (positions.any((point) => point != null)) return null;
     if (frame.source.finiteJointCount == 0) {
@@ -273,7 +382,14 @@ class _Swing3dScreenState extends State<Swing3dScreen>
         }
       },
       onError: _renderFailed,
-      orientation: motion?.frameAt(index),
+      orientation: motion == null
+          ? null
+          : gaussianSmoothedOrientation(
+              motion.frameAt,
+              index,
+              _clip!.frameCount,
+              _smoothWindow,
+            ),
       headPose: finalMotion?.headAt(index),
       edgeVisible: motion?.edgesAt(index),
       torsoVisible: motion?.torsoAt(index) ?? true,
@@ -317,6 +433,9 @@ class _Swing3dScreenState extends State<Swing3dScreen>
                     key: ValueKey(_generation),
                     positions: scene.positions,
                     jointWarnings: scene.warnings,
+                    partLevels: _partLevelsFor(index),
+                    handedness: widget.handedness,
+                    bonesOnly: _bonesOnly,
                     orientation: scene.orientation,
                     headPose: scene.headPose,
                     edgeVisible: scene.edgeVisible,
@@ -464,12 +583,32 @@ class _Swing3dScreenState extends State<Swing3dScreen>
     final motion = improved
         ? finalMotion?.directional ?? clip.directional
         : null;
-    final orientation = motion?.frameAt(index);
-    final positions = improved
-        ? finalMotion?.positionsAt(index) ?? frame.source.positions
-        : _stable
-        ? frame.positions
-        : frame.rawPositions;
+    // 몸통/골반 방향도 같은 ±N 윈도우로 평활(떨림 보정). 표시 전용.
+    final orientation = motion == null
+        ? null
+        : gaussianSmoothedOrientation(
+            motion.frameAt,
+            index,
+            clip.frameCount,
+            _smoothWindow,
+          );
+    // 표시 좌표 소스. improved 는 S2(오프라인) 우선, 없으면 소스 좌표로 폴백.
+    List<Vec3?> sourceAt(int i) {
+      if (i < 0 || i >= clip.frameCount) return const <Vec3?>[];
+      if (improved) {
+        return finalMotion?.positionsAt(i) ?? _p0!.frameAt(i).source.positions;
+      }
+      final f = _p0!.frameAt(i);
+      return _stable ? f.positions : f.rawPositions;
+    }
+
+    // 표시 전용 ±N 프레임 가우시안 평활('떨림 보정'). 강도는 _smoothWindow 슬라이더로 조절.
+    final positions = gaussianSmoothedPositions(
+      sourceAt,
+      index,
+      clip.frameCount,
+      _smoothWindow,
+    );
     final visible = positions.where((point) => point != null).length;
     final warnings = <String>{
       ...widget.dataWarnings,
@@ -596,7 +735,42 @@ class _Swing3dScreenState extends State<Swing3dScreen>
             }),
             icon: const Icon(Icons.restart_alt),
           ),
+          IconButton(
+            key: const Key('swing-3d-bones-only'),
+            tooltip: _bonesOnly ? '마네킹 보기' : '뼈대만 보기',
+            isSelected: _bonesOnly,
+            onPressed: () => setState(() => _bonesOnly = !_bonesOnly),
+            icon: const Icon(Icons.polyline),
+          ),
         ],
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: [
+            const Text('떨림 보정', style: TextStyle(fontSize: 12)),
+            Expanded(
+              child: Slider(
+                key: const Key('swing-3d-smooth'),
+                min: 0,
+                max: 10,
+                divisions: 10,
+                value: _smoothWindow.toDouble().clamp(0, 10),
+                label: _smoothWindow == 0 ? '끔' : '±$_smoothWindow',
+                onChanged: (value) =>
+                    setState(() => _smoothWindow = value.round()),
+              ),
+            ),
+            SizedBox(
+              width: 34,
+              child: Text(
+                _smoothWindow == 0 ? '끔' : '±$_smoothWindow',
+                style: const TextStyle(fontSize: 12),
+                textAlign: TextAlign.end,
+              ),
+            ),
+          ],
+        ),
       ),
       const Center(
         child: Text(

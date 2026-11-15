@@ -53,18 +53,24 @@ class Browser(base.Browser):
     async def login(self, user, password):
         await self.call('Page.bringToFront')
         await self.call('Emulation.setFocusEmulationEnabled', {'enabled': True})
+        # A full document navigation clears Flutter's in-memory session and old
+        # editing elements; changing only the hash can retain a previous form.
+        await self.call('Page.navigate', {'url': 'about:blank'})
+        await asyncio.sleep(.2)
         await super().login(user, password)
 
     async def fill(self, label, value):
-        await super().fill(label, value)
         selector = "[...document.querySelectorAll('input,textarea')].find(e=>(e.getAttribute('aria-label')||e.getAttribute('placeholder')||'').includes(" + json.dumps(label) + "))"
-        length = await self.js(f'({selector})?.value.length')
-        if length != len(value):
-            # Flutter can replace its editing element after the first pointer
-            # event. Refocus the current element, then use real CDP text input.
-            await self.js(f'({selector})?.focus()')
-            await self.call('Input.insertText', {'text': value})
-            await asyncio.sleep(.2)
+        position = await self.js(f'(()=>{{const e={selector};if(!e)return null;const r=e.getBoundingClientRect();return{{x:r.x+r.width/2,y:r.y+r.height/2}}}})()')
+        if position is None:
+            raise AssertionError('Missing input ' + label)
+        # Focus through actual pointer input. DOM focus/value writes can update
+        # Flutter's accessibility proxy without updating its text controller.
+        await self.call('Input.dispatchMouseEvent', {'type': 'mouseMoved', **position})
+        await self.mouse(**position)
+        await asyncio.sleep(.2)
+        await self.call('Input.insertText', {'text': value})
+        await asyncio.sleep(.2)
         if await self.js(f'({selector})?.value.length') != len(value):
             raise AssertionError('Chrome did not accept text in ' + label)
 

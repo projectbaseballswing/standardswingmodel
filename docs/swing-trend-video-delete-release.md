@@ -18,4 +18,73 @@ migration 연결은 `0001 → 0002 → 0003 → 0004`다. `0004`는 `swings`에 
 
 ## 검증 결과
 
-최신 main 반영 후 실행 결과를 아래에 갱신한다. 기존 캡처와 실행 원문은 `.local/github-finalization/` 및 각 로컬 검증 폴더에 보존한다. 실제 Supabase 객체 삭제, Android 실기기, PostgreSQL 동시 삭제 잠금은 별도 미검증 항목이다.
+기준 main은 `1b0ec66`(PR #75)이다. 25개 후속 커밋을 병합했으며 공통 수정 5파일은 자동 병합됐다. 충돌 표식은 없고, `frontend/lib/features/swing_3d`, `feedback`, `modules`, 인증·로그인·작업 큐는 최신 main과 동일하다.
+
+| 검사 | 결과 |
+| --- | --- |
+| Flutter analyze | 통과 |
+| Flutter 전체 VM 테스트 | 276 통과, 기존 6 제외 |
+| FastAPI 전체 테스트 | 187 통과, 14 제외 |
+| Web build | 통과 |
+| 실제 Chrome 통합 조작 | 28항목 통과, 런타임 예외 0 |
+| Migration | 격리 SQLite fresh/기존 데이터 보존/0003↔0004, PostgreSQL offline SQL 통과 |
+| 미적용 DB | 0003에서 새 ORM 조회 실패, 0004 적용 뒤 조회 복구 확인 |
+
+Chrome에서 정상 로그인 → 추이 기간 필터 → 삭제 취소 → 실제 임시 파일 잠금에 따른 502 → 잠금 해제 후 재삭제 200 → 추이·피드백·3D 유지 → 재로그인 후 유지까지 확인했다. API·UI는 실제 실행하되 점수와 3D는 명시한 합성 fixture이며 운영 데이터나 실제 AI 재추론을 사용하지 않았다. 원본은 Storage 검사용 MP4 컨테이너여서 영상 디코딩 품질 검증은 아니다. 기존 서버/DB는 건드리지 않고 해당 검사 프로세스만 종료했다.
+
+Windows에서 저장·재시작 검사 subprocess 로그의 문자 디코딩 경고가 발생했다. `PYTHONUTF8=1`로 해당 검사만 다시 실행해 통과했고 디코딩 경고는 없어졌다. 기존 Starlette/httpx deprecation 경고는 남아 있으며 의존성을 변경하지 않았다.
+
+GitHub CI 결과는 PR의 Checks에서 확인한다. 실제 Supabase 객체 삭제, Android 실기기, PostgreSQL 동시 삭제 잠금은 미검증이다.
+
+### 제외된 검사
+
+- Flutter VM: 기존 `swing_3d_screen_test.dart`의 P0/raw 모드 전환 관련 3개는 main의 표시 정책 변경으로 계속 skip이다. `swing_upload_test.dart`의 웹 Blob 실패 대체·취소 해제·결과 오류 시 해제 3개는 VM 제외이며 GitHub Linux Chrome job에서 따로 실행한다.
+- `test_compare_v2.py` 10개: 이 checkout에 `data/skeletons` 원본 실험 데이터가 없어 제외. schema, reference score, speed, phase duration, missing phase, whole-video missing joint, depth normal/abnormal, direction wording, rotation cap 검사다.
+- `test_event_lstm.py` 2개: 실제 스켈레톤 데이터가 없어 실제 스윙 이벤트 순서와 LSTM anchor 비교를 제외.
+- `test_real_supabase_end_to_end`: 원격 변경을 수행하지 않기 위해 opt-in 비활성.
+- `test_local_delete_rejects_wrong_bucket_directory_escape_and_links`: Windows symlink 생성 권한이 없어 제외. Linux CI에서 재검증한다.
+
+### 기존 작업 보존과 공개 범위
+
+두 원본 feature worktree와 `standardswingmodel`의 HEAD·변경 상태·수정/미추적 파일 SHA-256을 전후 비교한다. Git fetch로 공통 원격 추적 ref만 최신화하며 원본 파일은 변경하지 않는다. 테스트 캡처 20개와 JSON 1개는 untracked 상태로 남기고 삭제하지 않는다. `.env`, 키·토큰·비밀번호, 개인 영상·NPZ, 로컬 DB·캐시·실행 로그는 커밋에 포함하지 않는다.
+
+## PR에 포함하는 38개 파일
+
+- `api/analyses.py`
+- `api/database.py`
+- `api/main.py`
+- `api/schemas.py`
+- `api/storage.py`
+- `api/swings.py`
+- `api/video_deletion.py`
+- `docs/original-video-delete.md`
+- `docs/supabase-live-connection.md`
+- `docs/swing-trend-ui.md`
+- `docs/swing-trend-video-delete-integration.md`
+- `docs/swing-trend-video-delete-release.md`
+- `frontend/lib/api/analysis_api.dart`
+- `frontend/lib/api/original_video_api.dart`
+- `frontend/lib/api/swing_api.dart`
+- `frontend/lib/data/feedback_repository.dart`
+- `frontend/lib/data/swing_repository.dart`
+- `frontend/lib/models/feedback.dart`
+- `frontend/lib/models/swing.dart`
+- `frontend/lib/models/swing_trend.dart`
+- `frontend/lib/router.dart`
+- `frontend/lib/screens/overall_feedback_screen.dart`
+- `frontend/lib/screens/swing_list_screen.dart`
+- `frontend/lib/screens/swing_trend_screen.dart`
+- `frontend/lib/widgets/swing_trend_chart.dart`
+- `frontend/lib/widgets/swing_video.dart`
+- `frontend/test/original_video_delete_test.dart`
+- `frontend/test/swing_trend_screen_test.dart`
+- `frontend/test/swing_trend_test.dart`
+- `frontend/test/swing_trend_video_delete_test.dart`
+- `migrations/versions/0004_original_video_delete.py`
+- `scripts/run_supabase_review.py`
+- `scripts/verify_original_video_delete_browser.py`
+- `scripts/verify_swing_trend_browser.py`
+- `scripts/verify_trend_video_integration.py`
+- `tests/test_migrations.py`
+- `tests/test_swing_listing.py`
+- `tests/test_video_deletion.py`

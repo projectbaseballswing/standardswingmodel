@@ -7,7 +7,7 @@ scripts/build_reference_model.py 가 만든 npz 를 읽어서 비교에 필요�
     구간 길이 분포     구간마다 길이(ms) 평균/편차
     이벤트 시점 분포   임팩트를 0으로 본 각 이벤트 시점(ms) 평균/편차
     속도 지표 분포     스윙 시간, 최대 손 속도, 착지→임팩트 시간
-    점수 환산 기준     기준 스윙들이 평균 곡선에서 떨어진 거리
+    점수 환산 기준     기준 스윙들이 평균 곡선에서 떨어진 거리, 최대 손 속도의 중앙값/상위 10%
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -42,7 +42,7 @@ PHASE_EVENTS: Dict[str, tuple] = {
 SPEED_METRICS: Dict[str, tuple] = {
     # 키: (이름, 단위, 값이 클수록 좋은가)
     "swing_time_ms": ("스윙 시간", "ms", False),
-    "peak_hand_speed": ("최대 손 속도", "body/s", True),
+    "peak_hand_speed": ("최대 손 속도", "body/s", True),  # body = 몸통 길이
     "plant_to_impact_ms": ("착지→임팩트 시간", "ms", None),
 }
 
@@ -106,6 +106,11 @@ class ReferenceModel:
             if f"speed_{key}_mean" in data.files
         }
         self.typical_distance = float(data["typical_distance"]) if "typical_distance" in data.files else 1.0
+        # 속도 점수 기준 (프로 최대 손 속도의 중앙값, 상위 10%). 예전 모델 파일에는 없다.
+        self.peak_speed_reference: Optional[Tuple[float, float]] = None
+        if "speed_peak_hand_speed_median" in data.files:
+            self.peak_speed_reference = (float(data["speed_peak_hand_speed_median"]),
+                                         float(data["speed_peak_hand_speed_p90"]))
 
     @property
     def model_version(self) -> str:

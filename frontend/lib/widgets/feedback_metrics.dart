@@ -23,11 +23,22 @@ class PhaseMetrics extends StatelessWidget {
         if (phase.score == null) _note('구간 점수가 제공되지 않았습니다.'),
       ],
       for (final warning in phase.warnings) _note(warning),
+      if (phase.available && phase.checks.isNotEmpty) ...[
+        _note('몸통 회전 확인 (착지 → 임팩트)'),
+        for (final check in phase.checks)
+          _note(
+            '${check.passed == null
+                ? '–'
+                : check.passed!
+                ? '✓'
+                : '⚠'} ${check.message}',
+          ),
+      ],
       if (phase.available && phase.deviations.isNotEmpty) ...[
         _note('주요 관절 차이 (기준 스윙 대비)'),
         for (final deviation in phase.deviations)
           _note(
-            '${deviation.name}: ${_direction(deviation.direction)}'
+            '${deviation.name}: ${deviation.directionText ?? _direction(deviation.direction)}'
             '${deviation.zScore == null ? '' : ' · z ${feedbackNumber(deviation.zScore)}'}',
           ),
       ],

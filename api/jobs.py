@@ -51,6 +51,38 @@ def _skeleton_quality(skeleton) -> Dict[str, Any]:
     }
 
 
+def _world_landmarks(skeleton):
+    """깊이 점검용 MediaPipe 월드 좌표. 3D 보존에 실패했거나 없으면 None (점검을 건너뛴다)."""
+    capture = getattr(skeleton, "pose3d_capture", None)
+    return capture.get("world_raw") if isinstance(capture, dict) else None
+
+
+def _attach_motion(result: Dict[str, Any], skeleton, events) -> None:
+    """기준 동작과 겹쳐 그릴 사용자 스켈레톤 (/reference-motion). 점수와 무관해서 실패해도 분석은 그대로."""
+    try:
+        from feedback.reference_motion import user_motion
+        result["motion"] = user_motion(skeleton.landmarks_pixel, skeleton.fps, events.as_dict())
+    except Exception:
+        logger.warning("reference motion skipped", exc_info=True)
+    _attach_shadow_scores(result)
+
+
+def _attach_shadow_scores(result: Dict[str, Any]) -> None:
+    """VAE 거리 점수 후보를 기록만 한다 (API 응답에는 나가지 않음, docs/pose-vae.md '점수 반영').
+    기존 점수와 실제 사용자 데이터로 나란히 비교한 뒤 점수 반영을 정한다."""
+    phases = (result.get("motion") or {}).get("phases")
+    if not phases:
+        return
+    try:
+        from feedback.pose_vae import load_pose_vae, shadow_scores
+
+        model = load_pose_vae()
+        if model is not None:
+            result["shadow_scores"] = {"pose_vae": shadow_scores(model, phases)}
+    except Exception:
+        logger.warning("shadow scores skipped", exc_info=True)
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -261,13 +293,16 @@ class JobManager:
                 # 0.2: 이벤트 기반. 80프레임으로 자르기 전 스켈레톤을 그대로 쓴다.
                 skeleton = self._pipeline.extract_skeleton(video_path, is_left=is_left, on_stage=on_stage)
                 on_stage("comparing")
-                job.result = SwingComparisonV2(
+                comparison = SwingComparisonV2(
                     self.model_v2,
                     skeleton.landmarks_pixel,
                     skeleton.fps,
                     quality=_skeleton_quality(skeleton),
                     handedness="left" if is_left else "right",
-                ).report(include_series=True)
+                    world_landmarks=_world_landmarks(skeleton),
+                )
+                job.result = comparison.report(include_series=True)
+                _attach_motion(job.result, skeleton, comparison.events)
             else:
                 # 0.1: 임팩트 기준 80프레임 + DTW (기준 모델 파일이 없을 때)
                 result = self._pipeline.run(video_path, is_left=is_left, on_stage=on_stage)

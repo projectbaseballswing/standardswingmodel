@@ -193,6 +193,8 @@ def detect_events(
     clip_end: Optional[int] = None,
     pose_templates: Optional[Dict[str, Tuple[np.ndarray, np.ndarray]]] = None,
     use_pose_templates: bool = True,
+    use_event_model: bool = True,
+    event_model=None,
 ) -> SwingEvents:
     """관절 좌표(원본 프레임 좌표, (T, 12, 3))에서 이벤트를 찾는다.
 
@@ -210,6 +212,19 @@ def detect_events(
 
     end = n_frames - 1 if clip_end is None else min(clip_end, n_frames - 1)
     start = max(0, clip_start)
+
+    # LSTM 이 규칙보다 나았던 이벤트(model.use_events)는 먼저 LSTM 으로 정하고, 나머지 규칙 이벤트는
+    # 그 값을 기준점으로 찾는다 (예: 팔로우 종료는 LSTM 임팩트 이후, 앞발 들기는 LSTM 착지에서 거꾸로).
+    # 규칙을 규칙 임팩트 기준으로 다 찾은 뒤 일부만 바꾸면 기준이 어긋나 순서가 꼬였다 (docs/lstm-event-model.md).
+    anchors: Dict[str, int] = {}
+    if use_event_model:
+        from feedback.event_lstm import load_event_model  # event_lstm 이 이 모듈을 import 해서 여기서 불러온다
+
+        model = event_model if event_model is not None else load_event_model()
+        if model is not None:
+            predicted = model.predict(arr, fps, start, clip_end)
+            anchors = {key: predicted[key] for key in model.use_events
+                       if predicted.get(key) is not None and start <= predicted[key] <= end}
 
     # 화면이 중간에 확대되면 구간별로 크기 기준을 따로 쓴다
     zoom_frame = find_zoom_frame(arr)
@@ -240,8 +255,13 @@ def detect_events(
     poses = pose_vector(arr, scale) if pose_templates else None
     if pose_templates and "impact" in pose_templates:
         impact = _refine_with_pose(impact, poses, pose_templates["impact"], POSE_WINDOW["impact"]) or impact
+    if "impact" in anchors and anchors["impact"] >= 1:
+        impact = anchors["impact"]
+        # LSTM 임팩트가 속도 봉우리에서 한두 프레임 비켜 있어도 같은 기준 속도를 쓰도록 주변 최대값을 쓴다
+        peak_speed = float(np.nanmax(speed[max(0, impact - 3):min(len(speed), impact + 2)]))
+    else:
+        peak_speed = float(speed[impact - 1])
     events.impact = impact
-    peak_speed = float(speed[impact - 1])
     if impact <= lo + 1 or impact >= end - 1:
         events.warnings.append("임팩트가 구간 끝에 잡혔습니다. 스윙 전체가 담기지 않았을 수 있습니다.")
 
@@ -257,18 +277,26 @@ def detect_events(
     if pose_templates and "swing_start" in pose_templates:
         events.swing_start = _refine_with_pose(
             events.swing_start, poses, pose_templates["swing_start"], POSE_WINDOW["swing_start"])
+    if "swing_start" in anchors and anchors["swing_start"] < impact:
+        events.swing_start = anchors["swing_start"]
     if events.swing_start is None:
         events.warnings.append("스윙 시작을 찾지 못했습니다. 영상이 이미 스윙 중에 시작한 것 같습니다.")
 
     # --- 앞발 들기 / 착지: 앞 발목의 수직 움직임 (픽셀 좌표는 아래로 갈수록 값이 커진다) ---
     _, ankle_y = _track(arr, (LEAD_ANKLE,), scale)
-    ankle_v = np.diff(ankle_y)[start:impact]  # +면 내려가는 중, -면 올라가는 중
+    # 착지는 스윙 시작 이전이다. LSTM 스윙 시작이 기준점이면 그 앞에서만 찾는다.
+    plant_end = anchors["swing_start"] if "swing_start" in anchors and events.swing_start == anchors["swing_start"] else impact
+    ankle_v = np.diff(ankle_y)[start:plant_end]  # +면 내려가는 중, -면 올라가는 중
     if len(ankle_v):
         falling = np.nonzero(ankle_v > FOOT_PLANT_SPEED)[0]
         events.foot_plant = int(falling[-1]) + start + 1 if len(falling) else None
         if pose_templates and "foot_plant" in pose_templates:
             events.foot_plant = _refine_with_pose(
                 events.foot_plant, poses, pose_templates["foot_plant"], POSE_WINDOW["foot_plant"])
+        if "foot_plant" in anchors and anchors["foot_plant"] <= (events.swing_start or impact):
+            events.foot_plant = anchors["foot_plant"]
+        elif events.foot_plant is not None and plant_end != impact:
+            events.foot_plant = min(events.foot_plant, plant_end)  # 자세 보정이 스윙 시작을 넘지 않게
 
         # 들기는 착지에서 거꾸로 찾는다. 앞에서부터 찾으면 영상 초반의 작은 움직임에 걸려
         # 스트라이드가 몇 초씩 길게 잡히는 경우가 생긴다(라벨 59개 기준 최악 -4.3초).
@@ -288,7 +316,7 @@ def detect_events(
         events.warnings.append("앞발 착지를 찾지 못했습니다. 스트라이드가 영상에 담기지 않았을 수 있습니다.")
 
     # --- 로딩 시작: 발을 들기 전(없으면 스윙 시작 전), 손이 투수 반대쪽으로 움직이기 시작 ---
-    limit = events.foot_lift or events.swing_start or impact
+    limit = next(v for v in (events.foot_lift, events.foot_plant, events.swing_start, impact) if v is not None)
     if limit > start + 3:
         back = np.diff(hand_x[start:limit]) * -swing_dir  # 장전 방향을 +로
         moving = np.nonzero(back > peak_speed * LOAD_SPEED_RATIO)[0]
@@ -304,6 +332,8 @@ def detect_events(
     else:
         events.follow_end = end
         events.warnings.append("임팩트 이후 프레임이 없습니다.")
+    if "follow_end" in anchors and anchors["follow_end"] > impact:
+        events.follow_end = anchors["follow_end"]
 
     _check_order(events)
     return events

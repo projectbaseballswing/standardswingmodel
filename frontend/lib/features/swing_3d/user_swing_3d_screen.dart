@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../api/pose_3d_api.dart';
+import '../../api/analysis_api.dart';
 import '../../data/session.dart';
 import 'swing_3d_screen.dart';
 
@@ -24,11 +25,16 @@ class UserSwing3dScreen extends StatefulWidget {
 
 class _UserSwing3dScreenState extends State<UserSwing3dScreen> {
   late final Pose3dApi _api;
+  final AnalysisApi _analysisApi = AnalysisApi();
   Pose3dResponse? _response;
   Pose3dException? _error;
   Timer? _poll;
   int _generation = 0, _pollCount = 0;
   bool _loading = true;
+  // 품질 색뼈대용(선택). 분석 리포트에서 받는다.
+  Map<String, List<int>>? _phaseFrames;
+  Map<String, Map<String, String>>? _phasePartLevels;
+  String _handedness = 'right';
 
   @override
   void initState() {
@@ -36,6 +42,56 @@ class _UserSwing3dScreenState extends State<UserSwing3dScreen> {
     _api = widget.api ?? Pose3dApi();
     Session.instance.addListener(_sessionChanged);
     _load();
+  }
+
+  // 분석 리포트에서 구간 프레임 경계 + 구간별·부위별 level 을 파싱한다.
+  // 선택적 기능이라 실패/부재 시 조용히 넘어가고 3D는 그대로 보여준다.
+  Future<void> _loadQuality() async {
+    try {
+      final data = await _analysisApi.getAnalysis(widget.analysisId);
+      final result = data['result'];
+      if (result is! Map) return;
+      final input = data['input'];
+      final hand = (input is Map ? input['handedness'] : null) ?? 'right';
+      final pf = <String, List<int>>{};
+      final rawPf = result['phase_frames'];
+      if (rawPf is Map) {
+        rawPf.forEach((k, v) {
+          if (v is List && v.length >= 2) {
+            pf['$k'] = [(v[0] as num).toInt(), (v[1] as num).toInt()];
+          }
+        });
+      }
+      const order = {'good': 0, 'caution': 1, 'warning': 2};
+      final parts = <String, Map<String, String>>{};
+      final joints = result['joints'];
+      if (joints is List) {
+        for (final j in joints) {
+          if (j is! Map) continue;
+          final bp = (j['body_part'] as String?) ?? 'other';
+          final phases = j['phases'];
+          if (phases is! List) continue;
+          for (final ph in phases) {
+            if (ph is! Map) continue;
+            final k = ph['phase'] as String?;
+            final lv = (ph['level'] as String?) ?? 'good';
+            if (k == null) continue;
+            final m = parts.putIfAbsent(k, () => {});
+            if (!m.containsKey(bp) || (order[lv] ?? 0) > (order[m[bp]] ?? 0)) {
+              m[bp] = lv;
+            }
+          }
+        }
+      }
+      if (!mounted || pf.isEmpty || parts.isEmpty) return;
+      setState(() {
+        _phaseFrames = pf;
+        _phasePartLevels = parts;
+        _handedness = '$hand';
+      });
+    } catch (_) {
+      // 품질 데이터는 선택적. 실패해도 3D는 그대로.
+    }
   }
 
   @override
@@ -68,6 +124,8 @@ class _UserSwing3dScreenState extends State<UserSwing3dScreen> {
       });
       if (response.pending && _pollCount++ < 90) {
         _poll = Timer(widget.pollInterval, () => _load(polling: true));
+      } else if (!response.pending && _phasePartLevels == null) {
+        _loadQuality(); // 분석 완료 시 1회 품질 로드(비차단)
       }
     } on Pose3dException catch (error) {
       if (!mounted || generation != _generation) return;
@@ -94,6 +152,7 @@ class _UserSwing3dScreenState extends State<UserSwing3dScreen> {
     _poll?.cancel();
     Session.instance.removeListener(_sessionChanged);
     if (widget.api == null) _api.dispose();
+    _analysisApi.dispose();
     super.dispose();
   }
 
@@ -106,6 +165,9 @@ class _UserSwing3dScreenState extends State<UserSwing3dScreen> {
         loader: () async => clip,
         sceneBuilder: widget.sceneBuilder,
         dataWarnings: _response!.warnings,
+        phaseFrames: _phaseFrames,
+        phasePartLevels: _phasePartLevels,
+        handedness: _handedness,
       );
     }
     return Scaffold(
