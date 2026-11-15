@@ -7,6 +7,7 @@ import hmac
 import secrets
 import time
 import tempfile
+import stat
 
 import httpx
 
@@ -19,6 +20,13 @@ class StorageError(Exception):
 
 class StorageObjectNotFound(StorageError):
     pass
+
+
+def _validate_delete_path(path):
+    if (not isinstance(path, str) or not path or "\\" in path
+            or any(ord(c) < 32 for c in path)
+            or any(p in ("", ".", "..") for p in path.split("/"))):
+        raise StorageError("Invalid storage object path")
 
 
 class SupabaseStorage:
@@ -62,7 +70,7 @@ class SupabaseStorage:
         except httpx.HTTPError:
             raise StorageError('저장소에서 파일을 읽을 수 없습니다.') from None
 
-    def _request(self, method: str, path: str, *, missing_is_not_found=False, **kwargs):
+    def _request(self, method: str, path: str, *, missing_is_not_found=False, strict_missing=False, **kwargs):
         try:
             response = self.client.request(method, self.base_url + path, **kwargs)
             if response.is_error and missing_is_not_found:
@@ -73,8 +81,8 @@ class SupabaseStorage:
                 if not isinstance(error, dict):
                     error = {}
                 code = error.get("code") or error.get("error")
-                if (code in ("NoSuchKey", "not_found") or error.get("message") == "Object not found"
-                        or (response.status_code == 404 and code != "NoSuchBucket")):
+                if response.status_code in (400, 404) and (code in ("NoSuchKey", "not_found") or error.get("message") == "Object not found"
+                        or (not strict_missing and response.status_code == 404 and code != "NoSuchBucket")):
                     raise StorageObjectNotFound("저장된 영상 파일을 찾을 수 없습니다.")
             response.raise_for_status()
             return response
@@ -100,6 +108,17 @@ class SupabaseStorage:
             return self.base_url + signed
         except (ValueError, KeyError, TypeError):
             raise StorageError("영상 URL 발급 응답을 확인할 수 없습니다.") from None
+
+    def delete(self, bucket: str, path: str):
+        if bucket != self.bucket:
+            raise StorageError("Unexpected storage bucket")
+        _validate_delete_path(path)
+        endpoint = f"/object/{quote(bucket, safe='')}/{quote(path, safe='/')}"
+        # Single-object REST endpoint, never bucket/folder deletion. Missing
+        # objects alone are idempotent; auth/bucket/network errors remain errors.
+        response = self._request("DELETE", endpoint, missing_is_not_found=True, strict_missing=True)
+        if response.status_code != 200:
+            raise StorageError("Storage deletion was not confirmed")
 
     def close(self):
         self.client.close()
@@ -149,6 +168,27 @@ class LocalPrivateStorage:
             raise StorageError('Expired or invalid video capability')
         if not path.startswith('swings/') or '/original' not in path:raise StorageError('Only videos use capability URLs')
         return self._path(path)
+
+    def delete(self, bucket, path):
+        if bucket != self.bucket:
+            raise StorageError('Unexpected storage bucket')
+        _validate_delete_path(path)
+        target = self._path(path)
+        # Do not follow symlinks/junctions even to a sibling object inside root.
+        current = self.root
+        try:
+            for part in path.split('/'):
+                current = current / part
+                info = current.lstat()
+                if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400:
+                    raise StorageError('Linked storage paths cannot be deleted')
+            if not target.is_file():
+                raise StorageError('Only an individual file can be deleted')
+            target.unlink()
+        except FileNotFoundError:
+            raise StorageObjectNotFound('저장된 영상 파일을 찾을 수 없습니다.') from None
+        except OSError:
+            raise StorageError('원본 영상 파일을 삭제할 수 없습니다.') from None
     def close(self):pass
 
 def create_storage():

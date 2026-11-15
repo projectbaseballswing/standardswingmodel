@@ -23,6 +23,10 @@ class AnalysisVideoUrl {
   final int expiresIn;
 }
 
+class OriginalVideoDeletedException extends ApiException {
+  OriginalVideoDeletedException() : super('원본 영상이 삭제되었습니다.');
+}
+
 /// 스윙 업로드, 분석 결과 및 저장된 원본 영상 URL 조회 API.
 class AnalysisApi {
   AnalysisApi({http.Client? client}) : _client = client ?? http.Client();
@@ -163,9 +167,10 @@ class AnalysisApi {
       throw ApiException('영상 요청 시간이 초과됐습니다. 네트워크를 확인하고 다시 시도해주세요.');
     }
     if (res.statusCode < 200 || res.statusCode >= 300) {
+      if (res.statusCode == 410) throw OriginalVideoDeletedException();
       throw ApiException(switch (res.statusCode) {
         404 => '저장된 영상이 없습니다.',
-        409 => '영상 업로드 중입니다. 잠시 후 다시 시도해주세요.',
+        409 => '영상 업로드 중이거나 삭제가 진행 중입니다. 목록에서 상태를 확인해주세요.',
         502 => '영상 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.',
         503 => '영상 저장소 설정 문제로 재생할 수 없습니다.',
         _ => '영상 정보를 불러오지 못했습니다. 다시 시도해주세요.',
@@ -181,8 +186,16 @@ class AnalysisApi {
       }
       final url = Uri.tryParse(body['url'] as String);
       final expiresIn = body['expires_in'] as int;
+      final apiBase = Uri.parse(ApiConfig.baseUrl);
+      final localCapability =
+          url != null &&
+          url.scheme == 'http' &&
+          apiBase.scheme == 'http' &&
+          const ['127.0.0.1', 'localhost', '::1'].contains(url.host) &&
+          url.origin == apiBase.origin &&
+          url.path == '/api/local-video';
       if (url == null ||
-          url.scheme != 'https' ||
+          (url.scheme != 'https' && !localCapability) ||
           url.host.isEmpty ||
           url.userInfo.isNotEmpty ||
           url.hasFragment ||

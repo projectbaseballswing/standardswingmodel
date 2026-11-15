@@ -276,6 +276,7 @@ class AnalysisCreated(BaseModel):
 
 class Analysis(BaseModel):
     analysis_id: str
+    video_status: Literal['available', 'deleting', 'deleted', 'unavailable'] = 'unavailable'
     user_id: Optional[str] = None
     recorded_at: Optional[datetime] = None
     status: JobStatus
@@ -289,6 +290,7 @@ class Analysis(BaseModel):
 
 class SwingListItem(BaseModel):
     analysis_id: str
+    video_status: Literal['available', 'deleting', 'deleted', 'unavailable'] = 'unavailable'
     recorded_at: datetime = Field(description="표시 시각. 촬영 시각이 없으면 서버에 등록된 시각을 사용")
     status: JobStatus
     score: Optional[float] = Field(None, description="분석이 done인 경우의 종합 점수. 미완료/실패/미제공이면 null")
@@ -359,6 +361,12 @@ class VideoURL(BaseModel):
     analysis_id: str
     url: str
     expires_in: int = Field(description="발급 시점 기준 유효기간(초). 만료 시 다시 조회")
+
+
+class VideoDeleted(BaseModel):
+    analysis_id: str
+    video_status: Literal['deleted'] = 'deleted'
+    already_deleted: bool
 
 
 class Health(BaseModel):

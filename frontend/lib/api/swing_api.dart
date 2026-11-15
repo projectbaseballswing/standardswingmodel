@@ -14,17 +14,20 @@ class SwingApi {
 
   Future<List<Map<String, dynamic>>> fetchSwings({
     required String userId,
-    required int year,
-    required int month,
+    int? year,
+    int? month,
     required int tzOffsetMinutes,
   }) async {
+    if ((year == null) != (month == null)) {
+      throw ArgumentError('월별 조회에는 year와 month가 모두 필요합니다.');
+    }
     final uri =
         Uri.parse(
           '${ApiConfig.baseUrl}/api/users/${Uri.encodeComponent(userId)}/swings',
         ).replace(
           queryParameters: {
-            'year': '$year',
-            'month': '$month',
+            if (year != null) 'year': '$year',
+            if (month != null) 'month': '$month',
             'tz_offset_minutes': '$tzOffsetMinutes',
           },
         );

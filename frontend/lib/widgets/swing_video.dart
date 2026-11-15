@@ -57,6 +57,7 @@ class _SwingVideoState extends State<SwingVideo>
   bool _visible = true;
   bool _foreground = true;
   String? _error;
+  bool _deleted = false;
   int _generation = 0;
   int _playIntent = 0;
   bool _useStoredVideo = false;
@@ -105,6 +106,7 @@ class _SwingVideoState extends State<SwingVideo>
       _expiresAt = null;
       _position = Duration.zero;
       _error = null;
+      _deleted = false;
       _useStoredVideo = false;
       if (_local || widget.preload) {
         unawaited(_load(play: widget.autoplay && !kIsWeb));
@@ -178,7 +180,7 @@ class _SwingVideoState extends State<SwingVideo>
   }
 
   Future<void> _load({bool play = false, Duration? position}) async {
-    if (_loading) return;
+    if (_loading || _deleted) return;
     final generation = ++_generation;
     final playIntent = _playIntent;
     final localPath = _local ? widget.videoPath : null;
@@ -237,6 +239,7 @@ class _SwingVideoState extends State<SwingVideo>
     } catch (error) {
       if (!_current(generation)) return;
       _error = error is ApiException ? error.message : _playbackError;
+      _deleted = error is OriginalVideoDeletedException;
       await _detach();
     } finally {
       if (_current(generation)) setState(() => _loading = false);
@@ -353,21 +356,22 @@ class _SwingVideoState extends State<SwingVideo>
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 11),
                   ),
-                  TextButton(
-                    onPressed: () {
-                      // 웹 Blob이 사라졌거나 재생에 실패하면 저장된 원본으로
-                      // 사용자가 명시적으로 재시도한다. 자동 재시도는 하지 않는다.
-                      if (kIsWeb && _local && widget.analysisId.isNotEmpty) {
-                        _useStoredVideo = true;
-                      }
-                      _toggle();
-                    },
-                    child: Text(
-                      kIsWeb && _local && widget.analysisId.isNotEmpty
-                          ? '저장된 영상으로 재시도'
-                          : '다시 시도',
+                  if (!_deleted)
+                    TextButton(
+                      onPressed: () {
+                        // 웹 Blob이 사라졌거나 재생에 실패하면 저장된 원본으로
+                        // 사용자가 명시적으로 재시도한다. 자동 재시도는 하지 않는다.
+                        if (kIsWeb && _local && widget.analysisId.isNotEmpty) {
+                          _useStoredVideo = true;
+                        }
+                        _toggle();
+                      },
+                      child: Text(
+                        kIsWeb && _local && widget.analysisId.isNotEmpty
+                            ? '저장된 영상으로 재시도'
+                            : '다시 시도',
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),

@@ -24,6 +24,7 @@ from api.schemas import (
 )
 from api.settings import settings
 from api.auth import user_path_access
+from api.video_deletion import video_status
 from feedback.llm_coach import generate_comparison_coaching
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,7 @@ def list_user_swings(
                 status=row.status,
                 score=_overall_score(row),
                 thumbnail_url=None,
+                video_status=video_status(row),
             )
             for row in rows
         ],
