@@ -6,6 +6,7 @@ class Swing {
     required this.status,
     this.score,
     this.thumbnailUrl,
+    this.videoStatus = 'unknown',
   });
 
   factory Swing.fromJson(Map<String, dynamic> json) => Swing(
@@ -14,6 +15,7 @@ class Swing {
     status: json['status'] as String,
     score: (json['score'] as num?)?.toDouble(),
     thumbnailUrl: json['thumbnail_url'] as String?,
+    videoStatus: json['video_status'] as String? ?? 'unknown',
   );
 
   /// 분석 식별자. 과거 결과 조회는 다음 단계에서 연결한다.
@@ -30,6 +32,20 @@ class Swing {
 
   /// 썸네일 이미지 URL(없을 수 있음).
   final String? thumbnailUrl;
+
+  final String videoStatus;
+  bool get canDeleteVideo =>
+      (status == 'done' || status == 'failed') &&
+      (videoStatus == 'available' || videoStatus == 'deleting');
+
+  Swing withVideoStatus(String value) => Swing(
+    analysisId: analysisId,
+    recordedAt: recordedAt,
+    status: status,
+    score: score,
+    thumbnailUrl: thumbnailUrl,
+    videoStatus: value,
+  );
 
   /// 시:분 라벨. 예) "16시 30분"
   String get timeLabel => '${recordedAt.hour}시 ${recordedAt.minute}분';

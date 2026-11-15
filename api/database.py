@@ -77,6 +77,10 @@ class Swing(Base):
     storage_bucket: Mapped[str | None] = mapped_column(String)
     video_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     content_type: Mapped[str | None] = mapped_column(String)
+    # Durable delete intent is committed before touching Storage. It is not a
+    # score/analysis status and is intentionally absent from Job._save fields.
+    video_delete_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    video_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     worker_id: Mapped[str] = mapped_column(String, index=True)
     status: Mapped[str] = mapped_column(String(16), default="queued")
     stage: Mapped[str | None] = mapped_column(String)

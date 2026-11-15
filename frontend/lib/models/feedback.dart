@@ -280,11 +280,7 @@ class PartCoaching {
 
 /// LLM(백엔드)이 만든 구간별 코칭. 서버 `coaching.phases[]` 한 건.
 class PhaseCoaching {
-  const PhaseCoaching({
-    this.cardLine = '',
-    this.comment = '',
-    this.tip = '',
-  });
+  const PhaseCoaching({this.cardLine = '', this.comment = '', this.tip = ''});
 
   /// 구간 카드용 짧은 한 줄(상태 중심).
   final String cardLine;
@@ -362,6 +358,7 @@ class OverallFeedback {
     required this.items,
     this.previousTotalScore,
     this.modelVersion = 'unknown',
+    this.videoStatus = 'unknown',
     this.available = true,
     this.reliability = 'medium',
     this.warnings = const [],
@@ -384,6 +381,7 @@ class OverallFeedback {
   /// 전체 스윙 점수(0~100).
   final double? totalScore;
   final String modelVersion;
+  final String videoStatus;
   final bool available;
   final String reliability;
   final List<String> warnings;

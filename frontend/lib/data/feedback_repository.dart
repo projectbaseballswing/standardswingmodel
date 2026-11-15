@@ -212,6 +212,9 @@ class FeedbackRepository {
     }
 
     return OverallFeedback(
+      videoStatus: body['video_status'] is String
+          ? body['video_status'] as String
+          : 'unknown',
       recordedAt: _parseTime(body),
       totalScore: totalScore,
       modelVersion: version,
@@ -497,7 +500,9 @@ class FeedbackRepository {
               ? null
               : _number(p['user_duration_ms']),
           referenceDurationMs: _number(p['reference_duration_ms']),
-          tempoRatio: p['available'] == false ? null : _number(p['tempo_ratio']),
+          tempoRatio: p['available'] == false
+              ? null
+              : _number(p['tempo_ratio']),
           tempoLevel: p['available'] == false
               ? null
               : p['tempo_level'] as String?,

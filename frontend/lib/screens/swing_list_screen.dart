@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../api/auth_api.dart' show ApiException;
+import '../api/original_video_api.dart';
 import '../data/session.dart';
 import '../data/swing_repository.dart';
 import '../models/swing.dart';
@@ -13,9 +14,10 @@ import '../theme/app_theme.dart';
 /// 달력에서 촬영한 날짜에 썸네일을 보여주고, 날짜를 선택하면 아래에 그날의
 /// 스윙 영상들이 나온다. 완료된 기록은 저장된 피드백을 조회한다.
 class SwingListScreen extends StatefulWidget {
-  const SwingListScreen({super.key, this.repository});
+  const SwingListScreen({super.key, this.repository, this.videoApi});
 
   final SwingRepository? repository;
+  final OriginalVideoApi? videoApi;
 
   @override
   State<SwingListScreen> createState() => _SwingListScreenState();
@@ -23,6 +25,11 @@ class SwingListScreen extends StatefulWidget {
 
 class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
   late final SwingRepository _repository;
+  late final OriginalVideoApi _videoApi;
+  final Set<String> _busyVideoIds = {};
+  final Set<String> _deletingVideoIds = {};
+  final Set<String> _confirmedDeletedVideoIds = {};
+  bool _videoMenuOpen = false;
   ModalRoute<dynamic>? _route;
   int _requestId = 0;
 
@@ -41,6 +48,7 @@ class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
   void initState() {
     super.initState();
     _repository = widget.repository ?? SwingRepository();
+    _videoApi = widget.videoApi ?? OriginalVideoApi();
     final now = DateTime.now();
     _month = DateTime(now.year, now.month);
     _load();
@@ -59,6 +67,9 @@ class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
 
   @override
   void didPopNext() {
+    // Menus/dialogs are ModalRoutes too. Closing them is not a return from
+    // another screen; keep the selected day and scroll position during delete.
+    if (_videoMenuOpen || _busyVideoIds.isNotEmpty) return;
     // 카메라 push의 Future는 pushReplacement 시점에 끝날 수 있으므로,
     // 실제 결과 화면에서 목록으로 돌아왔을 때 다시 조회한다.
     _load();
@@ -68,6 +79,7 @@ class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
   void dispose() {
     swingRouteObserver.unsubscribe(this);
     if (widget.repository == null) _repository.dispose();
+    if (widget.videoApi == null) _videoApi.dispose();
     super.dispose();
   }
 
@@ -94,7 +106,13 @@ class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
       );
       if (!mounted || requestId != _requestId) return;
       setState(() {
-        _swings = swings;
+        _swings = swings
+            .map(
+              (s) => _confirmedDeletedVideoIds.contains(s.analysisId)
+                  ? s.withVideoStatus('deleted')
+                  : s,
+            )
+            .toList();
         _loading = false;
         if (swings.isNotEmpty) {
           final latest = swings.first.recordedAt;
@@ -144,6 +162,78 @@ class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _deleteOriginal(Swing swing) async {
+    if (!swing.canDeleteVideo || _busyVideoIds.contains(swing.analysisId)) {
+      return;
+    }
+    final userId = Session.instance.userId;
+    final token = Session.instance.accessToken;
+    setState(() => _busyVideoIds.add(swing.analysisId));
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('원본 영상 삭제'),
+          content: const Text(
+            '원본 영상을 삭제하시겠습니까? 삭제한 영상은 복구할 수 없지만 분석 점수와 3D 스윙 기록은 유지됩니다.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              key: const ValueKey('confirm-original-video-delete'),
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+              child: const Text('삭제'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || confirmed != true) return;
+      if (userId != Session.instance.userId ||
+          token != Session.instance.accessToken) {
+        throw ApiException('로그인 정보가 변경되었습니다. 목록을 다시 확인해주세요.');
+      }
+      setState(() => _deletingVideoIds.add(swing.analysisId));
+      await _videoApi.delete(swing.analysisId);
+      if (!mounted ||
+          userId != Session.instance.userId ||
+          token != Session.instance.accessToken) {
+        return;
+      }
+      setState(() {
+        _confirmedDeletedVideoIds.add(swing.analysisId);
+        _swings = _swings
+            .map(
+              (s) => s.analysisId == swing.analysisId
+                  ? s.withVideoStatus('deleted')
+                  : s,
+            )
+            .toList();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('원본 영상을 삭제했습니다. 분석 점수와 3D 기록은 유지됩니다.')),
+      );
+    } on ApiException catch (e) {
+      if (mounted &&
+          userId == Session.instance.userId &&
+          token == Session.instance.accessToken) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busyVideoIds.remove(swing.analysisId);
+          _deletingVideoIds.remove(swing.analysisId);
+        });
+      }
+    }
   }
 
   @override
@@ -533,18 +623,90 @@ class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: _thumbWidth,
-              height: _thumbHeight,
-              color: AppColors.fieldFill,
-              child: swing.thumbnailUrl == null
-                  ? _thumbnailPlaceholder()
-                  : Image.network(
-                      swing.thumbnailUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) =>
-                          _thumbnailPlaceholder(),
-                    ),
+            Stack(
+              children: [
+                Container(
+                  width: _thumbWidth,
+                  height: _thumbHeight,
+                  color: AppColors.fieldFill,
+                  child:
+                      swing.videoStatus == 'deleted' ||
+                          swing.videoStatus == 'deleting'
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.videocam_off_outlined,
+                                color: AppColors.hint,
+                                size: 30,
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                swing.videoStatus == 'deleted'
+                                    ? '원본 삭제됨'
+                                    : '삭제 재시도 필요',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.hint,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : swing.thumbnailUrl == null
+                      ? _thumbnailPlaceholder()
+                      : Image.network(
+                          swing.thumbnailUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              _thumbnailPlaceholder(),
+                        ),
+                ),
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: _deletingVideoIds.contains(swing.analysisId)
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              semanticsLabel: '원본 영상 삭제 처리 중',
+                            ),
+                          ),
+                        )
+                      : PopupMenuButton<String>(
+                          enabled: !_busyVideoIds.contains(swing.analysisId),
+                          key: ValueKey('video-menu-${swing.analysisId}'),
+                          tooltip: '스윙 기록 더보기',
+                          icon: const Icon(
+                            Icons.more_vert,
+                            color: AppColors.gray600,
+                          ),
+                          onOpened: () => _videoMenuOpen = true,
+                          onCanceled: () => _videoMenuOpen = false,
+                          onSelected: (_) {
+                            _videoMenuOpen = false;
+                            _deleteOriginal(swing);
+                          },
+                          itemBuilder: (_) => [
+                            PopupMenuItem(
+                              value: 'delete',
+                              enabled: swing.canDeleteVideo,
+                              child: Text(
+                                swing.videoStatus == 'deleted'
+                                    ? '원본 영상 삭제됨'
+                                    : swing.videoStatus == 'deleting'
+                                    ? '원본 영상 삭제 재시도'
+                                    : '원본 영상 삭제',
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+              ],
             ),
             const SizedBox(height: 5),
             Text(
@@ -600,8 +762,8 @@ class _SwingListScreenState extends State<SwingListScreen> with RouteAware {
       unselectedItemColor: AppColors.hint,
       type: BottomNavigationBarType.fixed,
       onTap: (index) {
-        // 0: 스윙 촬영, 2: 프로필. 1(스윙 추이)은 다음 작업에서 연결.
         if (index == 0) _openCamera();
+        if (index == 1) context.push('/swings/trend');
         if (index == 2) _openProfile();
       },
       items: const [

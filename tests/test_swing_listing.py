@@ -163,7 +163,8 @@ def test_score_only_comes_from_completed_numeric_result(mock_client, status, res
     assert item["status"] == status
     assert item["score"] == expected
     assert item["thumbnail_url"] is None
-    assert set(item) == {"analysis_id", "recorded_at", "status", "score", "thumbnail_url"}
+    assert item["video_status"] == "unavailable"
+    assert set(item) == {"analysis_id", "recorded_at", "status", "score", "thumbnail_url", "video_status"}
 
 
 def test_swing_listing_is_registered_in_swagger(mock_client):

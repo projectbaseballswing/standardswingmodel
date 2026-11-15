@@ -75,6 +75,14 @@ def local_video(request: Request, path: str, expires: int, signature: str):
     except StorageError:
         raise HTTPException(403, '유효한 영상 접근 권한이 없습니다.') from None
     if not target.is_file():raise HTTPException(404, '저장된 영상을 찾을 수 없습니다.')
+    # A previously issued local capability must not bypass a durable deletion
+    # intent, including the interval before Storage removal can be retried.
+    from sqlalchemy import select
+    from api.database import SessionLocal, Swing
+    with SessionLocal() as db:
+        row = db.scalar(select(Swing).where(Swing.video_storage_path == path))
+        if row is None or row.video_delete_requested_at is not None or row.video_deleted_at is not None:
+            raise HTTPException(410, '원본 영상이 삭제되었거나 삭제가 진행 중입니다.')
     return FileResponse(target, headers={'Cache-Control':'private, no-store'})
 
 

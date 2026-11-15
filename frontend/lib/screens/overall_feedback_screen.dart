@@ -173,6 +173,7 @@ class _FeedbackBody extends StatelessWidget {
                 _dateLabel(feedback.recordedAt),
                 const SizedBox(height: 12),
                 _VideoRow(
+                  videoStatus: feedback.videoStatus,
                   analysisId: analysisId,
                   videoPath: videoPath,
                   api: api,
@@ -303,6 +304,7 @@ class _VideoRow extends StatelessWidget {
     required this.analysisId,
     required this.api,
     this.videoPath,
+    this.videoStatus = 'unknown',
   });
 
   final String analysisId;
@@ -310,6 +312,7 @@ class _VideoRow extends StatelessWidget {
   final String? videoPath;
 
   final AnalysisApi api;
+  final String videoStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -319,13 +322,29 @@ class _VideoRow extends StatelessWidget {
         Expanded(
           child: _ThumbFrame(
             label: '내 스윙 영상',
-            child: SwingVideo(
-              key: ValueKey((analysisId, videoPath)),
-              analysisId: analysisId,
-              videoPath: videoPath,
-              api: api,
-              preload: true,
-            ),
+            child: videoStatus == 'deleted' || videoStatus == 'deleting'
+                ? ColoredBox(
+                    color: const Color(0xFFE6E6E6),
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Text(
+                          videoStatus == 'deleted'
+                              ? '원본 영상이 삭제되었습니다'
+                              : '원본 영상 삭제가 진행 중입니다.\n목록에서 삭제를 다시 요청해주세요.',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  )
+                : SwingVideo(
+                    key: ValueKey((analysisId, videoPath)),
+                    analysisId: analysisId,
+                    videoPath: videoPath,
+                    api: api,
+                    preload: true,
+                  ),
           ),
         ),
         const SizedBox(width: 12),
@@ -744,7 +763,9 @@ class _ItemRow extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                           color: delta > 0
                               ? const Color(0xFF2E9E5B)
-                              : (delta < 0 ? AppColors.primary : AppColors.hint),
+                              : (delta < 0
+                                    ? AppColors.primary
+                                    : AppColors.hint),
                         ),
                       ),
                     ],
@@ -835,11 +856,7 @@ class _CoachCard extends StatelessWidget {
           // 4단 상세가 있으면 아래에 펼친다.
           if (cf != null) ...[
             const SizedBox(height: 14),
-            _CoachStep(
-              icon: Icons.search,
-              label: '무엇이 아쉬운지',
-              text: cf.problem,
-            ),
+            _CoachStep(icon: Icons.search, label: '무엇이 아쉬운지', text: cf.problem),
             _CoachStep(
               icon: Icons.help_outline,
               label: '왜 그럴까요',

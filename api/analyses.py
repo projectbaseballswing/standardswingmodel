@@ -24,7 +24,8 @@ from sqlalchemy.orm import Session
 
 from api import schemas
 from api.jobs import Job, JobManager
-from api.database import User, get_db
+from api.database import Swing, User, get_db
+from api.video_deletion import delete_original_video, locked_swing, video_status
 from api.settings import settings
 from api.auth import analysis_access
 from api.storage import StorageError, StorageObjectNotFound, create_storage
@@ -257,12 +258,15 @@ def get_analysis(
     request: Request,
     analysis_id: str,
     include_series: bool = Query(False, description="관절 각도 80프레임 시계열 포함"),
+    db: Session = Depends(get_db),
 ):
     """작업 상태와 전체 결과(종합 + 관절별 + 구간별 + 속도)."""
     job = _jobs(request).get(analysis_id)
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "분석 결과를 찾을 수 없습니다.")
     analysis = _to_analysis(job)
+    db.expire_all()
+    analysis.video_status = video_status(db.get(Swing, analysis_id))
     if analysis.result is not None and not include_series:
         for joint in analysis.result.joints:
             joint.series = None
@@ -270,9 +274,13 @@ def get_analysis(
 
 
 @router.get("/analyses/{analysis_id}/video", response_model=schemas.VideoURL, tags=["analyses"])
-def get_video(request: Request, analysis_id: str):
+def get_video(request: Request, analysis_id: str, db: Session = Depends(get_db)):
     """저장된 원본 영상의 임시 URL. 만료되면 이 API를 다시 호출한다."""
-    job = _jobs(request).get(analysis_id)
+    job = locked_swing(db, analysis_id, request.state.user_id)
+    if job.video_deleted_at is not None:
+        raise HTTPException(410, "원본 영상이 삭제되었습니다.", headers={'Cache-Control': 'no-store'})
+    if job.video_delete_requested_at is not None:
+        raise HTTPException(409, "원본 영상 삭제가 진행 중입니다. 삭제를 다시 요청해 완료해주세요.", headers={'Cache-Control': 'no-store'})
     if job is None or job.video_storage_path is None:
         raise HTTPException(404, "저장된 영상 정보를 찾을 수 없습니다.")
     if job.stage == "uploading":
@@ -287,6 +295,12 @@ def get_video(request: Request, analysis_id: str):
     except StorageError as exc:
         raise HTTPException(502, str(exc)) from None
     return schemas.VideoURL(analysis_id=analysis_id, url=url, expires_in=storage.expires_in)
+
+
+@router.delete("/analyses/{analysis_id}/video", response_model=schemas.VideoDeleted, tags=["analyses"])
+def delete_video(request: Request, analysis_id: str, db: Session = Depends(get_db)):
+    """본인 원본 영상만 삭제. 동일 요청으로 미완료 삭제를 안전하게 재시도한다."""
+    return delete_original_video(db, analysis_id, request.state.user_id, lambda: _storage(request))
 
 
 @router.get("/analyses/{analysis_id}/overall", response_model=schemas.OverallFeedback, tags=["feedback"])
