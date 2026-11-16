@@ -320,7 +320,7 @@ class SwingListItem(BaseModel):
     recorded_at: datetime = Field(description="표시 시각. 촬영 시각이 없으면 서버에 등록된 시각을 사용")
     status: JobStatus
     score: Optional[float] = Field(None, description="분석이 done인 경우의 종합 점수. 미완료/실패/미제공이면 null")
-    thumbnail_url: Optional[str] = Field(None, description="썸네일 미구현: 현재 null")
+    thumbnail_url: Optional[str] = Field(None, description="영상 첫 프레임 썸네일 서명 URL. 썸네일이 없으면(옛 기록 등) null")
 
 
 class SwingListResponse(BaseModel):

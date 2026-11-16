@@ -9,11 +9,12 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from api.database import Swing, User, get_db
+from api.storage import create_storage
 from api.schemas import (
     ComparisonJoint,
     ComparisonPart,
@@ -122,8 +123,28 @@ def _joint_diffs(row: Swing) -> dict[str, dict]:
     return out
 
 
+def _list_storage(request: Request):
+    """목록 썸네일 서명용 Storage(앱 상태 재사용, 최초 1회 생성)."""
+    if getattr(request.app.state, "storage", None) is None:
+        request.app.state.storage = create_storage()
+    return request.app.state.storage
+
+
+def _thumbnail_url(request: Request, row: Swing) -> str | None:
+    """영상 썸네일 서명 URL. 썸네일이 없거나 서명 실패면 None(프론트가 플레이스홀더)."""
+    thumb = row.result.get("thumbnail") if isinstance(row.result, dict) else None
+    if not isinstance(thumb, dict) or not thumb.get("storage_path"):
+        return None
+    try:
+        return _list_storage(request).signed_url(thumb.get("bucket"), thumb["storage_path"])
+    except Exception:
+        logger.warning("thumbnail sign failed for %s", row.analysis_id, exc_info=True)
+        return None
+
+
 @router.get("/users/{user_id}/swings", response_model=SwingListResponse)
 def list_user_swings(
+    request: Request,
     user_id: str,
     year: int | None = Query(None, ge=1900, le=9998, description="월별 조회 시 month와 함께 전달"),
     month: int | None = Query(None, ge=1, le=12, description="월별 조회 시 year와 함께 전달"),
@@ -167,7 +188,7 @@ def list_user_swings(
                 recorded_at=_utc_datetime(row.recorded_at or row.created_at),
                 status=row.status,
                 score=_overall_score(row),
-                thumbnail_url=None,
+                thumbnail_url=_thumbnail_url(request, row),
                 video_status=video_status(row),
             )
             for row in rows

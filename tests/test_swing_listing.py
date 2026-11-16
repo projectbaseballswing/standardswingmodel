@@ -167,6 +167,32 @@ def test_score_only_comes_from_completed_numeric_result(mock_client, status, res
     assert set(item) == {"analysis_id", "recorded_at", "status", "score", "thumbnail_url", "video_status"}
 
 
+def test_list_returns_signed_thumbnail_url_when_result_has_marker(mock_client, fake_storage):
+    # 결과 JSON에 썸네일 마커가 있으면 목록이 서명 URL을 돌려준다.
+    mock_client.app.state.storage = fake_storage  # 목록 서명이 가짜 스토리지를 쓰게
+    owner = f"list-{uuid.uuid4().hex}"
+    aid = uuid.uuid4().hex
+    path = f"swings/{aid}/thumbnail.jpg"
+    fake_storage.objects[path] = b"jpeg-bytes"  # 업로드돼 있다고 가정
+    with SessionLocal.begin() as db:
+        db.add(User(user_id=owner, email=f"{owner}@example.com", nickname=owner,
+                    password_hash="not-used"))
+        db.flush()
+        db.add(Swing(
+            analysis_id=aid, user_id=owner, worker_id="list-test",
+            created_at=datetime(2026, 10, 5, 10, 0, tzinfo=timezone.utc),
+            status="done",
+            result={"overall": {"score": 80},
+                    "thumbnail": {"storage_path": path, "bucket": fake_storage.bucket}},
+        ))
+    authenticate(mock_client, owner)
+    body = mock_client.get(f"/api/users/{owner}/swings").json()
+    item = next(i for i in body["items"] if i["analysis_id"] == aid)
+    assert item["thumbnail_url"].startswith(
+        f"https://storage.invalid/{fake_storage.bucket}/{path}"
+    )
+
+
 def test_swing_listing_is_registered_in_swagger(mock_client):
     assert mock_client.get("/docs").status_code == 200
     response = mock_client.get("/openapi.json")

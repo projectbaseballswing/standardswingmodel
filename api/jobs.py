@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
@@ -318,6 +319,8 @@ class JobManager:
             on_stage("coaching")
             self._attach_coaching(job)
             job.status = "done"
+            # 목록 화면 썸네일(영상 첫 프레임). 실패해도 분석 결과엔 영향 없다.
+            self._make_thumbnail(job, video_path)
         except PipelineError as exc:
             job.status, job.error = "failed", {"code": exc.code, "message": exc.message}
         except Exception:  # 파이프라인 내부 예외도 작업 실패로 기록
@@ -340,6 +343,47 @@ class JobManager:
             finally:
                 try:
                     os.remove(video_path)
+                except OSError:
+                    pass
+
+    def _make_thumbnail(self, job: Job, video_path: str) -> None:
+        """영상 첫 프레임을 작은 JPEG 썸네일로 저장(목록 화면용). 경로는 결과 JSON에
+        기록해 목록 API가 서명 URL을 만든다. 실패해도 분석엔 영향 없다(조용히 건너뜀)."""
+        if self._pose_storage_factory is None:
+            return
+        tmp = None
+        try:
+            import cv2
+
+            cap = cv2.VideoCapture(video_path)
+            ok, frame = cap.read()
+            cap.release()
+            if not ok or frame is None:
+                return
+            h, w = frame.shape[:2]
+            if w > 0 and w > 320:  # 목록 썸네일은 작게(가로 320)
+                frame = cv2.resize(frame, (320, max(1, round(h * 320 / w))), interpolation=cv2.INTER_AREA)
+            fd, tmp = tempfile.mkstemp(suffix=".jpg", prefix="thumb_")
+            os.close(fd)
+            cv2.imwrite(tmp, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            storage = self._pose_storage_factory()
+            try:
+                path = f"swings/{job.analysis_id}/thumbnail.jpg"
+                storage.upload(path, tmp, "image/jpeg")
+                result = job.result if isinstance(job.result, dict) else {}
+                result["thumbnail"] = {"storage_path": path, "bucket": storage.bucket}
+                job.result = result
+            finally:
+                try:
+                    storage.close()
+                except Exception:
+                    pass
+        except Exception:
+            logger.warning("thumbnail generation failed for %s", job.analysis_id, exc_info=True)
+        finally:
+            if tmp:
+                try:
+                    os.remove(tmp)
                 except OSError:
                     pass
 
