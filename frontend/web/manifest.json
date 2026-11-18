@@ -1,11 +1,11 @@
 {
-    "name": "swing_analysis",
-    "short_name": "swing_analysis",
+    "name": "Swing Lab",
+    "short_name": "Swing Lab",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "AI Baseball Swing Analysis",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
