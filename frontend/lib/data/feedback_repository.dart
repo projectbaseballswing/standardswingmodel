@@ -212,6 +212,9 @@ class FeedbackRepository {
     }
 
     return OverallFeedback(
+      analysisId: body['analysis_id'] is String
+          ? body['analysis_id'] as String
+          : '',
       videoStatus: body['video_status'] is String
           ? body['video_status'] as String
           : 'unknown',
@@ -311,6 +314,10 @@ class FeedbackRepository {
       parts: parts,
       joints: joints,
       phases: phases,
+      // 'pending'=관절·구간 생성 중(화면은 '작성 중' 후 재조회), 'done'/'failed'=확정.
+      extendedStatus: raw['extended_status'] is String
+          ? raw['extended_status'] as String
+          : null,
     );
   }
 

@@ -273,6 +273,11 @@ class Coaching(BaseModel):
     # coaching_scope='full' 일 때만 채워진다. overall 이면 빈 리스트.
     joints: List[JointCoaching] = Field(default_factory=list)
     phases: List[PhaseCoaching] = Field(default_factory=list)
+    # 종합(overall+parts)을 먼저 주고 관절·구간(joints/phases)을 뒤이어 채울 때의 상태.
+    # 'pending'=생성 중, 'done'=완료, 'failed'=실패. None 이면 확장 코칭을 애초에 안 만든다.
+    extended_status: Optional[str] = Field(
+        None, description="관절·구간 서술 생성 상태: pending/done/failed. 종합을 먼저 보여줄 때 pending."
+    )
 
 
 class AnalysisReport(BaseModel):

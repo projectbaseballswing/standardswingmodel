@@ -327,6 +327,7 @@ class Coaching {
     this.parts = const {},
     this.joints = const {},
     this.phases = const {},
+    this.extendedStatus,
   });
 
   /// 종합 요약 (점수 옆 분홍 박스).
@@ -346,6 +347,14 @@ class Coaching {
 
   /// 구간 key → LLM 구간 코칭. scope='full' 일 때만 채워진다.
   final Map<String, PhaseCoaching> phases;
+
+  /// 관절·구간(joints/phases) 생성 상태. 종합을 먼저 주고 뒤이어 채울 때:
+  /// 'pending'=생성 중(화면은 '작성 중' 표시 후 재조회), 'done'=완료, 'failed'=실패.
+  /// null 이면 애초에 확장 코칭을 만들지 않은 응답(옛 캐시·규칙 기반 등).
+  final String? extendedStatus;
+
+  /// 관절·구간 서술이 아직 생성 중이라 재조회가 필요한 상태인지.
+  bool get isExtendedPending => extendedStatus == 'pending';
 }
 
 /// 종합 피드백 1건.
@@ -370,7 +379,11 @@ class OverallFeedback {
     this.speedScore,
     this.postureCapped = false,
     this.coaching,
+    this.analysisId = '',
   });
+
+  /// 분석 id. 관절·구간 코칭이 아직 생성 중(pending)일 때 상세 화면이 재조회하는 데 쓴다.
+  final String analysisId;
 
   /// 촬영/분석 시각.
   final DateTime recordedAt;

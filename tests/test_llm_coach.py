@@ -13,6 +13,7 @@ from feedback.llm_coach import (
     build_llm_input,
     generate_coaching,
     generate_comparison_coaching,
+    generate_extended_coaching,
 )
 
 FIXTURE = Path(__file__).resolve().parent.parent / "api" / "fixtures" / "analysis_sample.json"
@@ -121,6 +122,30 @@ def test_coaching_full_schema_shape():
     assert "joints" in fields
     assert "phases" in fields
     assert "overall_summary" in fields  # 기본 필드 상속
+
+
+# ---------------------------------------------------------------------------
+# generate_extended_coaching: 종합을 먼저 보여준 뒤 관절·구간만 따로 생성(비동기 2단계).
+# ---------------------------------------------------------------------------
+def test_extended_coaching_schema_has_only_joints_and_phases():
+    # 종합을 다시 만들지 않도록, 확장 전용 스키마는 joints/phases 만 요구한다.
+    from feedback.llm_coach import ExtendedCoaching
+
+    fields = ExtendedCoaching.model_fields
+    assert set(fields) == {"joints", "phases"}
+
+
+def test_generate_extended_coaching_without_key_returns_none():
+    # 키가 없으면 네트워크를 타지 않고 바로 None.
+    assert generate_extended_coaching(_report(), api_key="", model="gpt-6-luna") is None
+
+
+def test_generate_extended_coaching_no_joints_or_phases_returns_none():
+    report = _report()
+    report["joints"] = []
+    report["phases"]["phases"] = []
+    # 믿을 관절·구간이 없으면 키가 있어도 LLM 을 부르지 않는다.
+    assert generate_extended_coaching(report, api_key="fake-key", model="gpt-6-luna") is None
 
 
 def test_phase_coaching_has_card_line_comment_tip():
