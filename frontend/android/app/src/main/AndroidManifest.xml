@@ -7,7 +7,7 @@
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 
     <application
-        android:label="swing_analysis"
+        android:label="Swing Lab"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"><!-- 개발용: 로컬 HTTP 서버 연결 허용. 배포 시 HTTPS 로 바꾸고 제거할 것. -->

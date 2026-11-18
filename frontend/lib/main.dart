@@ -13,7 +13,7 @@ class SwingAnalysisApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'Swing Analysis',
+      title: 'Swing Lab',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       routerConfig: router,
