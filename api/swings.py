@@ -222,15 +222,19 @@ def _comparison_coaching(db: Session, current: Swing, previous: Swing) -> dict |
         scope=settings.coaching_scope,
     )
     if coaching is not None:
-        # JSON 컬럼이라 전체 dict를 재할당해야 변경이 감지된다.
-        new_result = dict(current.result)
-        new_result["comparison"] = {
-            "previous_analysis_id": previous.analysis_id,
-            "coaching": coaching,
-        }
-        current.result = new_result
+        # 분석 워커가 done 직후 관절·구간 코칭을 병합 저장할 수 있어, 낡은 current.result 를
+        # 통째로 되쓰면 그 변경을 지운다. 행을 잠그고(with_for_update) 최신 값으로 다시 읽어
+        # comparison 키만 병합한다. refresh 는 식별자 맵의 낡은 상태 대신 DB 값을 다시 채운다.
         try:
-            db.commit()
+            db.refresh(current, with_for_update=True)
+            if isinstance(current.result, dict):
+                merged = dict(current.result)  # JSON 컬럼이라 전체 dict 재할당으로 변경 감지.
+                merged["comparison"] = {
+                    "previous_analysis_id": previous.analysis_id,
+                    "coaching": coaching,
+                }
+                current.result = merged
+                db.commit()
         except Exception:
             logger.exception("비교 코칭 캐시 저장 실패 — 응답은 그대로 반환한다.")
             db.rollback()
