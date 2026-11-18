@@ -300,6 +300,26 @@ class JobManager:
         else:
             coaching["extended_status"] = "failed"
 
+    def _merge_save_coaching(self, job: Job) -> None:
+        """코칭만 최신 행에 병합 저장한다.
+
+        done 스냅샷 이후 다른 요청(이전 대비 비교, /comparison)이 result['comparison'] 등을
+        덧붙였을 수 있다. 전체 덮어쓰기(_save)는 그 변경을 지우므로, 행을 잠그고 다시 읽어
+        result['coaching'] 키만 교체한다. (두 writer 가 각자 자기 키만 잠금 병합하면 충돌 없음.)
+        """
+        coaching = job.result.get("coaching") if isinstance(job.result, dict) else None
+        if coaching is None:
+            return
+        with database.SessionLocal.begin() as db:
+            row = db.execute(
+                select(Swing).where(Swing.analysis_id == job.analysis_id).with_for_update()
+            ).scalar_one_or_none()
+            if row is None or not isinstance(row.result, dict):
+                return
+            merged = dict(row.result)
+            merged["coaching"] = coaching
+            row.result = merged
+
     def _run_video(self, job: Job, video_path: str, is_left: bool) -> None:
         job.status = "processing"
         skeleton = None
@@ -353,15 +373,24 @@ class JobManager:
             if run_extended:
                 # 관절·구간은 아직 생성 중임을 앱에 알린다(앱은 pending 이면 '작성 중' 표시 후 재조회).
                 job.result["coaching"]["extended_status"] = "pending"
+            # 목록 화면 썸네일(영상 첫 프레임)은 done 스냅샷에 포함시킨다. done 이후에 만들면
+            # 앱이 곧장 호출하는 /comparison 저장과 경쟁해 썸네일 경로가 사라질 수 있다.
+            self._make_thumbnail(job, video_path)
             job.status = "done"
             job.finished_at = _now()
             job.stage = None
-            self._save(job)  # 종합까지 담긴 상태를 먼저 저장 → 앱이 종합 피드백을 바로 본다.
-            # 목록 화면 썸네일(영상 첫 프레임). 실패해도 분석 결과엔 영향 없다.
-            self._make_thumbnail(job, video_path)
+            # 권위 있는 done 스냅샷(종합+썸네일). done 을 외부에 노출한 이후의 추가 저장은
+            # 전체 덮어쓰기(_save) 가 아니라 병합 저장만 해, 다른 writer(이전대비 비교 캐시)의
+            # 변경을 지우지 않는다.
+            self._save(job)
             # 관절·구간 코칭은 done 이후에 채운다. 느려도 종합 표시를 막지 않는다.
+            # done 은 이미 확정 저장했으므로, 여기서 실패해도 분석을 되돌리지 않는다.
             if run_extended:
-                self._attach_extended_coaching(job)
+                try:
+                    self._attach_extended_coaching(job)
+                    self._merge_save_coaching(job)
+                except Exception:
+                    logger.exception("extended coaching persist failed for %s", job.analysis_id)
         except PipelineError as exc:
             job.status, job.error = "failed", {"code": exc.code, "message": exc.message}
         except Exception:  # 파이프라인 내부 예외도 작업 실패로 기록
@@ -369,9 +398,13 @@ class JobManager:
             job.status, job.error = "failed", {"code": "INTERNAL_ERROR", "message": "분석 중 서버 오류가 발생했습니다."}
         finally:
             job.stage = None
-            job.finished_at = _now()
             try:
-                self._save(job)
+                # done 은 try 안에서 이미 확정 저장했다(썸네일 포함, 코칭은 병합 저장).
+                # 여기서 전체 덮어쓰기를 하면 그 사이 들어온 /comparison 저장을 지우므로,
+                # 실패/중단 경로일 때만 상태를 저장한다.
+                if job.status != "done":
+                    job.finished_at = _now()
+                    self._save(job)
                 # Persist score first. 3D is an independent state/result and
                 # never feeds smoothed world coordinates to model 0.2.
                 from api.pose3d import fail_pose, persist_pose
