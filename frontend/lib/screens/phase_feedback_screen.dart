@@ -4,6 +4,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../data/feedback_repository.dart';
 import '../models/feedback.dart';
 import '../theme/app_theme.dart';
+import '../widgets/coaching_pending_note.dart';
 import '../widgets/feedback_metrics.dart';
 
 /// 구간별 피드백 화면.
@@ -26,14 +27,68 @@ class PhaseFeedbackScreen extends StatefulWidget {
 }
 
 class _PhaseFeedbackScreenState extends State<PhaseFeedbackScreen> {
-  List<AnalysisPhase> get _phases => widget.feedback.phases;
+  late final FeedbackRepository _repo;
+  late OverallFeedback _feedback;
+  List<AnalysisPhase> get _phases => _feedback.phases;
   String? _selectedKey;
   int get _selected {
     final index = _phases.indexWhere((p) => p.key == _selectedKey);
     return index < 0 ? 0 : index;
   }
 
+  bool get _coachingPending => _feedback.coaching?.isExtendedPending ?? false;
+
   void _select(int index) => setState(() => _selectedKey = _phases[index].key);
+
+  bool _refreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _repo = FeedbackRepository();
+    _feedback = widget.feedback;
+    // 구간 코칭이 아직 생성 중(pending)이면, 완성될 때까지 조용히 재조회해 채운다.
+    if (_coachingPending) _refreshWhilePending();
+  }
+
+  @override
+  void didUpdateWidget(PhaseFeedbackScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.feedback, widget.feedback)) {
+      setState(() => _feedback = widget.feedback);
+      if (_coachingPending) _refreshWhilePending();
+    }
+  }
+
+  /// 관절·구간 코칭이 'pending' 인 동안 주기적으로 재조회해 구간 카드 문구를 채운다.
+  /// 완료/실패(또는 화면 이탈·최대 시도 초과)면 멈춘다. 구간 점수는 이미 보이는 상태다.
+  Future<void> _refreshWhilePending() async {
+    if (_refreshing) return; // 폴링 루프 중복 실행 방지
+    final id = _feedback.analysisId;
+    if (id.isEmpty) return;
+    _refreshing = true;
+    try {
+    for (var attempt = 0; attempt < 20 && mounted && _coachingPending; attempt++) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      if (!mounted) break;
+      try {
+        final fresh = await _repo.fetchFeedback(id); // firstTime:false → 단발 조회
+        if (!mounted) break;
+        setState(() => _feedback = fresh);
+      } catch (_) {
+        // 일시적 실패는 무시하고 다음 시도. 구간 점수 표시에는 영향 없다.
+      }
+    }
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _repo.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,8 +113,14 @@ class _PhaseFeedbackScreenState extends State<PhaseFeedbackScreen> {
                   '각 스윙 구간의 점수를 확인해보세요.',
                   style: TextStyle(fontSize: 13, color: AppColors.hint),
                 ),
+                if (_coachingPending) ...[
+                  const SizedBox(height: 12),
+                  const CoachingPendingNote(
+                    text: 'AI 코치가 구간별 코멘트를 작성하고 있어요…',
+                  ),
+                ],
                 const SizedBox(height: 14),
-                _OverallScoreCard(feedback: widget.feedback),
+                _OverallScoreCard(feedback: _feedback),
                 const SizedBox(height: 14),
                 _PhaseStepper(
                   phases: _phases,
@@ -78,9 +139,9 @@ class _PhaseFeedbackScreenState extends State<PhaseFeedbackScreen> {
                   phase: _phases[_selected],
                   number: _selected + 1,
                 ),
-                if (widget.feedback.events.isNotEmpty) ...[
+                if (_feedback.events.isNotEmpty) ...[
                   const SizedBox(height: 14),
-                  SwingEventsCard(events: widget.feedback.events),
+                  SwingEventsCard(events: _feedback.events),
                 ],
               ],
             ),

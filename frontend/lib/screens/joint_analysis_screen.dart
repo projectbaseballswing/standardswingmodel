@@ -4,6 +4,7 @@ import '../data/feedback_repository.dart';
 import '../models/feedback.dart';
 import '../theme/app_theme.dart';
 import '../widgets/body_part_art.dart';
+import '../widgets/coaching_pending_note.dart';
 
 /// 관절별 분석(상세 피드백) 화면.
 ///
@@ -21,16 +22,71 @@ class JointAnalysisScreen extends StatefulWidget {
 }
 
 class _JointAnalysisScreenState extends State<JointAnalysisScreen> {
-  late final List<PartAnalysis> _parts;
+  late final FeedbackRepository _repo;
+  late OverallFeedback _feedback;
+  late List<PartAnalysis> _parts;
   int _selected = 0;
+
+  bool get _coachingPending => _feedback.coaching?.isExtendedPending ?? false;
+
+  bool _refreshing = false;
 
   @override
   void initState() {
     super.initState();
-    final repository = FeedbackRepository();
-    _parts = repository.buildPartAnalyses(widget.feedback);
-    repository.dispose();
+    _repo = FeedbackRepository();
+    _feedback = widget.feedback;
+    _parts = _repo.buildPartAnalyses(_feedback);
     // 처음 들어오면 목록 맨 위 부위를 보여준다. (선택하면 그 부위로 바뀐다)
+    // 관절 코칭이 아직 생성 중(pending)이면, 완성될 때까지 조용히 재조회해 채운다.
+    if (_coachingPending) _refreshWhilePending();
+  }
+
+  @override
+  void didUpdateWidget(JointAnalysisScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.feedback, widget.feedback)) {
+      setState(() {
+        _feedback = widget.feedback;
+        _parts = _repo.buildPartAnalyses(_feedback);
+      });
+      if (_coachingPending) _refreshWhilePending();
+    }
+  }
+
+  /// 관절·구간 코칭이 'pending' 인 동안 주기적으로 재조회해 코멘트를 채운다.
+  /// 완료/실패(또는 화면 이탈·최대 시도 초과)면 멈춘다. 종합은 이미 보이는 상태다.
+  Future<void> _refreshWhilePending() async {
+    if (_refreshing) return; // 폴링 루프 중복 실행 방지
+    final id = _feedback.analysisId;
+    if (id.isEmpty) return;
+    _refreshing = true;
+    try {
+      for (var attempt = 0;
+          attempt < 20 && mounted && _coachingPending;
+          attempt++) {
+        await Future<void>.delayed(const Duration(seconds: 2));
+        if (!mounted) break;
+        try {
+          final fresh = await _repo.fetchFeedback(id); // firstTime:false → 단발 조회
+          if (!mounted) break;
+          setState(() {
+            _feedback = fresh;
+            _parts = _repo.buildPartAnalyses(fresh);
+          });
+        } catch (_) {
+          // 일시적 실패는 무시하고 다음 시도. 종합 표시에는 영향 없다.
+        }
+      }
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _repo.dispose();
+    super.dispose();
   }
 
   @override
@@ -56,6 +112,12 @@ class _JointAnalysisScreenState extends State<JointAnalysisScreen> {
                   '부위를 선택하면 상세 분석 결과를 확인할 수 있습니다.',
                   style: TextStyle(fontSize: 13, color: AppColors.hint),
                 ),
+                if (_coachingPending) ...[
+                  const SizedBox(height: 12),
+                  const CoachingPendingNote(
+                    text: 'AI 코치가 관절별 코멘트를 작성하고 있어요…',
+                  ),
+                ],
                 const SizedBox(height: 14),
                 _SelectorCard(
                   parts: _parts,

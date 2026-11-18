@@ -70,6 +70,17 @@ class CoachingFull(Coaching):
     phases: List[PhaseCoaching]
 
 
+class ExtendedCoaching(BaseModel):
+    """관절·구간 서술만 담는 스키마.
+
+    종합(overall+부위)을 먼저 보여준 뒤, 뒤이어 관절·구간만 따로 생성할 때 쓴다.
+    종합을 다시 만들지 않으므로 그 호출보다 출력이 작아 더 빠르다.
+    """
+
+    joints: List[JointCoaching]
+    phases: List[PhaseCoaching]
+
+
 # ---------------------------------------------------------------------------
 # 입력 다듬기: 리포트에서 LLM 에 넘길 핵심만 추린다
 # ---------------------------------------------------------------------------
@@ -279,6 +290,19 @@ FULL_SCOPE_INSTRUCTION = """\
 """
 
 
+# 관절·구간만 따로 생성할 때(종합을 먼저 보여준 뒤 뒤이어 채움) 쓰는 지침.
+EXTENDED_SYSTEM_INSTRUCTION = (
+    """\
+너는 야구 타격 스윙을 지도하는 전문 코치다. 선수의 스윙을 프로 기준과 비교한 분석
+데이터를 받아서, 관절별(joints)·구간별(phases) 코칭만 한국어로 만든다.
+(전체 요약·부위 요약은 이미 따로 만들었으니 여기서는 만들지 않는다.)
+
+"""
+    + AUDIENCE_RULES
+    + FULL_SCOPE_INSTRUCTION
+)
+
+
 # ---------------------------------------------------------------------------
 # OpenAI 호출 (structured outputs 로 Pydantic 스키마 강제)
 # ---------------------------------------------------------------------------
@@ -367,6 +391,43 @@ def generate_coaching(
         system_instruction=system_instruction,
         payload=payload,
         schema=schema,
+        timeout_s=timeout_s,
+    )
+
+
+def generate_extended_coaching(
+    report: Dict[str, Any],
+    *,
+    api_key: str,
+    model: str,
+    timeout_s: float = 30.0,
+) -> Optional[Dict[str, Any]]:
+    """관절(joints)·구간(phases) 서술만 생성한다. 실패하면 ``None``.
+
+    종합(overall+부위) 코칭을 먼저 붙여 결과 화면을 연 뒤, 뒤이어 이 함수로
+    관절·구간을 채우는 용도다. 종합을 다시 만들지 않아 출력이 작고 빠르다.
+
+    반환 형태(성공 시)::
+
+        {
+          "joints": [{"key", "comment"}],
+          "phases": [{"key", "card_line", "comment", "tip"}],
+        }
+    """
+    if not api_key:
+        return None
+
+    payload = build_llm_input(report, scope="full")
+    if not payload.get("joints") and not payload.get("phases"):
+        # 믿을 만한 관절·구간이 하나도 없으면 LLM 을 부를 것도 없다.
+        return None
+
+    return _call_openai(
+        api_key=api_key,
+        model=model,
+        system_instruction=EXTENDED_SYSTEM_INSTRUCTION,
+        payload=payload,
+        schema=ExtendedCoaching,
         timeout_s=timeout_s,
     )
 

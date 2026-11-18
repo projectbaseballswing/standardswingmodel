@@ -24,7 +24,7 @@ from api import database
 from api.database import Swing
 from feedback.compare import MODEL_VERSION, SwingComparison
 from feedback.compare_v2 import SwingComparisonV2
-from feedback.llm_coach import generate_coaching
+from feedback.llm_coach import generate_coaching, generate_extended_coaching
 from feedback.pipeline import PipelineError, SwingPipeline
 from feedback.reference import ReferenceStore
 from feedback.reference_model import load_reference_model
@@ -258,11 +258,11 @@ class JobManager:
         self._executor.submit(self._run_video, job, video_path, is_left)
         return job
 
-    def _attach_coaching(self, job: Job) -> None:
-        """리포트에 LLM 코칭 문장을 붙인다. 키가 없거나 실패하면 조용히 넘어간다.
+    def _attach_overall_coaching(self, job: Job) -> None:
+        """리포트에 '종합(전체 요약+부위)' LLM 코칭을 붙인다. 키가 없거나 실패하면 조용히 넘어간다.
 
-        실패해도 분석 자체는 성공으로 둔다. 프론트는 ``coaching`` 이 없으면
-        기존 규칙 기반 문장을 그대로 쓴다.
+        관절·구간 서술은 여기서 만들지 않는다(그건 done 이후 _attach_extended_coaching 이 채운다).
+        실패해도 분석 자체는 성공으로 둔다. 프론트는 ``coaching`` 이 없으면 규칙 기반 문장을 쓴다.
         """
         if not self.openai_api_key or not isinstance(job.result, dict):
             return
@@ -270,10 +270,35 @@ class JobManager:
             job.result,
             api_key=self.openai_api_key,
             model=self.openai_model,
-            scope=self.coaching_scope,
+            scope="overall",
         )
         if coaching is not None:
             job.result["coaching"] = coaching
+
+    def _attach_extended_coaching(self, job: Job) -> None:
+        """종합을 먼저 보여준 뒤, 관절·구간(joints/phases) 서술을 뒤이어 채운다.
+
+        종합 코칭이 없으면(키 없음·실패) 아무것도 하지 않는다. 생성에 실패하면
+        ``extended_status='failed'`` 로만 표시한다(프론트는 규칙 기반으로 폴백).
+        """
+        coaching = job.result.get("coaching") if isinstance(job.result, dict) else None
+        if not isinstance(coaching, dict):
+            return
+        try:
+            extended = generate_extended_coaching(
+                job.result,
+                api_key=self.openai_api_key,
+                model=self.openai_model,
+            )
+        except Exception:  # 확장 코칭 실패가 완료된 분석을 되돌리면 안 된다.
+            logger.exception("extended coaching failed for %s", job.analysis_id)
+            extended = None
+        if extended is not None:
+            coaching["joints"] = extended.get("joints", [])
+            coaching["phases"] = extended.get("phases", [])
+            coaching["extended_status"] = "done"
+        else:
+            coaching["extended_status"] = "failed"
 
     def _run_video(self, job: Job, video_path: str, is_left: bool) -> None:
         job.status = "processing"
@@ -316,11 +341,27 @@ class JobManager:
                     quality=result.quality,
                 ).report(include_series=True)
             # LLM 코칭은 분석의 선택 단계. 실패해도 분석 결과는 그대로 둔다.
+            # 종합(overall+부위)을 먼저 붙이고 바로 done 으로 저장해, 앱이 종합 피드백을
+            # 관절·구간 생성(느림)을 기다리지 않고 즉시 볼 수 있게 한다.
             on_stage("coaching")
-            self._attach_coaching(job)
+            self._attach_overall_coaching(job)
+            run_extended = (
+                self.coaching_scope == "full"
+                and isinstance(job.result, dict)
+                and isinstance(job.result.get("coaching"), dict)
+            )
+            if run_extended:
+                # 관절·구간은 아직 생성 중임을 앱에 알린다(앱은 pending 이면 '작성 중' 표시 후 재조회).
+                job.result["coaching"]["extended_status"] = "pending"
             job.status = "done"
+            job.finished_at = _now()
+            job.stage = None
+            self._save(job)  # 종합까지 담긴 상태를 먼저 저장 → 앱이 종합 피드백을 바로 본다.
             # 목록 화면 썸네일(영상 첫 프레임). 실패해도 분석 결과엔 영향 없다.
             self._make_thumbnail(job, video_path)
+            # 관절·구간 코칭은 done 이후에 채운다. 느려도 종합 표시를 막지 않는다.
+            if run_extended:
+                self._attach_extended_coaching(job)
         except PipelineError as exc:
             job.status, job.error = "failed", {"code": exc.code, "message": exc.message}
         except Exception:  # 파이프라인 내부 예외도 작업 실패로 기록
