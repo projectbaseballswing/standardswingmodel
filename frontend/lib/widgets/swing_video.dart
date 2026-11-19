@@ -148,6 +148,7 @@ class _SwingVideoState extends State<SwingVideo>
       _commandBusy = false;
       _expiresAt = null;
       _position = Duration.zero;
+      _scrubbed = false;
       _error = null;
       _deleted = false;
       _useStoredVideo = false;
@@ -325,6 +326,9 @@ class _SwingVideoState extends State<SwingVideo>
   /// 진행 중인 이동이 끝난 뒤 마지막 요청 위치로 한 번 더 옮긴다.
   Duration? _pendingSeek;
   bool _externalSeeking = false;
+  // 한 번이라도 그래프로 스크럽하면, 이후에는 멈춰 있어도 가운데 재생 버튼을 계속 숨긴다.
+  // (새 영상으로 바뀌면 초기화한다.)
+  bool _scrubbed = false;
 
   Future<void> _seekExternal(Duration position) async {
     final c = _controller;
@@ -343,7 +347,7 @@ class _SwingVideoState extends State<SwingVideo>
       return;
     }
     final generation = _generation;
-    _externalSeeking = true;
+    _setSeeking(true); // 스크럽 중에는 가운데 재생 버튼을 숨긴다.
     try {
       if (c.value.isPlaying) await _pause();
       while (_pendingSeek != null && _current(generation)) {
@@ -354,9 +358,19 @@ class _SwingVideoState extends State<SwingVideo>
     } catch (_) {
       _playerError(c);
     } finally {
-      _externalSeeking = false;
       _pendingSeek = null;
+      _setSeeking(false); // 스크럽이 끝나면 (멈춤 상태이므로) 버튼을 다시 보인다.
     }
+  }
+
+  /// 그래프 스크럽 진행 여부. 바뀔 때 화면을 갱신해 재생 버튼 표시를 즉시 반영한다.
+  /// 스크럽이 시작되면 _scrubbed 를 세워, 이후 멈춰 있어도 재생 버튼을 계속 숨긴다.
+  void _setSeeking(bool value) {
+    final becameScrubbed = value && !_scrubbed;
+    if (_externalSeeking == value && !becameScrubbed) return;
+    _externalSeeking = value;
+    if (value) _scrubbed = true;
+    if (mounted) setState(() {});
   }
 
   Future<void> _toggle() async {
@@ -506,8 +520,9 @@ class _SwingVideoState extends State<SwingVideo>
               child: IgnorePointer(child: VideoPlayer(c)),
             ),
           ),
-          if (!c.value.isPlaying)
+          if (!c.value.isPlaying && !_externalSeeking && !_scrubbed)
             // 피그마: 34px 흰 원(92% 불투명) 위 빨간 재생 삼각형.
+            // 재생 중이거나, 한 번이라도 그래프로 스크럽한 뒤에는 숨긴다.
             Center(
               child: Container(
                 width: 34,
