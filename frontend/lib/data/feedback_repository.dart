@@ -228,6 +228,12 @@ class FeedbackRepository {
         _map(result['phases'])['phases'],
         swingChecks: rotationChecks,
         coaching: coaching,
+        // 관절 key → 설명. '주요 관절 차이'에서 각 관절이 뭘 재는지 작게 보여준다.
+        jointDescriptions: {
+          for (final j in _rows(result['joints']))
+            if (j['key'] is String)
+              (j['key'] as String): (j['description'] as String?) ?? '',
+        },
       ),
       rotationChecks: rotationChecks,
       postureScore: available ? _number(overall['posture_score']) : null,
@@ -491,6 +497,7 @@ class FeedbackRepository {
     dynamic raw, {
     List<RotationCheck> swingChecks = const [],
     Coaching? coaching,
+    Map<String, String> jointDescriptions = const {},
   }) => [
     for (final p in _rows(raw))
       () {
@@ -527,6 +534,8 @@ class FeedbackRepository {
                       direction: d['direction'] as String? ?? 'similar',
                       directionText: d['direction_text'] as String?,
                       level: d['level'] as String? ?? '',
+                      description:
+                          jointDescriptions[d['joint'] as String? ?? ''] ?? '',
                     ),
                 ],
           coachCardLine: coach?.cardLine ?? '',

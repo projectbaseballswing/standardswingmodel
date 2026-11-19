@@ -9,70 +9,153 @@ class PhaseMetrics extends StatelessWidget {
   final AnalysisPhase phase;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      _note(
-        '내 시간 ${_value(phase.available ? phase.userDurationMs : null, 'ms')} / 기준 ${_value(phase.referenceDurationMs, 'ms')}',
-      ),
-      _note(reliabilityLabel(phase.reliability)),
-      if (!phase.available)
-        _note(phase.unavailableReason ?? '이 구간은 분석할 수 없습니다.')
-      else ...[
-        _note(_tempo(phase)),
-        if (phase.score == null) _note('구간 점수가 제공되지 않았습니다.'),
-      ],
-      for (final warning in phase.warnings) _note(warning),
-      if (phase.available && phase.checks.isNotEmpty) ...[
-        _note('몸통 회전 확인 (착지 → 임팩트)'),
-        for (final check in phase.checks)
-          _note(
-            '${check.passed == null
-                ? '–'
-                : check.passed!
-                ? '✓'
-                : '⚠'} ${check.message}',
-          ),
-      ],
-      if (phase.available && phase.deviations.isNotEmpty) ...[
-        _note('주요 관절 차이 (기준 스윙 대비)'),
+  Widget build(BuildContext context) {
+    // '주요 관절 차이'만 보여준다. (시간/신뢰도/템포/몸통 회전 등은 표시하지 않는다.)
+    if (!phase.available) {
+      return _note(phase.unavailableReason ?? '이 구간은 분석할 수 없습니다.');
+    }
+    if (phase.deviations.isEmpty) {
+      return _note('기준과 크게 다른 관절이 없어요.');
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '주요 관절 차이',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        ),
+        _hint('프로 기준 스윙과 비교한 차이예요. 막대가 길수록 기준에서 많이 벗어난 거예요(색: 초록 양호·주황 주의·빨강 경고).'),
         for (final deviation in phase.deviations)
-          _note(
-            '${deviation.name}: ${deviation.directionText ?? _direction(deviation.direction)}'
-            '${deviation.zScore == null ? '' : ' · z ${feedbackNumber(deviation.zScore)}'}',
-          ),
+          _DeviationRow(deviation: deviation),
       ],
-    ],
-  );
+    );
+  }
+}
 
-  String _tempo(AnalysisPhase phase) {
-    final ratio = phase.tempoRatio;
-    final ratioText = ratio
-        ?.toStringAsFixed(3)
-        .replaceFirst(RegExp(r'\.?0+$'), '');
-    final comparison = ratio == null
-        ? '소요 시간 비율 미제공'
-        : '기준의 $ratioText배'
-              ' (${ratio > 1
-                  ? '소요 시간이 더 김'
-                  : ratio < 1
-                  ? '소요 시간이 더 짧음'
-                  : '소요 시간이 같음'})';
-    final verdict = switch (phase.tempoLevel) {
-      'good' => '기준 범위',
-      'caution' => '기준과 차이 있음',
-      'warning' => '기준과 차이 큼',
-      _ => '판정 보류',
-    };
-    return '$comparison · 템포 $verdict';
+/// '주요 관절 차이' 한 줄: 관절 이름 + 방향(색) + 뭘 재는지 설명 + 양방향 막대.
+/// 가운데가 기준(0). 막대는 z 부호 방향으로, |z| 가 클수록 길게. 숫자는 보여주지 않는다.
+class _DeviationRow extends StatelessWidget {
+  const _DeviationRow({required this.deviation});
+  final PhaseDeviation deviation;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _devColor(deviation.level, deviation.zScore);
+    final label =
+        deviation.directionText ?? _directionLabel(deviation.direction);
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            deviation.name,
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+          ),
+          if (deviation.description.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                deviation.description,
+                style: const TextStyle(fontSize: 10.5, color: AppColors.hint),
+              ),
+            ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 10,
+                  child: CustomPaint(
+                    size: Size.infinite,
+                    painter: _DeviationBarPainter(
+                      magnitude: (deviation.zScore ?? 0).abs(),
+                      color: color,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _directionLabel(String direction) => switch (direction) {
+  'higher' => '기준보다 큼',
+  'lower' => '기준보다 작음',
+  'similar' => '기준과 비슷',
+  _ => '',
+};
+
+/// 레벨(없으면 |z|)로 막대·라벨 색을 정한다. 양호=초록, 주의=주황, 경고=빨강.
+Color _devColor(String level, double? z) {
+  final lv = level.isNotEmpty
+      ? level
+      : z == null
+      ? 'good'
+      : z.abs() >= 2
+      ? 'warning'
+      : z.abs() >= 1
+      ? 'caution'
+      : 'good';
+  return switch (lv) {
+    'warning' => AppColors.primary,
+    'caution' => const Color(0xFFF5A623),
+    _ => const Color(0xFF4CC38A),
+  };
+}
+
+/// 왼쪽(기준과 같음) → 오른쪽으로 '벗어난 정도(|z|)'만큼 차는 막대.
+/// 좌우에 방향 의미는 없다. 길수록 많이 벗어난 것이고, 색이 심각도를 나타낸다.
+class _DeviationBarPainter extends CustomPainter {
+  _DeviationBarPainter({required this.magnitude, required this.color});
+
+  /// 기준에서 벗어난 크기(|z|). 0 이면 기준과 같음.
+  final double magnitude;
+  final Color color;
+
+  /// |z| 가 이 값 이상이면 막대가 끝까지 찬다.
+  static const double _zMax = 2.5;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cy = size.height / 2;
+    final r = size.height / 2; // 둥근 끝 반지름
+    final left = r;
+    final right = size.width - r;
+    final track = Paint()
+      ..color = const Color(0xFFECECEF)
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = size.height;
+    canvas.drawLine(Offset(left, cy), Offset(right, cy), track);
+
+    final frac = (magnitude / _zMax).clamp(0.0, 1.0);
+    final fill = Paint()
+      ..color = color
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = size.height;
+    if (frac <= 0) {
+      canvas.drawCircle(Offset(left, cy), r, fill);
+    } else {
+      canvas.drawLine(Offset(left, cy), Offset(left + frac * (right - left), cy), fill);
+    }
   }
 
-  String _direction(String direction) => switch (direction) {
-    'higher' => '기준보다 높음',
-    'lower' => '기준보다 낮음',
-    'similar' => '기준과 유사',
-    _ => '방향 정보 없음',
-  };
+  @override
+  bool shouldRepaint(_DeviationBarPainter old) =>
+      old.magnitude != magnitude || old.color != color;
 }
 
 class SwingEventsCard extends StatelessWidget {
@@ -147,6 +230,15 @@ Widget _note(String text) => Padding(
       color: AppColors.subtitle,
       height: 1.4,
     ),
+  ),
+);
+
+/// 설명용 더 옅은 회색 줄.
+Widget _hint(String text) => Padding(
+  padding: const EdgeInsets.only(top: 2),
+  child: Text(
+    text,
+    style: const TextStyle(fontSize: 11, color: AppColors.hint, height: 1.4),
   ),
 );
 

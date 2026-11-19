@@ -320,8 +320,10 @@ void main() {
           ),
           GoRoute(
             path: '/phase-feedback',
-            builder: (_, state) =>
-                PhaseFeedbackScreen(feedback: state.extra as OverallFeedback),
+            builder: (_, state) => PhaseFeedbackScreen(
+              feedback: state.extra as OverallFeedback,
+              videoBuilder: () => const SizedBox.shrink(),
+            ),
           ),
         ],
       );
@@ -345,11 +347,6 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('phase-card-transition')));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(find.byType(PhaseMetrics), 200);
-      expect(
-        find.textContaining('0.8배 (소요 시간이 더 짧음) · 템포 판정 보류'),
-        findsOneWidget,
-      );
-      expect(find.textContaining('구간이 짧아'), findsOneWidget);
       expect(find.text('75.1'), findsWidgets);
       await tester.scrollUntilVisible(find.byType(SwingEventsCard), 200);
       expect(find.textContaining('앞발 착지: 임팩트 전 300 ms'), findsOneWidget);
