@@ -2,20 +2,30 @@ import 'package:flutter/material.dart';
 
 import '../data/feedback_repository.dart';
 import '../models/feedback.dart';
+import '../models/swing_timeline.dart';
 import '../theme/app_theme.dart';
 import '../widgets/body_part_art.dart';
 import '../widgets/coaching_pending_note.dart';
+import '../widgets/swing_video.dart';
 
 /// 관절별 분석(상세 피드백) 화면.
 ///
 /// 종합 피드백에서 "상세 피드백 보기" 를 누르면 들어온다.
 /// 위쪽 인체 그림에서 부위(앞팔/뒷팔/몸통/앞다리/뒷다리)를 고르면, 그 부위의
-/// 점수·상태와 세부 항목(팔꿈치 각도, 손 높이 등)별 각도 그래프를 보여준다.
+/// 점수·상태와 내 스윙 영상, 세부 항목(팔꿈치 각도, 손 높이 등)별 각도 그래프를
+/// 보여준다. 그래프의 세로선을 움직이면 영상도 그 시점으로 이동한다.
 class JointAnalysisScreen extends StatefulWidget {
-  const JointAnalysisScreen({super.key, required this.feedback});
+  const JointAnalysisScreen({
+    super.key,
+    required this.feedback,
+    this.videoBuilder,
+  });
 
   /// 종합 피드백. 이 값을 부위별로 펼쳐서 보여준다.
   final OverallFeedback feedback;
+
+  /// 테스트에서 영상 위젯을 바꿔 끼울 때 쓴다. 없으면 [SwingVideo].
+  final Widget Function(SwingVideoSync sync)? videoBuilder;
 
   @override
   State<JointAnalysisScreen> createState() => _JointAnalysisScreenState();
@@ -26,6 +36,12 @@ class _JointAnalysisScreenState extends State<JointAnalysisScreen> {
   late OverallFeedback _feedback;
   late List<PartAnalysis> _parts;
   int _selected = 0;
+
+  /// 영상 ↔ 그래프 세로선 재생 위치 연결.
+  final _videoSync = SwingVideoSync();
+
+  /// 스윙 이벤트로 만든 영상 시간축. 이벤트가 부족하면 null(연동 안 함).
+  SwingTimeline? get _timeline => SwingTimeline.fromEvents(_feedback.events);
 
   bool get _coachingPending => _feedback.coaching?.isExtendedPending ?? false;
 
@@ -85,6 +101,7 @@ class _JointAnalysisScreenState extends State<JointAnalysisScreen> {
 
   @override
   void dispose() {
+    _videoSync.dispose();
     _repo.dispose();
     super.dispose();
   }
@@ -92,6 +109,7 @@ class _JointAnalysisScreenState extends State<JointAnalysisScreen> {
   @override
   Widget build(BuildContext context) {
     final hasParts = _parts.isNotEmpty;
+    final timeline = _timeline;
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
       appBar: AppBar(
@@ -105,35 +123,176 @@ class _JointAnalysisScreenState extends State<JointAnalysisScreen> {
       ),
       body: !hasParts
           ? const Center(child: Text('분석할 관절 정보가 없어요.'))
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-              children: [
-                const Text(
-                  '부위를 선택하면 상세 분석 결과를 확인할 수 있습니다.',
-                  style: TextStyle(fontSize: 13, color: AppColors.hint),
-                ),
-                if (_coachingPending) ...[
-                  const SizedBox(height: 12),
-                  const CoachingPendingNote(
-                    text: 'AI 코치가 관절별 코멘트를 작성하고 있어요…',
+          : CustomScrollView(
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate([
+                      const Text(
+                        '부위를 선택하면 상세 분석 결과를 확인할 수 있습니다.',
+                        style: TextStyle(fontSize: 13, color: AppColors.hint),
+                      ),
+                      if (_coachingPending) ...[
+                        const SizedBox(height: 12),
+                        const CoachingPendingNote(
+                          text: 'AI 코치가 관절별 코멘트를 작성하고 있어요…',
+                        ),
+                      ],
+                      const SizedBox(height: 14),
+                      _SelectorCard(
+                        parts: _parts,
+                        selected: _selected,
+                        onSelect: (i) => setState(() => _selected = i),
+                      ),
+                      const SizedBox(height: 14),
+                      _ScoreCard(part: _parts[_selected]),
+                      const SizedBox(height: 8),
+                    ]),
                   ),
-                ],
-                const SizedBox(height: 14),
-                _SelectorCard(
-                  parts: _parts,
-                  selected: _selected,
-                  onSelect: (i) => setState(() => _selected = i),
                 ),
-                const SizedBox(height: 14),
-                _ScoreCard(part: _parts[_selected]),
-                const SizedBox(height: 14),
-                if (_parts[_selected].features.isNotEmpty) ...[
-                  _FeatureListCard(part: _parts[_selected]),
-                  const SizedBox(height: 14),
-                ],
-                _CoachCard(part: _parts[_selected]),
+                // 점수 아래 영상. 스크롤해 화면 위에 닿으면 그 자리에 고정되어
+                // 아래 그래프를 보면서도 영상을 함께 확인할 수 있다.
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: _PinnedVideoDelegate(
+                    child: _VideoCard(
+                      videoStatus: _feedback.videoStatus,
+                      synced: timeline != null,
+                      child:
+                          widget.videoBuilder?.call(_videoSync) ??
+                          SwingVideo(
+                            key: ValueKey(_feedback.analysisId),
+                            analysisId: _feedback.analysisId,
+                            api: _repo.api,
+                            fit: BoxFit.contain,
+                            preload: true,
+                            sync: _videoSync,
+                          ),
+                    ),
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate([
+                      if (_parts[_selected].features.isNotEmpty) ...[
+                        _FeatureListCard(
+                          part: _parts[_selected],
+                          sync: _videoSync,
+                          timeline: timeline,
+                        ),
+                        const SizedBox(height: 14),
+                      ],
+                      _CoachCard(part: _parts[_selected]),
+                    ]),
+                  ),
+                ),
               ],
             ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 고정 영상 (점수 아래, 스크롤 시 화면 위에 고정)
+// ---------------------------------------------------------------------------
+class _PinnedVideoDelegate extends SliverPersistentHeaderDelegate {
+  _PinnedVideoDelegate({required this.child});
+
+  final Widget child;
+
+  static const double _extent = 236;
+
+  @override
+  double get minExtent => _extent;
+
+  @override
+  double get maxExtent => _extent;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    // 뒤로 지나가는 카드가 비치지 않도록 화면 배경색으로 덮는다.
+    return Container(
+      color: const Color(0xFFF7F7F7),
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 6),
+      child: child,
+    );
+  }
+
+  @override
+  bool shouldRebuild(_PinnedVideoDelegate old) => old.child != child;
+}
+
+class _VideoCard extends StatelessWidget {
+  const _VideoCard({
+    required this.videoStatus,
+    required this.synced,
+    required this.child,
+  });
+
+  final String videoStatus;
+
+  /// 그래프 세로선과 시점 연동이 가능한지.
+  final bool synced;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final deleted = videoStatus == 'deleted' || videoStatus == 'deleting';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                '내 스윙 영상',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  synced
+                      ? '그래프의 세로선을 움직이면 그 시점으로 이동해요.'
+                      : '이 기록은 그래프와 시점 연동을 지원하지 않아요.',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: AppColors.hint),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: deleted
+                  ? ColoredBox(
+                      color: const Color(0xFFE6E6E6),
+                      child: Center(
+                        child: Text(
+                          videoStatus == 'deleted'
+                              ? '원본 영상이 삭제되었습니다'
+                              : '원본 영상 삭제가 진행 중입니다.',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    )
+                  : ColoredBox(color: Colors.black, child: child),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -409,7 +568,7 @@ class _ScoreCard extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           if (hasComparison)
             Row(
               children: [
@@ -430,7 +589,7 @@ class _ScoreCard extends StatelessWidget {
                       ? const Text(
                           '-',
                           style: TextStyle(
-                            fontSize: 22,
+                            fontSize: 18,
                             fontWeight: FontWeight.w800,
                             color: AppColors.hint,
                           ),
@@ -444,13 +603,13 @@ class _ScoreCard extends StatelessWidget {
                                   : (delta < 0
                                         ? Icons.arrow_drop_down
                                         : Icons.remove),
-                              size: 22,
+                              size: 18,
                               color: style.color,
                             ),
                             Text(
                               feedbackNumber(delta.abs()),
                               style: TextStyle(
-                                fontSize: 22,
+                                fontSize: 18,
                                 fontWeight: FontWeight.w800,
                                 color: style.color,
                               ),
@@ -465,13 +624,13 @@ class _ScoreCard extends StatelessWidget {
             _CurrentScoreOnly(part: part, style: style),
           // 검출 신뢰도가 높지 않으면 참고 문구를 덧붙인다.
           if (part.reliability != 'high') ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             _ReliabilityNote(reliability: part.reliability),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
             decoration: BoxDecoration(
               color: style.soft,
               borderRadius: BorderRadius.circular(10),
@@ -543,7 +702,7 @@ class _StatBox extends StatelessWidget {
   Widget build(BuildContext context) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 7),
         decoration: BoxDecoration(
           color: const Color(0xFFF7F7F7),
           borderRadius: BorderRadius.circular(10),
@@ -554,12 +713,12 @@ class _StatBox extends StatelessWidget {
               label,
               style: const TextStyle(fontSize: 11, color: AppColors.hint),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 2),
             child ??
                 Text(
                   value ?? '-',
                   style: TextStyle(
-                    fontSize: 22,
+                    fontSize: 18,
                     fontWeight: FontWeight.w800,
                     color: valueColor ?? Colors.black87,
                   ),
@@ -581,7 +740,7 @@ class _CurrentScoreOnly extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
       decoration: BoxDecoration(
         color: const Color(0xFFF7F7F7),
         borderRadius: BorderRadius.circular(10),
@@ -607,7 +766,7 @@ class _CurrentScoreOnly extends StatelessWidget {
                       Text(
                         feedbackNumber(part.currentScore),
                         style: TextStyle(
-                          fontSize: 40,
+                          fontSize: 30,
                           height: 1.0,
                           fontWeight: FontWeight.w800,
                           color: style.color,
@@ -662,9 +821,15 @@ class _CurrentScoreOnly extends StatelessWidget {
 /// 부위를 이루는 세부 항목들을 펼쳐, 각 항목이 기준과 어떻게 다른지 보여준다.
 /// 항목을 누르면 스윙 전체 각도 그래프(내 스윙 vs 기준)가 열린다.
 class _FeatureListCard extends StatefulWidget {
-  const _FeatureListCard({required this.part});
+  const _FeatureListCard({
+    required this.part,
+    required this.sync,
+    required this.timeline,
+  });
 
   final PartAnalysis part;
+  final SwingVideoSync sync;
+  final SwingTimeline? timeline;
 
   @override
   State<_FeatureListCard> createState() => _FeatureListCardState();
@@ -708,6 +873,8 @@ class _FeatureListCardState extends State<_FeatureListCard> {
               ),
             _FeatureTile(
               feature: features[i],
+              sync: widget.sync,
+              timeline: widget.timeline,
               expanded: _expanded == i,
               onTap: () =>
                   setState(() => _expanded = _expanded == i ? null : i),
@@ -723,11 +890,15 @@ class _FeatureListCardState extends State<_FeatureListCard> {
 class _FeatureTile extends StatelessWidget {
   const _FeatureTile({
     required this.feature,
+    required this.sync,
+    required this.timeline,
     required this.expanded,
     required this.onTap,
   });
 
   final FeatureAnalysis feature;
+  final SwingVideoSync sync;
+  final SwingTimeline? timeline;
   final bool expanded;
   final VoidCallback onTap;
 
@@ -795,7 +966,8 @@ class _FeatureTile extends StatelessWidget {
             ),
           ),
         ),
-        if (expanded) _FeatureDetail(feature: feature),
+        if (expanded)
+          _FeatureDetail(feature: feature, sync: sync, timeline: timeline),
       ],
     );
   }
@@ -803,9 +975,15 @@ class _FeatureTile extends StatelessWidget {
 
 /// 펼쳤을 때: 각도 그래프 + 임팩트/움직임 폭 수치.
 class _FeatureDetail extends StatelessWidget {
-  const _FeatureDetail({required this.feature});
+  const _FeatureDetail({
+    required this.feature,
+    required this.sync,
+    required this.timeline,
+  });
 
   final FeatureAnalysis feature;
+  final SwingVideoSync sync;
+  final SwingTimeline? timeline;
 
   @override
   Widget build(BuildContext context) {
@@ -838,18 +1016,14 @@ class _FeatureDetail extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            SizedBox(
-              height: 140,
-              child: CustomPaint(
-                key: ValueKey('feature-series-${feature.key}'),
-                size: Size.infinite,
-                painter: _FeatureChartPainter(
-                  series: series,
-                  eventBased: feature.eventBasedSeries,
-                  unit: feature.unit,
-                  userColor: AppColors.primary,
-                ),
-              ),
+            _SyncedSeriesChart(
+              feature: feature,
+              series: series,
+              sync: sync,
+              // 0.2 구간 시계열만 영상 시간축으로 옮길 수 있다.
+              clock: feature.eventBasedSeries
+                  ? timeline?.clockFor(series.length)
+                  : null,
             ),
             const SizedBox(height: 14),
           ],
@@ -1120,6 +1294,166 @@ class _LegendDot extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// 영상과 연동되는 각도 그래프 (세로선 드래그 ↔ 영상 시점)
+// ---------------------------------------------------------------------------
+class _SyncedSeriesChart extends StatefulWidget {
+  const _SyncedSeriesChart({
+    required this.feature,
+    required this.series,
+    required this.sync,
+    required this.clock,
+  });
+
+  final FeatureAnalysis feature;
+  final List<SeriesSample> series;
+  final SwingVideoSync sync;
+
+  /// 인덱스 ↔ 영상 시간 변환. null 이면 세로선을 그리지 않는다.
+  final SeriesClock? clock;
+
+  @override
+  State<_SyncedSeriesChart> createState() => _SyncedSeriesChartState();
+}
+
+class _SyncedSeriesChartState extends State<_SyncedSeriesChart> {
+  /// 드래그 중인 위치. 영상 이동이 따라오기 전에도 손가락 위치를 바로 보여준다.
+  double? _dragIndex;
+
+  double _indexFromDx(double dx, double width) {
+    final plotW = width - _FeatureChartPainter.leftPad -
+        _FeatureChartPainter.rightPad;
+    final f = ((dx - _FeatureChartPainter.leftPad) / plotW).clamp(0.0, 1.0);
+    return f * (widget.series.length - 1);
+  }
+
+  void _moveTo(double dx, double width) {
+    final clock = widget.clock;
+    if (clock == null) return;
+    final index = _indexFromDx(dx, width);
+    setState(() => _dragIndex = index);
+    final ms = (clock.secondsAt(index) * 1000).round();
+    widget.sync.seekTo(Duration(milliseconds: ms));
+  }
+
+  void _release() {
+    if (_dragIndex != null) setState(() => _dragIndex = null);
+  }
+
+  String _fmtTime(double seconds) {
+    final s = seconds < 0 ? 0.0 : seconds;
+    final m = s ~/ 60;
+    final rest = s - m * 60;
+    return '$m:${rest.toStringAsFixed(2).padLeft(5, '0')}';
+  }
+
+  String _fmtValue(double? v) {
+    if (v == null) return '-';
+    return widget.feature.unit == 'deg'
+        ? '${v.toStringAsFixed(1)}°'
+        : '${v.toStringAsFixed(1)} ${widget.feature.unit}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final clock = widget.clock;
+    return ListenableBuilder(
+      listenable: widget.sync,
+      builder: (context, _) {
+        final cursor = clock == null
+            ? null
+            : _dragIndex ??
+                  clock.indexAt(widget.sync.position.inMilliseconds / 1000);
+        final sample = cursor == null
+            ? null
+            : widget.series[cursor.round().clamp(0, widget.series.length - 1)];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (cursor != null && sample != null)
+              // 현재 시점의 내 값 / 기준 값
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFDECEC),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        _fmtTime(clock!.secondsAt(cursor)),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '내 ${_fmtValue(sample.user)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '기준 ${_fmtValue(sample.reference)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.subtitle,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            SizedBox(
+              height: 140,
+              child: LayoutBuilder(
+                builder: (context, box) => GestureDetector(
+                  key: ValueKey('feature-series-scrub-${widget.feature.key}'),
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: clock == null
+                      ? null
+                      : (d) => _moveTo(d.localPosition.dx, box.maxWidth),
+                  onTapUp: clock == null ? null : (_) => _release(),
+                  onHorizontalDragStart: clock == null
+                      ? null
+                      : (d) => _moveTo(d.localPosition.dx, box.maxWidth),
+                  onHorizontalDragUpdate: clock == null
+                      ? null
+                      : (d) => _moveTo(d.localPosition.dx, box.maxWidth),
+                  onHorizontalDragEnd: clock == null
+                      ? null
+                      : (_) => _release(),
+                  onHorizontalDragCancel: clock == null ? null : _release,
+                  child: CustomPaint(
+                    key: ValueKey('feature-series-${widget.feature.key}'),
+                    size: Size.infinite,
+                    painter: _FeatureChartPainter(
+                      series: widget.series,
+                      eventBased: widget.feature.eventBasedSeries,
+                      unit: widget.feature.unit,
+                      userColor: AppColors.primary,
+                      cursor: cursor,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 세부 항목 각도 시계열 Painter (내 스윙 vs 기준 ±편차)
 // ---------------------------------------------------------------------------
 class _FeatureChartPainter extends CustomPainter {
@@ -1128,6 +1462,7 @@ class _FeatureChartPainter extends CustomPainter {
     required this.eventBased,
     required this.unit,
     required this.userColor,
+    this.cursor,
   });
 
   final List<SeriesSample> series;
@@ -1135,17 +1470,21 @@ class _FeatureChartPainter extends CustomPainter {
   final String unit;
   final Color userColor;
 
+  /// 영상 현재 시점의 시계열 인덱스(실수). null 이면 세로선을 그리지 않는다.
+  final double? cursor;
+
   static const _grid = Color(0xFFEDEDED);
   static const _axisText = Color(0xFF9E9E9E);
   static const _refColor = Color(0xFFBDBDBD);
 
+  static const leftPad = 32.0;
+  static const rightPad = 6.0;
+
   @override
   void paint(Canvas canvas, Size size) {
     if (series.length < 2) return;
-    const leftPad = 32.0;
     const bottomPad = 26.0;
     const topPad = 8.0;
-    const rightPad = 6.0;
     final plot = Rect.fromLTRB(
       leftPad,
       topPad,
@@ -1281,6 +1620,39 @@ class _FeatureChartPainter extends CustomPainter {
       yOf,
       width: 2.2,
     );
+
+    // 영상 현재 시점 세로선 + 내 스윙 선 위의 점.
+    final c = cursor;
+    if (c != null) {
+      final x = plot.left + plot.width * (c / (series.length - 1));
+      canvas.drawLine(
+        Offset(x, plot.top),
+        Offset(x, plot.bottom),
+        Paint()
+          ..color = userColor.withValues(alpha: 0.8)
+          ..strokeWidth = 1.4,
+      );
+      final i0 = c.floor().clamp(0, series.length - 1);
+      final i1 = c.ceil().clamp(0, series.length - 1);
+      final v0 = series[i0].user;
+      final v1 = series[i1].user;
+      final v = v0 != null && v1 != null
+          ? v0 + (v1 - v0) * (c - i0)
+          : (v0 ?? v1);
+      if (v != null) {
+        final p = Offset(x, yOf(v));
+        canvas.drawCircle(p, 5, Paint()..color = Colors.white);
+        canvas.drawCircle(
+          p,
+          5,
+          Paint()
+            ..color = userColor
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2,
+        );
+        canvas.drawCircle(p, 2.2, Paint()..color = userColor);
+      }
+    }
   }
 
   /// null 지점에서는 선을 끊어 그린다(영상에 없는 구간).
@@ -1362,7 +1734,8 @@ class _FeatureChartPainter extends CustomPainter {
       old.series != series ||
       old.eventBased != eventBased ||
       old.unit != unit ||
-      old.userColor != userColor;
+      old.userColor != userColor ||
+      old.cursor != cursor;
 }
 
 // ---------------------------------------------------------------------------

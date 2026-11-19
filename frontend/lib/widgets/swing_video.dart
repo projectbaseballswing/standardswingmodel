@@ -13,6 +13,40 @@ import '../video/selected_video.dart';
 typedef SwingVideoControllerFactory =
     VideoPlayerController Function({String? videoPath, Uri? url});
 
+/// 영상 바깥(예: 관절 각도 그래프)과 재생 위치를 주고받는 연결 고리.
+///
+/// [SwingVideo.sync] 로 넘기면 영상이 현재 위치를 알리고([position]),
+/// 바깥에서 [seekTo] 로 원하는 시점으로 옮길 수 있다.
+class SwingVideoSync extends ChangeNotifier {
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  _SwingVideoState? _state;
+
+  /// 영상의 현재 재생 위치.
+  Duration get position => _position;
+
+  /// 영상 길이. 아직 불러오지 않았으면 0.
+  Duration get duration => _duration;
+
+  void _report(Duration position, Duration duration) {
+    if (position == _position && duration == _duration) return;
+    _position = position;
+    _duration = duration;
+    notifyListeners();
+  }
+
+  /// 영상을 [position] 으로 옮기고 멈춘다. 영상이 아직 없으면 위치만 기억한다.
+  void seekTo(Duration position) {
+    final p = position < Duration.zero ? Duration.zero : position;
+    final state = _state;
+    if (state == null) {
+      _report(p, _duration);
+    } else {
+      state._seekExternal(p);
+    }
+  }
+}
+
 /// 로컬 영상 우선. 과거 영상은 [preload]가 true면 화면 진입 시, 아니면 탭할 때
 /// URL과 스트림을 요청한다.
 /// URL은 이 위젯의 controller 안에서만 사용하며 영구 저장하지 않는다.
@@ -27,7 +61,11 @@ class SwingVideo extends StatefulWidget {
     this.fit = BoxFit.cover,
     this.autoplay = false,
     this.preload = false,
+    this.sync,
   });
+
+  /// 재생 위치를 바깥과 주고받을 때 넘긴다. 없으면 단독으로 동작한다.
+  final SwingVideoSync? sync;
 
   final String analysisId;
   final String? videoPath;
@@ -77,6 +115,7 @@ class _SwingVideoState extends State<SwingVideo>
     WidgetsBinding.instance.addObserver(this);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    widget.sync?._state = this;
     if (_local || widget.preload) {
       unawaited(_load(play: widget.autoplay && !kIsWeb));
     }
@@ -96,6 +135,10 @@ class _SwingVideoState extends State<SwingVideo>
   @override
   void didUpdateWidget(SwingVideo oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.sync != widget.sync) {
+      if (oldWidget.sync?._state == this) oldWidget.sync!._state = null;
+      widget.sync?._state = this;
+    }
     if (oldWidget.analysisId != widget.analysisId ||
         oldWidget.videoPath != widget.videoPath) {
       _generation++;
@@ -172,6 +215,7 @@ class _SwingVideoState extends State<SwingVideo>
   void dispose() {
     _generation++;
     _playIntent++;
+    if (widget.sync?._state == this) widget.sync!._state = null;
     WidgetsBinding.instance.removeObserver(this);
     swingRouteObserver.unsubscribe(this);
     unawaited(_detach());
@@ -272,7 +316,46 @@ class _SwingVideoState extends State<SwingVideo>
       }
     } else {
       _position = c.value.position;
+      widget.sync?._report(c.value.position, c.value.duration);
       setState(() {});
+    }
+  }
+
+  /// 바깥(그래프)에서 요청한 위치로 옮긴다. 드래그로 연달아 들어오면
+  /// 진행 중인 이동이 끝난 뒤 마지막 요청 위치로 한 번 더 옮긴다.
+  Duration? _pendingSeek;
+  bool _externalSeeking = false;
+
+  Future<void> _seekExternal(Duration position) async {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized || _loading) {
+      // 아직 영상이 없으면 불러올 때 이 위치에서 시작한다.
+      _position = position;
+      widget.sync?._report(position, widget.sync!.duration);
+      return;
+    }
+    _pendingSeek = position > c.value.duration ? c.value.duration : position;
+    if (_externalSeeking) return; // 진행 중인 루프가 마지막 요청을 처리한다.
+    if (_expired) {
+      final target = _pendingSeek!;
+      _pendingSeek = null;
+      await _load(position: target);
+      return;
+    }
+    final generation = _generation;
+    _externalSeeking = true;
+    try {
+      if (c.value.isPlaying) await _pause();
+      while (_pendingSeek != null && _current(generation)) {
+        final next = _pendingSeek!;
+        _pendingSeek = null;
+        await c.seekTo(next);
+      }
+    } catch (_) {
+      _playerError(c);
+    } finally {
+      _externalSeeking = false;
+      _pendingSeek = null;
     }
   }
 
