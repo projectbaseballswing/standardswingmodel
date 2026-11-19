@@ -462,6 +462,7 @@ class PhaseDeviation {
     this.directionText,
     this.diff,
     this.zScore,
+    this.description = '',
   });
   final String joint;
   final String name;
@@ -470,6 +471,10 @@ class PhaseDeviation {
   final String level;
   final double? diff;
   final double? zScore;
+
+  /// 이 관절이 뭘 재는지 한 줄 설명(예: "앞 어깨-팔꿈치-손목 각도. 클수록 팔이 펴져 있다.").
+  /// 리포트의 joints[].description 에서 같은 key 로 찾아 채운다.
+  final String description;
 }
 
 /// 착지 → 임팩트 몸통 회전 확인 하나. 서버 `overall.rotation_checks[]`.

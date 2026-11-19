@@ -6,6 +6,7 @@ import '../models/feedback.dart';
 import '../theme/app_theme.dart';
 import '../widgets/coaching_pending_note.dart';
 import '../widgets/feedback_metrics.dart';
+import '../widgets/swing_video.dart';
 
 /// 구간별 피드백 화면.
 ///
@@ -17,10 +18,13 @@ import '../widgets/feedback_metrics.dart';
 /// 새 업로드와 과거 기록 모두 서버 구간 점수를 사용한다. 이전 비교는 만들지 않는다.
 /// 포즈 그림은 사용자 영상이 아니라 피그마의 구간별 대표 일러스트다.
 class PhaseFeedbackScreen extends StatefulWidget {
-  const PhaseFeedbackScreen({super.key, required this.feedback});
+  const PhaseFeedbackScreen({super.key, required this.feedback, this.videoBuilder});
 
   /// 종합 피드백. 이 값을 구간별로 펼쳐서 보여준다.
   final OverallFeedback feedback;
+
+  /// 테스트에서 영상 위젯을 바꿔 끼울 때 쓴다. 없으면 [SwingVideo].
+  final Widget Function()? videoBuilder;
 
   @override
   State<PhaseFeedbackScreen> createState() => _PhaseFeedbackScreenState();
@@ -132,6 +136,20 @@ class _PhaseFeedbackScreenState extends State<PhaseFeedbackScreen> {
                   phases: _phases,
                   selected: _selected,
                   onSelect: _select,
+                ),
+                const SizedBox(height: 14),
+                // 내 스윙 영상. 구간을 바꿔도 다시 로드되지 않게 상세 카드 밖(고정 위치)에 둔다.
+                _PhaseVideoCard(
+                  key: ValueKey('phase-video-${_feedback.analysisId}'),
+                  child:
+                      widget.videoBuilder?.call() ??
+                      SwingVideo(
+                        key: ValueKey('phase-swing-${_feedback.analysisId}'),
+                        analysisId: _feedback.analysisId,
+                        api: _repo.api,
+                        fit: BoxFit.contain,
+                        preload: true,
+                      ),
                 ),
                 const SizedBox(height: 14),
                 _PhaseDetailCard(
@@ -562,16 +580,6 @@ class _PhaseDetailCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          // 구간 포즈 + 점수
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              _PoseFrame(phase: phase, index: number - 1, label: '현재 스윙'),
-              const SizedBox(width: 16),
-              Expanded(child: _ScoreBlock(phase: phase)),
-            ],
-          ),
-          const SizedBox(height: 14),
           PhaseMetrics(phase: phase),
           const SizedBox(height: 14),
           _buildTipBox(phase),
@@ -581,34 +589,32 @@ class _PhaseDetailCard extends StatelessWidget {
   }
 }
 
-/// 실제 서버 구간 점수. 비교 데이터가 없으므로 이전 점수나 증감을 만들지 않는다.
-class _ScoreBlock extends StatelessWidget {
-  const _ScoreBlock({required this.phase});
-  final AnalysisPhase phase;
+/// 내 스윙 영상 카드. 구간 선택과 무관하게 한 번만 로드되도록 상세 카드 밖에 둔다.
+class _PhaseVideoCard extends StatelessWidget {
+  const _PhaseVideoCard({super.key, required this.child});
+
+  final Widget child;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      FittedBox(
-        fit: BoxFit.scaleDown,
-        alignment: Alignment.centerLeft,
-        child: Text(
-          _scoreText(phase),
-          style: TextStyle(
-            fontSize: 40,
-            height: 1.0,
-            fontWeight: FontWeight.w800,
-            color: _scoreColor(phase),
+  Widget build(BuildContext context) => _Card(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '내 스윙 영상',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            height: 220,
+            width: double.infinity,
+            child: ColoredBox(color: Colors.black, child: child),
           ),
         ),
-      ),
-      const SizedBox(height: 4),
-      const Text(
-        '구간 점수',
-        style: TextStyle(fontSize: 12, color: AppColors.hint),
-      ),
-    ],
+      ],
+    ),
   );
 }
 
@@ -776,53 +782,6 @@ class _PoseImage extends StatelessWidget {
     width: height * 48.3019 / 64,
     height: height,
   );
-}
-
-/// 구간 상세의 포즈 칸: 회색 배경 + 포즈 + 하단 라벨 칩.
-class _PoseFrame extends StatelessWidget {
-  const _PoseFrame({
-    required this.phase,
-    required this.index,
-    required this.label,
-  });
-
-  final AnalysisPhase phase;
-  final int index;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 66,
-      height: 112,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF2F3F5),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: [
-          const SizedBox(height: 2),
-          _PoseImage(phase: phase, index: index, height: 86),
-          const SizedBox(height: 4),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(5),
-            ),
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 7.5,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _Bulb extends StatelessWidget {
