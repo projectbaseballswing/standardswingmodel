@@ -412,7 +412,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('팔'));
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('관절별 구간 참고 점수'), 250);
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -800));
+      await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     },
   );
@@ -436,7 +437,10 @@ void main() {
         MaterialApp(home: JointAnalysisScreen(feedback: feedback, videoBuilder: noVideo)),
       );
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('관절별 구간 참고 점수'), 250);
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('feature-series-lead_elbow_angle')),
+        250,
+      );
       final series = tester.widget<CustomPaint>(
         find.byKey(const ValueKey('feature-series-lead_elbow_angle')),
       );
@@ -476,17 +480,6 @@ void main() {
         referencePaths[0].path.getBounds().right,
         lessThan(referencePaths[1].path.getBounds().left),
       );
-      final phases = tester.widget<CustomPaint>(
-        find.byKey(const ValueKey('feature-phase-scores-lead_elbow_angle')),
-      );
-      final phaseCanvas = PlotCanvas();
-      phases.painter!.paint(phaseCanvas, const Size(300, 130));
-      expect(phaseCanvas.dots.length, 2);
-      expect(
-        phaseCanvas.paths.every((p) => p.path.computeMetrics().isEmpty),
-        isTrue,
-        reason: '두 정상 구간 사이의 결측 구간을 선으로 잇지 않아야 한다.',
-      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -500,8 +493,10 @@ void main() {
         MaterialApp(home: JointAnalysisScreen(feedback: feedback, videoBuilder: noVideo)),
       );
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('관절별 구간 참고 점수'), 250);
-      expect(find.textContaining('구간 종합 점수와 다릅니다'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('feature-series-lead_elbow_angle')),
+        250,
+      );
       expect(find.text('스윙 단계별 점수'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.drag(find.byType(CustomScrollView), const Offset(0, 1600));
@@ -534,7 +529,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('내 스윙 영상'), findsOneWidget);
-      await tester.scrollUntilVisible(find.text('관절별 구간 참고 점수'), 250);
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('feature-series-lead_elbow_angle')),
+        250,
+      );
 
       // fixture: 30fps, 임팩트 2.0초 → 스윙 구간 끝(인덱스 59).
       sync.seekTo(const Duration(milliseconds: 2000));
