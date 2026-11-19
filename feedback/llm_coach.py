@@ -278,8 +278,11 @@ SYSTEM_INSTRUCTION = (
 FULL_SCOPE_INSTRUCTION = """\
 
 추가로 joints, phases 도 채운다(위 독자 규칙 그대로: 용어·숫자 나열 금지, 부위 이름 사용):
-- joints: 입력으로 받은 관절(key)마다 그 부위가 기준 자세와 어떻게 다른지 쉬운 말로 1~2문장.
-  각도 숫자를 나열하지 말고 "팔이 조금 더 펴져 있어요"처럼 느낌으로 풀어라.
+- joints: 입력으로 받은 관절(key)마다 1~2문장으로, 임팩트 순간(impact_diff)과
+  움직임 폭(range_of_motion_diff)이 기준과 어떻게 다른지 쉬운 말로 풀어라. 각도·숫자를
+  쓰지 말고 "임팩트 때 앞팔꿈치가 기준보다 조금 더 펴져 있어요", "스윙하는 동안 팔을
+  더 크게 움직여요"처럼 느낌으로. impact_diff / range_of_motion_diff 가 null 인 항목은
+  언급하지 않는다. 구간 이름을 섞어 "임팩트 구간에서 ~" 처럼 말해도 좋다.
 - phases: 입력으로 받은 구간(key)마다 아래 3가지를 모두 채운다. 근거는 타이밍과
   그 구간에서 가장 벌어진 관절(top_deviation). 그 관절 이름으로 어느 부위가 아쉬운지
   말하고, 입력에 없는 부위는 지어내지 않는다.
@@ -491,6 +494,14 @@ def _compare_joints(
             if cur_diff is not None and prev_diff is not None
             else None
         )
+        # 움직임 폭(range_of_motion)도 같은 방식으로 '기준과의 차이' 변화를 낸다.
+        cur_rom = _num((j.get("range_of_motion") or {}).get("diff"))
+        prev_rom = _num((p.get("range_of_motion") or {}).get("diff")) if p else None
+        rom_gap_narrowed = (
+            round(abs(prev_rom) - abs(cur_rom), 1)
+            if cur_rom is not None and prev_rom is not None
+            else None
+        )
         out.append(
             {
                 "key": key,
@@ -498,7 +509,8 @@ def _compare_joints(
                 "body_part": j.get("body_part"),
                 "current_diff": cur_diff,
                 "previous_diff": prev_diff,
-                "gap_narrowed": gap_narrowed,  # +면 프로에 가까워짐=개선, −면 멀어짐=악화
+                "gap_narrowed": gap_narrowed,  # 임팩트: +면 프로에 가까워짐=개선, −면 멀어짐=악화
+                "rom_gap_narrowed": rom_gap_narrowed,  # 움직임 폭: +면 기준에 가까워짐, −면 멀어짐
             }
         )
     return out
@@ -628,9 +640,11 @@ COMPARISON_SYSTEM_INSTRUCTION = (
 COMPARISON_FULL_INSTRUCTION = """\
 
 추가로 joints, phases 도 채운다(위 독자 규칙 그대로: 용어·숫자 나열 금지, 부위 이름 사용):
-- joints: 각 관절이 지난 스윙 대비 기준 자세에 더 가까워졌는지 쉬운 말로 1~2문장.
-  gap_narrowed 가 +면 기준에 가까워진 것(좋아짐), −면 멀어진 것(아쉬움)이다. 숫자는
-  말하지 말고 "더 안정적으로 바뀌었어요"처럼 느낌으로.
+- joints: 각 관절이 지난 스윙 대비 임팩트 순간과 움직임 폭에서 어떻게 달라졌는지 쉬운 말로
+  1~2문장. gap_narrowed(임팩트) / rom_gap_narrowed(움직임 폭)가 +면 기준에 가까워진 것
+  (좋아짐), −면 멀어진 것(아쉬움)이다. 숫자는 말하지 말고 "임팩트 때 앞팔꿈치가 지난
+  스윙보다 기준에서 조금 멀어졌어요", "스윙하는 동안 움직임 폭은 더 좋아졌어요"처럼 느낌으로.
+  값이 null 인 항목은 언급하지 않는다.
 - phases: 입력으로 받은 구간(key)마다 아래 3가지를 '지난 스윙 대비' 관점으로 모두 채운다.
   근거는 타이밍 변화·상태(status)와 그 구간에서 가장 아쉬운 관절(top_deviation).
   그 관절 이름으로 어느 부위(예: 팔/다리)가 아쉬운지 말하고, 입력에 없는 부위는

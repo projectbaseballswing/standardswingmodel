@@ -988,7 +988,6 @@ class _FeatureDetail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final series = feature.series;
-    final phaseScores = feature.phaseScores;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -1000,20 +999,12 @@ class _FeatureDetail extends StatelessWidget {
             style: const TextStyle(fontSize: 11, color: AppColors.hint),
           ),
           if (series != null && series.isNotEmpty) ...[
-            Row(
-              children: [
-                Text(
-                  '스윙 단계별 ${feature.unit == 'deg' ? '각도' : '위치'} 변화',
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const Spacer(),
-                _LegendDot(color: const Color(0xFFBDBDBD), label: '기준 스윙'),
-                const SizedBox(width: 10),
-                _LegendDot(color: AppColors.primary, label: '내 스윙'),
-              ],
+            Text(
+              '스윙 단계별 ${feature.unit == 'deg' ? '각도' : '위치'} 변화',
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 8),
             _SyncedSeriesChart(
@@ -1027,50 +1018,8 @@ class _FeatureDetail extends StatelessWidget {
             ),
             const SizedBox(height: 14),
           ],
-          // ② 스윙 단계별 점수 (구간 z_score 환산)
-          if (phaseScores != null) ...[
-            const Text(
-              '관절별 구간 참고 점수',
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              '관절 z-score 환산값이며 구간 종합 점수와 다릅니다. 빈 구간은 미측정입니다.',
-              style: TextStyle(fontSize: 11, color: AppColors.hint),
-            ),
-            SizedBox(
-              height: 130,
-              child: CustomPaint(
-                key: ValueKey('feature-phase-scores-${feature.key}'),
-                size: Size.infinite,
-                painter: _PhaseScoreChartPainter(
-                  scores: phaseScores,
-                  color: AppColors.primary,
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-          ],
-          // 임팩트 순간 / 움직임 폭 수치
-          Row(
-            children: [
-              if (feature.impact != null)
-                _MeasureBox(
-                  label: '임팩트 순간',
-                  measure: feature.impact!,
-                  unit: feature.unit,
-                ),
-              if (feature.impact != null && feature.rangeOfMotion != null)
-                const SizedBox(width: 10),
-              if (feature.rangeOfMotion != null)
-                _MeasureBox(
-                  label: '움직임 폭',
-                  measure: feature.rangeOfMotion!,
-                  unit: feature.unit,
-                ),
-            ],
-          ),
           // LLM 관절 코멘트(scope='full' 일 때만). 없으면 표시하지 않는다.
+          // 임팩트 순간·움직임 폭은 숫자 카드 대신 이 코멘트가 말로 설명한다.
           if (feature.comment.isNotEmpty) ...[
             const SizedBox(height: 10),
             Container(
@@ -1103,70 +1052,12 @@ class _FeatureDetail extends StatelessWidget {
               ),
             ),
           ],
-          if (feature.description.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              feature.description,
-              style: const TextStyle(
-                fontSize: 11.5,
-                height: 1.4,
-                color: AppColors.hint,
-              ),
-            ),
-          ],
         ],
       ),
     );
   }
 }
 
-/// 내 값 vs 기준 값 박스(임팩트 / 움직임 폭).
-class _MeasureBox extends StatelessWidget {
-  const _MeasureBox({
-    required this.label,
-    required this.measure,
-    required this.unit,
-  });
-
-  final String label;
-  final Measure measure;
-  final String unit;
-
-  @override
-  Widget build(BuildContext context) {
-    String fmt(double? v) => v == null ? '-' : '${v.toStringAsFixed(1)}$_u';
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF7F7F7),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(fontSize: 11, color: AppColors.hint),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '내 ${fmt(measure.user)}',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-            ),
-            Text(
-              '기준 ${fmt(measure.reference)}',
-              style: const TextStyle(fontSize: 12, color: AppColors.subtitle),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 각도는 °, 그 외 단위는 그대로 붙인다.
-  String get _u => unit == 'deg' ? '°' : ' $unit';
-}
 
 // ---------------------------------------------------------------------------
 // AI 코치의 피드백 카드
@@ -1267,32 +1158,6 @@ class _CoachCard extends StatelessWidget {
   }
 }
 
-class _LegendDot extends StatelessWidget {
-  const _LegendDot({required this.color, required this.label});
-
-  final Color color;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 11, color: AppColors.hint),
-        ),
-      ],
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
 // 영상과 연동되는 각도 그래프 (세로선 드래그 ↔ 영상 시점)
 // ---------------------------------------------------------------------------
@@ -1339,20 +1204,6 @@ class _SyncedSeriesChartState extends State<_SyncedSeriesChart> {
     if (_dragIndex != null) setState(() => _dragIndex = null);
   }
 
-  String _fmtTime(double seconds) {
-    final s = seconds < 0 ? 0.0 : seconds;
-    final m = s ~/ 60;
-    final rest = s - m * 60;
-    return '$m:${rest.toStringAsFixed(2).padLeft(5, '0')}';
-  }
-
-  String _fmtValue(double? v) {
-    if (v == null) return '-';
-    return widget.feature.unit == 'deg'
-        ? '${v.toStringAsFixed(1)}°'
-        : '${v.toStringAsFixed(1)} ${widget.feature.unit}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final clock = widget.clock;
@@ -1363,55 +1214,9 @@ class _SyncedSeriesChartState extends State<_SyncedSeriesChart> {
             ? null
             : _dragIndex ??
                   clock.indexAt(widget.sync.position.inMilliseconds / 1000);
-        final sample = cursor == null
-            ? null
-            : widget.series[cursor.round().clamp(0, widget.series.length - 1)];
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (cursor != null && sample != null)
-              // 현재 시점의 내 값 / 기준 값
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFDECEC),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        _fmtTime(clock!.secondsAt(cursor)),
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '내 ${_fmtValue(sample.user)}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '기준 ${_fmtValue(sample.reference)}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.subtitle,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             SizedBox(
               height: 140,
               child: LayoutBuilder(
@@ -1738,141 +1543,6 @@ class _FeatureChartPainter extends CustomPainter {
       old.cursor != cursor;
 }
 
-// ---------------------------------------------------------------------------
-// 관절별 구간 참고 점수 Painter (z-score 환산값, 결측은 선·점 생략)
-// ---------------------------------------------------------------------------
-class _PhaseScoreChartPainter extends CustomPainter {
-  _PhaseScoreChartPainter({required this.scores, required this.color});
-
-  /// 0.2는 SwingPhase 순서, 0.1은 서버 구간 순서의 참고 점수.
-  final List<JointPhaseScore> scores;
-  final Color color;
-
-  static const _grid = Color(0xFFEDEDED);
-  static const _axisText = Color(0xFF9E9E9E);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (scores.isEmpty) return;
-    const leftPad = 26.0;
-    const bottomPad = 26.0;
-    const topPad = 6.0;
-    final plot = Rect.fromLTRB(
-      leftPad,
-      topPad,
-      size.width,
-      size.height - bottomPad,
-    );
-
-    double yOf(num s) => plot.bottom - (s.clamp(0, 100) / 100) * plot.height;
-    double xOf(int i) =>
-        plot.left +
-        plot.width * (scores.length == 1 ? 0.5 : i / (scores.length - 1));
-
-    final gridPaint = Paint()
-      ..color = _grid
-      ..strokeWidth = 1;
-
-    // 가로 눈금 + y 라벨 (0 / 50 / 100)
-    for (final v in [0, 50, 100]) {
-      final y = yOf(v);
-      canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), gridPaint);
-      _text(
-        canvas,
-        '$v',
-        Offset(plot.left - 6, y),
-        align: _Align.right,
-        color: _axisText,
-      );
-    }
-
-    // x 라벨(영문 + 국문)
-    for (var i = 0; i < scores.length; i++) {
-      final phase = scores[i];
-      final x = xOf(i);
-      _text(
-        canvas,
-        phase.key,
-        Offset(x, plot.bottom + 4),
-        align: _Align.center,
-        color: _axisText,
-        size: 7.5,
-      );
-      _text(
-        canvas,
-        phase.name,
-        Offset(x, plot.bottom + 14),
-        align: _Align.center,
-        color: _axisText,
-        size: 7.5,
-      );
-    }
-
-    // 점수 선 + 점
-    final linePaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    final dotPaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-
-    Path? path;
-    for (var i = 0; i < scores.length; i++) {
-      final score = scores[i].score;
-      if (score == null) {
-        if (path != null) canvas.drawPath(path, linePaint);
-        path = null;
-        continue;
-      }
-      final point = Offset(xOf(i), yOf(score));
-      if (path == null) {
-        path = Path()..moveTo(point.dx, point.dy);
-      } else {
-        path.lineTo(point.dx, point.dy);
-      }
-      canvas.drawCircle(point, 2.6, dotPaint);
-    }
-    if (path != null) canvas.drawPath(path, linePaint);
-  }
-
-  void _text(
-    Canvas canvas,
-    String s,
-    Offset at, {
-    required _Align align,
-    required Color color,
-    double size = 10,
-  }) {
-    final tp = TextPainter(
-      text: TextSpan(
-        text: s,
-        style: TextStyle(color: color, fontSize: size),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    double dx;
-    switch (align) {
-      case _Align.center:
-        dx = at.dx - tp.width / 2;
-        break;
-      case _Align.right:
-        dx = at.dx - tp.width;
-        break;
-      case _Align.left:
-        dx = at.dx;
-        break;
-    }
-    final dy = align == _Align.right ? at.dy - tp.height / 2 : at.dy;
-    tp.paint(canvas, Offset(dx, dy));
-  }
-
-  @override
-  bool shouldRepaint(_PhaseScoreChartPainter old) =>
-      old.scores != scores || old.color != color;
-}
 
 enum _Align { left, center, right }
 
