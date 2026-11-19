@@ -14,6 +14,7 @@ import 'package:swing_analysis/screens/overall_feedback_screen.dart';
 import 'package:swing_analysis/screens/phase_feedback_screen.dart';
 import 'package:swing_analysis/theme/app_theme.dart';
 import 'package:swing_analysis/widgets/feedback_metrics.dart';
+import 'package:swing_analysis/widgets/swing_video.dart';
 
 Map<String, dynamic> v2() =>
     jsonDecode(File('test/fixtures/analysis_v2.json').readAsStringSync())
@@ -78,6 +79,9 @@ FeedbackRepository repository(
   addTearDown(repo.dispose);
   return repo;
 }
+
+/// 관절 화면 테스트에서 네트워크 영상 대신 빈 상자를 넣는다.
+Widget noVideo(SwingVideoSync _) => const SizedBox.shrink();
 
 void smallView(WidgetTester tester) {
   tester.view.devicePixelRatio = 1;
@@ -403,7 +407,7 @@ void main() {
       expect(tester.takeException(), isNull);
       final feedback = await repo.fetchFeedback('legacy');
       await tester.pumpWidget(
-        MaterialApp(home: JointAnalysisScreen(feedback: feedback)),
+        MaterialApp(home: JointAnalysisScreen(feedback: feedback, videoBuilder: noVideo)),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('팔'));
@@ -429,7 +433,7 @@ void main() {
       joint['phases'][3]['z_score'] = null;
       final feedback = await repository(body).fetchFeedback('partial');
       await tester.pumpWidget(
-        MaterialApp(home: JointAnalysisScreen(feedback: feedback)),
+        MaterialApp(home: JointAnalysisScreen(feedback: feedback, videoBuilder: noVideo)),
       );
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(find.text('관절별 구간 참고 점수'), 250);
@@ -493,20 +497,65 @@ void main() {
       smallView(tester);
       final feedback = await repository(v2()).fetchFeedback('model-v2-test');
       await tester.pumpWidget(
-        MaterialApp(home: JointAnalysisScreen(feedback: feedback)),
+        MaterialApp(home: JointAnalysisScreen(feedback: feedback, videoBuilder: noVideo)),
       );
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(find.text('관절별 구간 참고 점수'), 250);
       expect(find.textContaining('구간 종합 점수와 다릅니다'), findsOneWidget);
       expect(find.text('스윙 단계별 점수'), findsNothing);
       expect(tester.takeException(), isNull);
-      await tester.drag(find.byType(ListView), const Offset(0, 1600));
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, 1600));
       await tester.pumpAndSettle();
       await tester.tap(find.text('오른쪽 팔'));
       await tester.pumpAndSettle();
       expect(find.text('51.2'), findsWidgets);
       expect(find.textContaining('참고용'), findsWidgets);
       expect(find.textContaining('다음 스윙을 촬영하면 이번 결과와 비교'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'angle chart cursor follows the video and tapping it seeks the video',
+    (tester) async {
+      smallView(tester);
+      final feedback = await repository(v2()).fetchFeedback('model-v2-test');
+      late SwingVideoSync sync;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: JointAnalysisScreen(
+            feedback: feedback,
+            videoBuilder: (s) {
+              sync = s;
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('내 스윙 영상'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('관절별 구간 참고 점수'), 250);
+
+      // fixture: 30fps, 임팩트 2.0초 → 스윙 구간 끝(인덱스 59).
+      sync.seekTo(const Duration(milliseconds: 2000));
+      await tester.pump();
+      final dynamic painter = tester
+          .widget<CustomPaint>(
+            find.byKey(const ValueKey('feature-series-lead_elbow_angle')),
+          )
+          .painter;
+      expect(painter.cursor as double, closeTo(59, 0.01));
+
+      // 그래프 오른쪽 끝을 누르면 팔로우 종료(2.3초)로 영상이 이동한다.
+      final scrub = find.byKey(
+        const ValueKey('feature-series-scrub-lead_elbow_angle'),
+      );
+      final width = tester.getSize(scrub).width;
+      tester.widget<GestureDetector>(scrub).onTapDown!(
+        TapDownDetails(localPosition: Offset(width, 70)),
+      );
+      await tester.pump();
+      expect(sync.position.inMilliseconds, closeTo(2300, 5));
       expect(tester.takeException(), isNull);
     },
   );

@@ -143,7 +143,10 @@ void main() {
           GoRoute(
             path: '/joint-analysis',
             builder: (_, state) =>
-                JointAnalysisScreen(feedback: state.extra as OverallFeedback),
+                JointAnalysisScreen(
+                  feedback: state.extra as OverallFeedback,
+                  videoBuilder: (_) => const SizedBox.shrink(),
+                ),
           ),
         ],
       );
