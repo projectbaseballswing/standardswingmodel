@@ -23,10 +23,9 @@ from api.schemas import (
     SwingListItem,
     SwingListResponse,
 )
-from api.settings import settings
 from api.auth import user_path_access
 from api.video_deletion import video_status
-from feedback.llm_coach import generate_comparison_coaching
+from feedback.coaching_review import PRIVATE_KEY, context_for, public_coaching
 
 logger = logging.getLogger(__name__)
 
@@ -196,49 +195,26 @@ def list_user_swings(
     )
 
 
-def _comparison_coaching(db: Session, current: Swing, previous: Swing) -> dict | None:
-    """이전 대비 LLM 코칭. 성공분은 current.result['comparison']에 캐시해 재호출을 막는다.
+def _comparison_coaching(db: Session, current: Swing, previous: Swing) -> tuple[dict | None, dict]:
+    """GET is read-only: only an explicitly reviewed exact comparison is shown.
 
-    키가 없거나 생성 실패하면 None → 프론트는 규칙 기반으로 폴백한다.
+    Legacy/unreviewed cache text stays stored but is never returned. Candidate
+    generation and trusted review are separate operations, not read side effects.
     """
-    if not settings.openai_api_key:
-        return None
-    if not isinstance(current.result, dict) or not isinstance(previous.result, dict):
-        return None
-
-    cache = current.result.get("comparison")
-    if (
-        isinstance(cache, dict)
-        and cache.get("previous_analysis_id") == previous.analysis_id
-        and isinstance(cache.get("coaching"), dict)
-    ):
-        return cache["coaching"]  # 같은 직전 분석에 대해 이미 생성됨
-
-    coaching = generate_comparison_coaching(
-        current.result,
-        previous.result,
-        api_key=settings.openai_api_key,
-        model=settings.openai_model,
-        scope=settings.coaching_scope,
+    current_result = current.result if isinstance(current.result, dict) else {}
+    previous_result = previous.result if isinstance(previous.result, dict) else {}
+    cache = current_result.get("comparison")
+    cache = cache if isinstance(cache, dict) else {}
+    envelope = cache.get(PRIVATE_KEY)
+    if cache.get("previous_analysis_id") != previous.analysis_id:
+        envelope = None
+    return public_coaching(
+        current_result, envelope,
+        context=context_for(current.analysis_id, current.user_id,
+                            previous_analysis_id=previous.analysis_id, previous=previous_result),
+        previous=previous_result,
+        legacy_present=isinstance(cache.get("coaching"), dict),
     )
-    if coaching is not None:
-        # 분석 워커가 done 직후 관절·구간 코칭을 병합 저장할 수 있어, 낡은 current.result 를
-        # 통째로 되쓰면 그 변경을 지운다. 행을 잠그고(with_for_update) 최신 값으로 다시 읽어
-        # comparison 키만 병합한다. refresh 는 식별자 맵의 낡은 상태 대신 DB 값을 다시 채운다.
-        try:
-            db.refresh(current, with_for_update=True)
-            if isinstance(current.result, dict):
-                merged = dict(current.result)  # JSON 컬럼이라 전체 dict 재할당으로 변경 감지.
-                merged["comparison"] = {
-                    "previous_analysis_id": previous.analysis_id,
-                    "coaching": coaching,
-                }
-                current.result = merged
-                db.commit()
-        except Exception:
-            logger.exception("비교 코칭 캐시 저장 실패 — 응답은 그대로 반환한다.")
-            db.rollback()
-    return coaching
 
 
 @router.get(
@@ -332,6 +308,7 @@ def compare_with_previous(
             )
         )
 
+    coaching, coaching_review = _comparison_coaching(db, current, previous)
     return ComparisonResponse(
         has_previous=True,
         previous_analysis_id=previous.analysis_id,
@@ -341,5 +318,6 @@ def compare_with_previous(
         parts=parts,
         phases=phases,
         joints=joints,
-        coaching=_comparison_coaching(db, current, previous),
+        coaching=coaching,
+        coaching_review=coaching_review,
     )

@@ -25,6 +25,9 @@ from api.database import Swing
 from feedback.compare import MODEL_VERSION, SwingComparison
 from feedback.compare_v2 import SwingComparisonV2
 from feedback.llm_coach import generate_coaching, generate_extended_coaching
+from feedback.coaching_review import (
+    PRIVATE_KEY, capture_review, capture_extended_review, context_for, report_fingerprint,
+)
 from feedback.pipeline import PipelineError, SwingPipeline
 from feedback.reference import ReferenceStore
 from feedback.reference_model import load_reference_model
@@ -259,56 +262,51 @@ class JobManager:
         return job
 
     def _attach_overall_coaching(self, job: Job) -> None:
-        """리포트에 '종합(전체 요약+부위)' LLM 코칭을 붙인다. 키가 없거나 실패하면 조용히 넘어간다.
-
-        관절·구간 서술은 여기서 만들지 않는다(그건 done 이후 _attach_extended_coaching 이 채운다).
-        실패해도 분석 자체는 성공으로 둔다. 프론트는 ``coaching`` 이 없으면 규칙 기반 문장을 쓴다.
-        """
-        if not self.openai_api_key or not isinstance(job.result, dict):
+        """Capture an optional GPT candidate privately; never auto-publish it."""
+        if not isinstance(job.result, dict):
             return
-        coaching = generate_coaching(
-            job.result,
-            api_key=self.openai_api_key,
-            model=self.openai_model,
-            scope="overall",
+        sink = {}
+        failure_reason = "not_configured" if not self.openai_api_key else "generation_failed"
+        if self.openai_api_key:
+            try:
+                generate_coaching(
+                    job.result, api_key=self.openai_api_key, model=self.openai_model,
+                    scope="overall", review_sink=sink,
+                )
+            except Exception as error:
+                # A coaching failure must not change score/analysis success.
+                logger.warning("coaching capture failed (%s)", type(error).__name__)
+        job.result["coaching"] = None
+        job.result[PRIVATE_KEY] = capture_review(
+            job.result, sink, context=context_for(job.analysis_id, job.user_id),
+            scope="overall", failure_reason=failure_reason,
         )
-        if coaching is not None:
-            job.result["coaching"] = coaching
 
     def _attach_extended_coaching(self, job: Job) -> None:
-        """종합을 먼저 보여준 뒤, 관절·구간(joints/phases) 서술을 뒤이어 채운다.
-
-        종합 코칭이 없으면(키 없음·실패) 아무것도 하지 않는다. 생성에 실패하면
-        ``extended_status='failed'`` 로만 표시한다(프론트는 규칙 기반으로 폴백).
-        """
-        coaching = job.result.get("coaching") if isinstance(job.result, dict) else None
-        if not isinstance(coaching, dict):
+        """Merge new text into the private candidate and invalidate prior approval."""
+        if not isinstance(job.result, dict):
             return
+        old = job.result.get(PRIVATE_KEY) or {}
+        candidate = old.get("candidate")
+        if not isinstance(candidate, dict) or not self.openai_api_key:
+            return
+        sink = {}
         try:
-            extended = generate_extended_coaching(
-                job.result,
-                api_key=self.openai_api_key,
-                model=self.openai_model,
+            generate_extended_coaching(
+                job.result, api_key=self.openai_api_key, model=self.openai_model,
+                review_sink=sink,
             )
-        except Exception:  # 확장 코칭 실패가 완료된 분석을 되돌리면 안 된다.
-            logger.exception("extended coaching failed for %s", job.analysis_id)
-            extended = None
-        if extended is not None:
-            coaching["joints"] = extended.get("joints", [])
-            coaching["phases"] = extended.get("phases", [])
-            coaching["extended_status"] = "done"
-        else:
-            coaching["extended_status"] = "failed"
+        except Exception as error:
+            logger.warning("extended coaching capture failed (%s)", type(error).__name__)
+        job.result[PRIVATE_KEY] = capture_extended_review(
+            job.result, old, sink, context=context_for(job.analysis_id, job.user_id),
+        )
+        job.result["coaching"] = None
 
     def _merge_save_coaching(self, job: Job) -> None:
-        """코칭만 최신 행에 병합 저장한다.
-
-        done 스냅샷 이후 다른 요청(이전 대비 비교, /comparison)이 result['comparison'] 등을
-        덧붙였을 수 있다. 전체 덮어쓰기(_save)는 그 변경을 지우므로, 행을 잠그고 다시 읽어
-        result['coaching'] 키만 교체한다. (두 writer 가 각자 자기 키만 잠금 병합하면 충돌 없음.)
-        """
-        coaching = job.result.get("coaching") if isinstance(job.result, dict) else None
-        if coaching is None:
+        """Merge only private coaching fields, preserving concurrent 3-D/comparison writes."""
+        envelope = job.result.get(PRIVATE_KEY) if isinstance(job.result, dict) else None
+        if not isinstance(envelope, dict):
             return
         with database.SessionLocal.begin() as db:
             row = db.execute(
@@ -316,8 +314,12 @@ class JobManager:
             ).scalar_one_or_none()
             if row is None or not isinstance(row.result, dict):
                 return
+            fingerprint = report_fingerprint(row.result)
+            if fingerprint is None or fingerprint != envelope.get("report_sha256"):
+                return  # A newer analysis revision must be reviewed independently.
             merged = dict(row.result)
-            merged["coaching"] = coaching
+            merged["coaching"] = None
+            merged[PRIVATE_KEY] = envelope
             row.result = merged
 
     def _run_video(self, job: Job, video_path: str, is_left: bool) -> None:
@@ -368,11 +370,11 @@ class JobManager:
             run_extended = (
                 self.coaching_scope == "full"
                 and isinstance(job.result, dict)
-                and isinstance(job.result.get("coaching"), dict)
+                and isinstance((job.result.get(PRIVATE_KEY) or {}).get("candidate"), dict)
             )
             if run_extended:
-                # 관절·구간은 아직 생성 중임을 앱에 알린다(앱은 pending 이면 '작성 중' 표시 후 재조회).
-                job.result["coaching"]["extended_status"] = "pending"
+                # Extended text stays private until its complete revision is reviewed.
+                job.result[PRIVATE_KEY]["extended_status"] = "pending"
             # 목록 화면 썸네일(영상 첫 프레임)은 done 스냅샷에 포함시킨다. done 이후에 만들면
             # 앱이 곧장 호출하는 /comparison 저장과 경쟁해 썸네일 경로가 사라질 수 있다.
             self._make_thumbnail(job, video_path)

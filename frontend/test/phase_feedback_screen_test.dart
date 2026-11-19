@@ -90,8 +90,8 @@ void main() {
       await selectPhase(tester, 'swing');
       expect(find.byKey(const ValueKey('phase-detail-swing')), findsOneWidget);
       expect(find.text('80'), findsNothing);
-      expect(find.text('앞팔 팔꿈치 각도'), findsOneWidget);
-      expect(find.text('기준보다 큼'), findsWidgets);
+      expect(find.text('앞팔 팔꿈치 각도'), findsNothing);
+      expect(find.textContaining('구간별 교정 설명에서 제외'), findsOneWidget);
       expect(find.textContaining('이전 점수'), findsNothing);
       expect(find.textContaining('이전 스윙 대비'), findsNothing);
       expect(find.text('점수 변화'), findsNothing);
@@ -132,7 +132,10 @@ void main() {
           expect(find.text('앞발 들기를 찾지 못했습니다.'), findsOneWidget);
         }
         await selectPhase(tester, 'swing');
-        expect(find.byKey(const ValueKey('phase-detail-swing')), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('phase-detail-swing')),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
       },
     );
@@ -187,7 +190,10 @@ void main() {
     expect(find.byKey(const ValueKey('phase-detail-load')), findsOneWidget);
     expect(find.text('로딩(테이크백·스트라이드) 구간 분석'), findsOneWidget);
     await selectPhase(tester, 'follow_through');
-    expect(find.byKey(const ValueKey('phase-detail-follow_through')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('phase-detail-follow_through')),
+      findsOneWidget,
+    );
     expect(find.byType(SwingEventsCard), findsNothing);
     expect(find.byType(SpeedFeedbackCard), findsNothing);
     expect(find.text('착지 후 준비'), findsNothing);

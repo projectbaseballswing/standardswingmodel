@@ -196,13 +196,67 @@ class _FeedbackBody extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 _ScoreCard(feedback: feedback),
+                if (feedback.scoreExplanation.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _Card(
+                    child: Material(
+                      color: Colors.transparent,
+                      child: ExpansionTile(
+                        key: const Key('score-evidence'),
+                        title: const Text('점수가 산출된 이유'),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (feedback.postureScore != null ||
+                                    feedback.speedScore != null) ...[
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: _SubScore(
+                                          label: '자세',
+                                          weight: feedback.confirmedComposite
+                                              ? '70%'
+                                              : '',
+                                          score: feedback.postureScore,
+                                          note: feedback.postureCapped
+                                              ? '상한 40점 적용 · 몸통 회전 부족'
+                                              : '프로 선수 자세와 얼마나 비슷한지',
+                                          capped: feedback.postureCapped,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: _SubScore(
+                                          label: '속도',
+                                          weight: feedback.confirmedComposite
+                                              ? '30%'
+                                              : '',
+                                          score: feedback.speedScore,
+                                          note: '임팩트 주변 최대 손 속도 · 프로 중앙값 80점',
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                Text(feedback.scoreExplanation),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                _CoachCard(feedback: feedback),
                 const SizedBox(height: 12),
                 ..._buildCategorySections(feedback),
-                const SizedBox(height: 12),
-                _CoachCard(
-                  comment: feedback.coachComment,
-                  detail: feedback.coaching?.coachFeedback,
-                ),
                 if (feedback.speedMetrics.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   SpeedFeedbackCard(metrics: feedback.speedMetrics),
@@ -484,7 +538,7 @@ class _ScoreCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
-              feedback.summary,
+              '${feedback.summarySource}\n${feedback.summary}',
               style: const TextStyle(
                 fontSize: 13,
                 height: 15 / 13,
@@ -492,34 +546,6 @@ class _ScoreCard extends StatelessWidget {
               ),
             ),
           ),
-          if (feedback.postureScore != null || feedback.speedScore != null) ...[
-            const SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: _SubScore(
-                    label: '자세',
-                    weight: '70%',
-                    score: feedback.postureScore,
-                    note: feedback.postureCapped
-                        ? '상한 40점 적용 · 몸통 회전 부족'
-                        : '프로 선수 자세와 얼마나 비슷한지',
-                    capped: feedback.postureCapped,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _SubScore(
-                    label: '속도',
-                    weight: '30%',
-                    score: feedback.speedScore,
-                    note: '임팩트 때 손 속도. 프로 중간이 80점',
-                  ),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     );
@@ -554,7 +580,7 @@ class _SubScore extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '$label 점수 · 반영 $weight',
+            weight.isEmpty ? '$label 점수' : '$label 점수 · 반영 $weight',
             style: const TextStyle(fontSize: 11.5, color: AppColors.hint),
           ),
           const SizedBox(height: 4),
@@ -816,60 +842,99 @@ class _ItemRow extends StatelessWidget {
 // AI 코치의 한마디
 // ---------------------------------------------------------------------------
 class _CoachCard extends StatelessWidget {
-  const _CoachCard({required this.comment, this.detail});
-
-  /// 한 문장 코칭(헤드라인/폴백).
-  final String comment;
-
-  /// 4단 상세(문제/원인/교정/추천훈련). 없으면 한 문장만 보여준다.
-  final CoachFeedback? detail;
+  const _CoachCard({required this.feedback});
+  final OverallFeedback feedback;
 
   static const _accent = Color(0xFF8A6BEA);
 
   @override
   Widget build(BuildContext context) {
-    final cf = detail;
+    final cf = feedback.coaching?.coachFeedback;
+    final first = feedback.priorities.firstOrNull;
+    final strength = feedback.strengths.firstOrNull;
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
-              Icon(Icons.auto_awesome, size: 16, color: _accent),
-              SizedBox(width: 6),
-              Text(
-                'AI 코치의 한마디',
-                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+            children: [
+              const Icon(Icons.info_outline, size: 16, color: _accent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  feedback.coachSource,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          // 헤드라인 한 줄 (항상 표시)
           Text(
-            comment,
-            style: const TextStyle(
-              fontSize: 12.5,
-              height: 1.5,
-              color: AppColors.subtitle,
-            ),
+            feedback.coachingReview.notice,
+            key: const Key('coaching-review-notice'),
+            style: const TextStyle(fontSize: 11.5, color: AppColors.hint),
           ),
-          // 4단 상세가 있으면 아래에 펼친다.
+          const SizedBox(height: 14),
+          if (strength != null)
+            _CoachStep(
+              icon: Icons.check_circle_outline,
+              label: '잘한 점 · 기준과 가까운 구간',
+              text: '${strength.observation}\n다른 구간까지 모두 안정적이라는 뜻은 아니에요.',
+            ),
+          if (feedback.coaching != null)
+            _CoachStep(
+              icon: Icons.flag_outlined,
+              label: '가장 먼저 확인할 동작',
+              text: feedback.coachComment,
+            )
+          else if (first != null) ...[
+            _CoachStep(
+              icon: Icons.flag_outlined,
+              label: '가장 먼저 확인할 동작',
+              text: first.observation,
+            ),
+            _CoachStep(
+              icon: Icons.search,
+              label: '원본에서 먼저 확인',
+              text:
+                  '${first.phaseName} 구간 전체에서 ${first.name} 측정이 실제 자세와 맞는지 확인하세요. '
+                  '구간 평균은 한 순간에 맞춰야 할 목표 자세가 아니에요.',
+            ),
+            const _CoachStep(
+              icon: Icons.build_outlined,
+              label: '작게 시도해 볼 조절',
+              text:
+                  '차이가 실제로 보일 때만 기준 쪽으로 조금 조절해 보세요. '
+                  '원인이나 필요한 조절량은 현재 분석만으로 확정하기 어려워요.',
+            ),
+            const _CoachStep(
+              icon: Icons.sports_baseball_outlined,
+              label: '확인 연습 · 일반적인 제안',
+              text:
+                  '해당 구간을 천천히 재현하고 같은 구도로 다시 촬영해 비교해 보세요. '
+                  '이 연습의 교정 효과를 분석으로 검증한 것은 아니에요.',
+              isLast: true,
+            ),
+          ] else
+            Text(feedback.coachComment),
           if (cf != null) ...[
-            const SizedBox(height: 14),
-            _CoachStep(icon: Icons.search, label: '무엇이 아쉬운지', text: cf.problem),
+            _CoachStep(icon: Icons.search, label: '기준과의 차이', text: cf.problem),
             _CoachStep(
               icon: Icons.help_outline,
-              label: '왜 그럴까요',
+              label: '원인과 확인 범위',
               text: cf.cause,
             ),
             _CoachStep(
               icon: Icons.build_outlined,
-              label: '이렇게 고쳐봐요',
+              label: '확인 후 시도할 작은 조절',
               text: cf.fix,
             ),
             _CoachStep(
               icon: Icons.sports_baseball_outlined,
-              label: '추천 훈련',
+              label: '추천 연습 · 효과 검증과 구분',
               text: cf.drill,
               isLast: true,
             ),

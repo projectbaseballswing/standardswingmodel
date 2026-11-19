@@ -135,47 +135,29 @@ def test_comparison_missing_part_in_previous_gives_null(mock_client):
     assert torso["delta"] is None
 
 
-def test_comparison_endpoint_returns_and_caches_coaching(mock_client, monkeypatch):
-    import api.swings as swings
-
-    calls = {"n": 0}
-    fake = {
-        "overall_summary": "지난 스윙보다 전체적으로 좋아졌어요.",
-        "overall_coach": "뒷다리 무릎에 집중해 보세요.",
-        "parts": [
-            {"key": "lead_arm", "summary": "앞팔이 개선됐어요.",
-             "keep_points": ["팔꿈치 각도 유지"], "improve_points": []},
-        ],
-    }
-
-    def fake_gen(current, previous, **kwargs):
-        calls["n"] += 1
-        return fake
-
-    # 네트워크 대신 가짜 생성기 + 키가 있는 것처럼 (Settings는 frozen이라 통째 교체).
-    from dataclasses import replace
-
-    monkeypatch.setattr(swings, "settings", replace(swings.settings, openai_api_key="test-key"))
-    monkeypatch.setattr(swings, "generate_comparison_coaching", fake_gen)
-
+def test_comparison_get_does_not_generate_or_expose_legacy_cache(mock_client, monkeypatch):
+    """GET remains free of paid side effects; unreviewed old cache is preserved."""
+    import feedback.llm_coach as llm
+    def must_not_generate(*args, **kwargs):
+        raise AssertionError("comparison GET must not call GPT")
+    monkeypatch.setattr(llm, "generate_comparison_coaching", must_not_generate)
     owner = f"cmp-{uuid.uuid4().hex}"
-    prev = _swing(owner, datetime(2026, 9, 20, 9, tzinfo=timezone.utc),
-                  result=_result(70.0, [_part("lead_arm", "왼쪽 팔", 60.0)]))
-    current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc),
-                     result=_result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)]))
-    _seed([prev, current], user_ids=[owner])
-    authenticate(mock_client, owner)
+    previous = _swing(owner, datetime(2026, 9, 20, 9, tzinfo=timezone.utc),
+                      result=_result(70.0, [_part("lead_arm", "왼쪽 팔", 60.0)]))
+    raw = {"overall_summary": "UNREVIEWED PRIVATE TEXT", "overall_coach": "private", "parts": []}
+    result = _result(77.3, [_part("lead_arm", "왼쪽 팔", 63.8)])
+    result["comparison"] = {"previous_analysis_id": previous.analysis_id, "coaching": raw}
+    current = _swing(owner, datetime(2026, 10, 10, 9, tzinfo=timezone.utc), result=result)
+    _seed([previous, current], user_ids=[owner]); authenticate(mock_client, owner)
     url = f"/api/users/{owner}/analyses/{current.analysis_id}/comparison"
-
-    body1 = mock_client.get(url).json()
-    assert body1["coaching"]["overall_summary"] == fake["overall_summary"]
-    assert body1["coaching"]["parts"][0]["key"] == "lead_arm"
-    assert calls["n"] == 1
-
-    # 두 번째 호출 → 캐시 사용, 생성 함수 재호출 안 함.
-    body2 = mock_client.get(url).json()
-    assert body2["coaching"]["overall_coach"] == fake["overall_coach"]
-    assert calls["n"] == 1
+    for _ in range(2):
+        response = mock_client.get(url)
+        assert response.status_code == 200
+        assert response.json()["coaching"] is None
+        assert response.json()["coaching_review"]["status"] == "review_required"
+        assert "UNREVIEWED PRIVATE TEXT" not in response.text
+    with SessionLocal() as db:
+        assert db.get(Swing, current.analysis_id).result["comparison"]["coaching"] == raw
 
 
 def test_comparison_includes_phase_and_joint_deltas(mock_client):

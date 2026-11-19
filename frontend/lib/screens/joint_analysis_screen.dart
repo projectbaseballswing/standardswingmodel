@@ -78,13 +78,17 @@ class _JointAnalysisScreenState extends State<JointAnalysisScreen> {
     if (id.isEmpty) return;
     _refreshing = true;
     try {
-      for (var attempt = 0;
-          attempt < 20 && mounted && _coachingPending;
-          attempt++) {
+      for (
+        var attempt = 0;
+        attempt < 20 && mounted && _coachingPending;
+        attempt++
+      ) {
         await Future<void>.delayed(const Duration(seconds: 2));
         if (!mounted) break;
         try {
-          final fresh = await _repo.fetchFeedback(id); // firstTime:false → 단발 조회
+          final fresh = await _repo.fetchFeedback(
+            id,
+          ); // firstTime:false → 단발 조회
           if (!mounted) break;
           setState(() {
             _feedback = fresh;
@@ -136,7 +140,7 @@ class _JointAnalysisScreenState extends State<JointAnalysisScreen> {
                       if (_coachingPending) ...[
                         const SizedBox(height: 12),
                         const CoachingPendingNote(
-                          text: 'AI 코치가 관절별 코멘트를 작성하고 있어요…',
+                          text: '서버에서 관절별 코멘트를 준비하고 있어요…',
                         ),
                       ],
                       const SizedBox(height: 14),
@@ -424,30 +428,40 @@ class _PartRow extends StatelessWidget {
             ),
             const SizedBox(width: 7),
             Expanded(
-              child: Text(
-                part.label,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  color: selected ? style.color : Colors.black87,
-                ),
-              ),
-            ),
-            Text(
-              feedbackNumber(part.currentScore),
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w800,
-                color: style.color,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              style.badge,
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: style.color,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          part.label,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: selected ? style.color : Colors.black87,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        feedbackNumber(part.currentScore),
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: style.color,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    style.badge,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: style.color,
+                    ),
+                  ),
+                ],
               ),
             ),
             const Icon(Icons.chevron_right, size: 16, color: AppColors.hint),
@@ -846,7 +860,7 @@ class _FeatureListCardState extends State<_FeatureListCard> {
     if (_partKey != widget.part.key) {
       _partKey = widget.part.key;
       // 기본으로 기준과 차이가 큰 첫 항목을 펼친다. 없으면 접어 둔다.
-      final idx = features.indexWhere((f) => f.level != 'good');
+      final idx = features.indexWhere((f) => f.evidence?.isIssue == true);
       _expanded = idx >= 0 ? idx : null;
     }
 
@@ -1020,8 +1034,12 @@ class _FeatureDetail extends StatelessWidget {
           ],
           // LLM 관절 코멘트(scope='full' 일 때만). 없으면 표시하지 않는다.
           // 임팩트 순간·움직임 폭은 숫자 카드 대신 이 코멘트가 말로 설명한다.
-          if (feature.comment.isNotEmpty) ...[
+          if (feature.displayedComment.isNotEmpty) ...[
             const SizedBox(height: 10),
+            Text(
+              feature.commentSource,
+              style: const TextStyle(fontSize: 11, color: AppColors.hint),
+            ),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
@@ -1040,7 +1058,7 @@ class _FeatureDetail extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      feature.comment,
+                      feature.displayedComment,
                       style: const TextStyle(
                         fontSize: 12.5,
                         height: 1.5,
@@ -1057,7 +1075,6 @@ class _FeatureDetail extends StatelessWidget {
     );
   }
 }
-
 
 // ---------------------------------------------------------------------------
 // AI 코치의 피드백 카드
@@ -1079,7 +1096,7 @@ class _CoachCard extends StatelessWidget {
               Icon(Icons.auto_awesome, size: 16, color: Color(0xFF8A6BEA)),
               SizedBox(width: 6),
               Text(
-                'AI 코치의 피드백',
+                '분석 근거 안내 · 규칙 기반',
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
               ),
             ],
@@ -1108,12 +1125,14 @@ class _CoachCard extends StatelessWidget {
                   children: [
                     Icon(Icons.lightbulb_outline, size: 15, color: style.color),
                     const SizedBox(width: 6),
-                    Text(
-                      part.pointsTitle,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: style.color,
+                    Expanded(
+                      child: Text(
+                        '${part.pointsTitle}\n${part.pointsSource}',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: style.color,
+                        ),
                       ),
                     ),
                   ],
@@ -1185,8 +1204,8 @@ class _SyncedSeriesChartState extends State<_SyncedSeriesChart> {
   double? _dragIndex;
 
   double _indexFromDx(double dx, double width) {
-    final plotW = width - _FeatureChartPainter.leftPad -
-        _FeatureChartPainter.rightPad;
+    final plotW =
+        width - _FeatureChartPainter.leftPad - _FeatureChartPainter.rightPad;
     final f = ((dx - _FeatureChartPainter.leftPad) / plotW).clamp(0.0, 1.0);
     return f * (widget.series.length - 1);
   }
@@ -1233,9 +1252,7 @@ class _SyncedSeriesChartState extends State<_SyncedSeriesChart> {
                   onHorizontalDragUpdate: clock == null
                       ? null
                       : (d) => _moveTo(d.localPosition.dx, box.maxWidth),
-                  onHorizontalDragEnd: clock == null
-                      ? null
-                      : (_) => _release(),
+                  onHorizontalDragEnd: clock == null ? null : (_) => _release(),
                   onHorizontalDragCancel: clock == null ? null : _release,
                   child: CustomPaint(
                     key: ValueKey('feature-series-${widget.feature.key}'),
@@ -1542,7 +1559,6 @@ class _FeatureChartPainter extends CustomPainter {
       old.userColor != userColor ||
       old.cursor != cursor;
 }
-
 
 enum _Align { left, center, right }
 

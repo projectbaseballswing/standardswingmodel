@@ -18,7 +18,11 @@ import '../widgets/swing_video.dart';
 /// 새 업로드와 과거 기록 모두 서버 구간 점수를 사용한다. 이전 비교는 만들지 않는다.
 /// 포즈 그림은 사용자 영상이 아니라 피그마의 구간별 대표 일러스트다.
 class PhaseFeedbackScreen extends StatefulWidget {
-  const PhaseFeedbackScreen({super.key, required this.feedback, this.videoBuilder});
+  const PhaseFeedbackScreen({
+    super.key,
+    required this.feedback,
+    this.videoBuilder,
+  });
 
   /// 종합 피드백. 이 값을 구간별로 펼쳐서 보여준다.
   final OverallFeedback feedback;
@@ -72,17 +76,23 @@ class _PhaseFeedbackScreenState extends State<PhaseFeedbackScreen> {
     if (id.isEmpty) return;
     _refreshing = true;
     try {
-    for (var attempt = 0; attempt < 20 && mounted && _coachingPending; attempt++) {
-      await Future<void>.delayed(const Duration(seconds: 2));
-      if (!mounted) break;
-      try {
-        final fresh = await _repo.fetchFeedback(id); // firstTime:false → 단발 조회
+      for (
+        var attempt = 0;
+        attempt < 20 && mounted && _coachingPending;
+        attempt++
+      ) {
+        await Future<void>.delayed(const Duration(seconds: 2));
         if (!mounted) break;
-        setState(() => _feedback = fresh);
-      } catch (_) {
-        // 일시적 실패는 무시하고 다음 시도. 구간 점수 표시에는 영향 없다.
+        try {
+          final fresh = await _repo.fetchFeedback(
+            id,
+          ); // firstTime:false → 단발 조회
+          if (!mounted) break;
+          setState(() => _feedback = fresh);
+        } catch (_) {
+          // 일시적 실패는 무시하고 다음 시도. 구간 점수 표시에는 영향 없다.
+        }
       }
-    }
     } finally {
       _refreshing = false;
     }
@@ -119,9 +129,7 @@ class _PhaseFeedbackScreenState extends State<PhaseFeedbackScreen> {
                 ),
                 if (_coachingPending) ...[
                   const SizedBox(height: 12),
-                  const CoachingPendingNote(
-                    text: 'AI 코치가 구간별 코멘트를 작성하고 있어요…',
-                  ),
+                  const CoachingPendingNote(text: '서버에서 구간별 코멘트를 준비하고 있어요…'),
                 ],
                 const SizedBox(height: 14),
                 _OverallScoreCard(feedback: _feedback),
@@ -526,7 +534,9 @@ class _PhaseCard extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               // LLM 구간 카드 한 줄이 있으면 그걸, 없으면 측정 상태 문구로 폴백.
-              phase.coachCardLine.isNotEmpty
+              phase.available &&
+                      phase.reliability != 'low' &&
+                      phase.coachCardLine.isNotEmpty
                   ? phase.coachCardLine
                   : _statusText(phase),
               style: const TextStyle(
@@ -626,21 +636,25 @@ class _PhaseVideoCard extends StatelessWidget {
 ///  - 없으면 기존 측정 상태 안내문으로 폴백한다.
 Widget _buildTipBox(AnalysisPhase phase) {
   final hasCoach =
-      phase.available && phase.reliability != 'low' && phase.coachTip.isNotEmpty;
+      phase.available &&
+      phase.reliability != 'low' &&
+      phase.coachTip.isNotEmpty;
   if (hasCoach) {
     return _TipBox(
-      title: '코치 팁',
+      title: 'GPT 코칭 · 검토 완료',
       comment: phase.coachComment,
       tip: phase.coachTip,
     );
   }
   return _TipBox(
-    title: '확인 안내',
+    title: '분석 근거 안내 · 규칙 기반',
     tip: !phase.available
         ? '분석되지 않은 구간의 자세는 판정하지 않습니다.'
         : phase.reliability == 'low'
         ? '검출 신뢰도가 낮습니다. 측정값은 참고용으로 확인하세요.'
-        : '구간 점수와 소요 시간은 서로 다른 지표입니다. 템포 판정이 보류된 구간은 수치만 참고하세요.',
+        : phase.ruleTip.isNotEmpty
+        ? phase.ruleTip
+        : '교정을 제안할 구간별 측정 근거가 충분하지 않아요. 원본과 측정 상태를 확인하세요.',
   );
 }
 

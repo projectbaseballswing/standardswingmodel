@@ -280,6 +280,15 @@ class Coaching(BaseModel):
     )
 
 
+class CoachingReviewStatus(BaseModel):
+    """Public status only; private candidates/reviewer notes never leave the API."""
+
+    status: Literal["approved", "review_required", "blocked", "generation_failed"]
+    source: Literal["openai", "rules"]
+    display_allowed: bool = False
+    reason: str
+
+
 class AnalysisReport(BaseModel):
     model_version: str
     overall: OverallFeedback
@@ -289,6 +298,7 @@ class AnalysisReport(BaseModel):
     coaching: Optional[Coaching] = Field(
         None, description="LLM 코칭 문장. 없으면 프론트가 규칙 기반으로 채운다."
     )
+    coaching_review: Optional[CoachingReviewStatus] = None
     phase_frames: Dict[str, List[int]] = Field(
         default_factory=dict,
         description="구간별 프레임 경계 {phase: [start, end]}. 재생 프레임→구간 매핑용(마네킹 품질 색코딩).",
@@ -386,6 +396,7 @@ class ComparisonResponse(BaseModel):
         None,
         description="이전 대비 LLM 코칭. 키 없음/실패 시 null → 프론트는 규칙 기반 폴백.",
     )
+    coaching_review: Optional[CoachingReviewStatus] = None
 
 
 class VideoURL(BaseModel):
