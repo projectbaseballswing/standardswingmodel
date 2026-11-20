@@ -535,7 +535,8 @@ class _ScoreCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = _statusStyle(part.status);
-    final delta = part.delta;
+    final limited = part.status == JointStatus.limited;
+    final delta = limited ? null : part.delta;
     // 비교할 이전 점수가 있어야 이전/변화·비교 기간 선택을 보여준다.
     final hasComparison = part.previousScore != null;
     return _Card(
@@ -591,50 +592,52 @@ class _ScoreCard extends StatelessWidget {
             Row(
               children: [
                 _StatBox(
-                  label: '이전 점수',
+                  label: limited ? '이전 점수 · 참고' : '이전 점수',
                   value: part.previousScore?.toString() ?? '-',
                 ),
                 const SizedBox(width: 10),
                 _StatBox(
-                  label: '현재 점수',
+                  label: limited ? '현재 점수 · 참고' : '현재 점수',
                   value: feedbackNumber(part.currentScore),
                   valueColor: style.color,
                 ),
-                const SizedBox(width: 10),
-                _StatBox(
-                  label: '점수 변화',
-                  child: delta == null
-                      ? const Text(
-                          '-',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.hint,
-                          ),
-                        )
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              delta > 0
-                                  ? Icons.arrow_drop_up
-                                  : (delta < 0
-                                        ? Icons.arrow_drop_down
-                                        : Icons.remove),
-                              size: 18,
-                              color: style.color,
+                if (!limited) ...[
+                  const SizedBox(width: 10),
+                  _StatBox(
+                    label: '점수 변화',
+                    child: delta == null
+                        ? const Text(
+                            '-',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.hint,
                             ),
-                            Text(
-                              feedbackNumber(delta.abs()),
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                delta > 0
+                                    ? Icons.arrow_drop_up
+                                    : (delta < 0
+                                          ? Icons.arrow_drop_down
+                                          : Icons.remove),
+                                size: 18,
                                 color: style.color,
                               ),
-                            ),
-                          ],
-                        ),
-                ),
+                              Text(
+                                feedbackNumber(delta.abs()),
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: style.color,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ],
               ],
             )
           else
@@ -678,7 +681,7 @@ class _ScoreCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 점수 영향도: 이 부위 점수에서 각 세부 항목(피처)이 깎은 비중. 종합 화면과 같은 패턴.
+// 부위 내 표시 항목의 표준화 차이 제곱합 비중. 종합점수의 감점량이 아니다.
 // ---------------------------------------------------------------------------
 class _ContributionCard extends StatelessWidget {
   const _ContributionCard({required this.part});
@@ -744,6 +747,7 @@ class _ContributionCard extends StatelessWidget {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(5),
                       child: LinearProgressIndicator(
+                        key: ValueKey('feature-contribution-${f.key}'),
                         value: f.contribution!.clamp(0.0, 1.0),
                         minHeight: 9,
                         backgroundColor: const Color(0xFFEEF0F2),
@@ -1169,6 +1173,31 @@ class _FeatureDetail extends StatelessWidget {
               ),
             ),
           ],
+          if (feature.description.isNotEmpty)
+            Material(
+              color: Colors.transparent,
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text(
+                  '측정 항목과 단위 보기',
+                  style: TextStyle(fontSize: 12),
+                ),
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '${feature.description}'
+                      '${feature.unit == 'body' ? '\n몸통 길이를 기준으로 맞춘 상대 위치예요. 실제 거리(cm)나 이동 거리가 아니에요.' : ''}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        height: 1.5,
+                        color: AppColors.subtitle,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -1195,7 +1224,7 @@ class _CoachCard extends StatelessWidget {
               Icon(Icons.auto_awesome, size: 16, color: Color(0xFF8A6BEA)),
               SizedBox(width: 6),
               Text(
-                '분석 근거 안내 · 규칙 기반',
+                '분석 결과 안내 · 기본 설명',
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
               ),
             ],
@@ -1782,10 +1811,10 @@ _StatusStyle _statusStyle(JointStatus status) {
       );
     case JointStatus.limited:
       return const _StatusStyle(
-        color: Color(0xFFBDBDBD),
+        color: Color(0xFF757575),
         soft: Color(0xFFF4F4F4),
         textOnSoft: Color(0xFF757575),
-        badge: '평가 제한',
+        badge: '측정 확인 필요',
         messageIcon: Icons.info_outline,
       );
     case JointStatus.proGood:

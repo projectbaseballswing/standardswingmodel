@@ -118,7 +118,7 @@ void main() {
       expect(f.phases[0].referenceDurationMs, 500);
       expect(f.phases[0].tempoRatio, 1.2);
       expect(f.phases[1].tempoLevel, isNull);
-      expect(f.phases[1].warnings.single, contains('판정하지'));
+      expect(f.phases[1].warnings.single, contains('판단하기 어려워요'));
       // This minimal fixture has no measured phase means/diff: do not turn a
       // detached top_deviations entry into a correction target.
       expect(f.phases[2].deviations, isEmpty);
@@ -380,7 +380,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('77.3'), findsNothing);
       expect(find.text('-'), findsOneWidget);
-      expect(find.text('참고용 · 분석 제한'), findsOneWidget);
+      expect(find.text('측정 확인 필요'), findsOneWidget);
       expect(find.textContaining('51.2점', findRichText: true), findsOneWidget);
       expect(find.byType(PhaseMetrics), findsNothing);
       expect(find.text('구간별 피드백 보기'), findsOneWidget);
@@ -442,8 +442,8 @@ void main() {
       await tester.pumpAndSettle();
       // Insufficient correction evidence does not auto-expand this feature.
       // Users can still open its measured graph and scrub the original video.
-      await tester.scrollUntilVisible(find.text('앞팔 팔꿈치 각도'), 250);
-      await tester.tap(find.text('앞팔 팔꿈치 각도'));
+      await tester.scrollUntilVisible(find.text('앞팔 팔꿈치'), 250);
+      await tester.tap(find.text('앞팔 팔꿈치'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('feature-series-lead_elbow_angle')),
@@ -505,8 +505,8 @@ void main() {
       await tester.pumpAndSettle();
       // Insufficient correction evidence does not auto-expand this feature.
       // Users can still open its measured graph and scrub the original video.
-      await tester.scrollUntilVisible(find.text('앞팔 팔꿈치 각도'), 250);
-      await tester.tap(find.text('앞팔 팔꿈치 각도'));
+      await tester.scrollUntilVisible(find.text('앞팔 팔꿈치'), 250);
+      await tester.tap(find.text('앞팔 팔꿈치'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('feature-series-lead_elbow_angle')),
@@ -546,8 +546,8 @@ void main() {
       expect(find.text('내 스윙 영상'), findsOneWidget);
       // Insufficient correction evidence does not auto-expand this feature.
       // Users can still open its measured graph and scrub the original video.
-      await tester.scrollUntilVisible(find.text('앞팔 팔꿈치 각도'), 250);
-      await tester.tap(find.text('앞팔 팔꿈치 각도'));
+      await tester.scrollUntilVisible(find.text('앞팔 팔꿈치'), 250);
+      await tester.tap(find.text('앞팔 팔꿈치'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('feature-series-lead_elbow_angle')),

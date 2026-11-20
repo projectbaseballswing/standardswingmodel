@@ -371,7 +371,7 @@ void main() {
     final repo = repositoryFor((_) async => response(storedAnalysis()));
     final feedback = await repo.fetchFeedback('saved-analysis');
     expect(feedback.coaching, isNull);
-    expect(feedback.summary, contains('프로 기준과 비교'));
+    expect(feedback.summary, contains('기준 스윙과 비교'));
   });
 
   test('malformed coaching (missing overall fields) is ignored', () async {
@@ -386,7 +386,7 @@ void main() {
     final feedback = await repo.fetchFeedback('saved-analysis');
     // overall_summary/overall_coach 가 없으면 통째로 무시 → 규칙 기반.
     expect(feedback.coaching, isNull);
-    expect(feedback.summary, contains('프로 기준과 비교'));
+    expect(feedback.summary, contains('기준 스윙과 비교'));
   });
 
   for (final envelope in <dynamic>[
@@ -417,7 +417,7 @@ void main() {
       expect(f.coaching, isNull);
       expect(f.coachingReview.canDisplay, isFalse);
       expect(f.summary, isNot(contains('PRIVATE')));
-      expect(f.coachSource, contains('규칙 기반'));
+      expect(f.coachSource, contains('기본 설명'));
       expect(
         repo.buildPartAnalyses(f).single.points.join(),
         isNot(contains('PRIVATE')),

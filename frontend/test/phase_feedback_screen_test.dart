@@ -90,14 +90,14 @@ void main() {
       await selectPhase(tester, 'swing');
       expect(find.byKey(const ValueKey('phase-detail-swing')), findsOneWidget);
       expect(find.text('80'), findsNothing);
-      expect(find.text('앞팔 팔꿈치 각도'), findsNothing);
-      expect(find.textContaining('구간별 교정 설명에서 제외'), findsOneWidget);
+      expect(find.text('앞팔 팔꿈치'), findsNothing);
+      expect(find.textContaining('이 구간의 교정 안내에서 제외'), findsOneWidget);
       expect(find.textContaining('이전 점수'), findsNothing);
       expect(find.textContaining('이전 스윙 대비'), findsNothing);
       expect(find.text('점수 변화'), findsNothing);
       await selectPhase(tester, 'stride', step: true);
       expect(find.byKey(const ValueKey('phase-detail-stride')), findsOneWidget);
-      expect(find.text('앞팔 팔꿈치 각도'), findsNothing);
+      expect(find.text('앞팔 팔꿈치'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
