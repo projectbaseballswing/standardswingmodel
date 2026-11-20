@@ -40,6 +40,13 @@ void main() {
         final f = await repo.fetchFeedback('audit-fixture');
         final parts = repo.buildPartAnalyses(f);
         final rows = <Map<String, dynamic>>[];
+        String sourceName(String key, String fallback) =>
+            (body['result']['joints'] as List)
+                    .cast<Map<String, dynamic>>()
+                    .where((j) => j['key'] == key)
+                    .firstOrNull?['name']
+                as String? ??
+            fallback;
         void add(
           String section,
           String slot,
@@ -47,12 +54,14 @@ void main() {
           String text, {
           bool rendered = true,
           String origin = 'rule_or_measured',
+          String? sourceTarget,
         }) {
           if (text.isNotEmpty) {
             rows.add({
               'section': section,
               'slot': slot,
               'target': target,
+              'source_target': sourceTarget ?? target,
               'text': text,
               'rendered': rendered,
               'origin': origin,
@@ -73,11 +82,25 @@ void main() {
         add('종합', '점수 산출 설명', '전체', f.scoreExplanation);
         for (var i = 0; i < f.priorities.length; i++) {
           final e = f.priorities[i];
-          add('종합', '우선 확인', e.name, e.observation, rendered: i == 0);
+          add(
+            '종합',
+            '우선 확인',
+            e.name,
+            e.observation,
+            rendered: i == 0,
+            sourceTarget: sourceName(e.joint, e.name),
+          );
         }
         for (var i = 0; i < f.strengths.length; i++) {
           final e = f.strengths[i];
-          add('종합', '기준과 비슷한 구간', e.name, e.observation, rendered: i == 0);
+          add(
+            '종합',
+            '기준과 비슷한 구간',
+            e.name,
+            e.observation,
+            rendered: i == 0,
+            sourceTarget: sourceName(e.joint, e.name),
+          );
         }
         for (final item in f.items) {
           final p = parts.firstWhere((p) => p.key == item.key);
@@ -88,9 +111,28 @@ void main() {
             add('부위', p.pointsTitle, p.label, point);
           }
           for (final feat in item.features) {
-            add('관절', '코치 코멘트', feat.name, feat.displayedComment);
-            add('관절', '항목 정의', feat.name, feat.description, rendered: false);
-            add('관절', '대표 방향', feat.name, feat.directionText ?? '');
+            add(
+              '관절',
+              '코치 코멘트',
+              feat.name,
+              feat.displayedComment,
+              sourceTarget: sourceName(feat.key, feat.name),
+            );
+            add(
+              '관절',
+              '항목 정의',
+              feat.name,
+              feat.description,
+              rendered: false,
+              sourceTarget: sourceName(feat.key, feat.name),
+            );
+            add(
+              '관절',
+              '대표 방향',
+              feat.name,
+              feat.directionText ?? '',
+              sourceTarget: sourceName(feat.key, feat.name),
+            );
           }
         }
         for (final p in f.phases) {

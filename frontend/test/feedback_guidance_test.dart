@@ -26,7 +26,7 @@ FeedbackRepository repoFor(
       client: MockClient(
         (r) async => http.Response(
           jsonEncode(
-            r.url.path.contains('/compare')
+            r.url.path.endsWith('/comparison')
                 ? comparison
                 : {
                     'status': 'done',
@@ -73,7 +73,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('자세 점수 · 반영 70%'), findsOneWidget);
       expect(find.text('속도 점수 · 반영 30%'), findsOneWidget);
-      expect(find.textContaining('80.4점 × 70%'), findsOneWidget);
+      expect(find.textContaining('80.4점(70%)'), findsOneWidget);
       expect(find.text('AI 코치의 한마디'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(
@@ -96,11 +96,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-        find.text('분석 근거 안내 · 규칙 기반'),
+        find.text('분석 결과 안내 · 기본 설명'),
         250,
         scrollable: find.byType(Scrollable).first,
       );
-      expect(find.textContaining('원본의 스트라이드'), findsOneWidget);
+      expect(find.textContaining('원본 영상의 스트라이드'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -130,7 +130,7 @@ void main() {
       expect(find.text('자세 점수'), findsOneWidget);
       expect(find.text('속도 점수'), findsOneWidget);
       expect(find.textContaining('점수 · 반영'), findsNothing);
-      expect(find.textContaining('확인할 구성 점수가 충분하지'), findsOneWidget);
+      expect(find.textContaining('점수 구성 항목이 부족해'), findsOneWidget);
       expect(jsonEncode(r), before);
       expect(tester.takeException(), isNull);
     },
@@ -149,7 +149,7 @@ void main() {
       expect(arm.joint, 'hand_y_from_shoulder');
       expect(arm.phase, 'stride');
       expect(arm.action, contains('원본'));
-      expect(arm.action, contains('차이가 확인되면'));
+      expect(arm.action, contains('같은 차이가 보이는지'));
       expect(jsonEncode(r), before);
       r['joints'] = (r['joints'] as List).reversed.toList();
       expect(
@@ -196,9 +196,9 @@ void main() {
   );
 
   test('semantics distinguish joint angles, heights and unmeasured fields', () {
-    expect(featureDirection('lead_elbow_angle', 'higher'), contains('펴져'));
-    expect(featureDirection('rear_knee_angle', 'lower'), contains('굽혀져'));
-    expect(featureDirection('hand_y_from_shoulder', 'higher'), contains('높아요'));
+    expect(featureDirection('lead_elbow_angle', 'higher'), contains('펴진'));
+    expect(featureDirection('rear_knee_angle', 'lower'), contains('굽혀진'));
+    expect(featureDirection('hand_y_from_shoulder', 'higher'), contains('높게'));
     expect(featureDirection('unknown', 'higher'), contains('동작 의미는 확인 필요'));
     expect(
       featureDirection('lead_elbow_angle', 'unknown'),
@@ -331,10 +331,10 @@ void main() {
     () {
       final r = sample();
       final text = explainScores(r);
-      expect(text, contains('80.4점 × 70% + 속도 36.6점 × 30%'));
-      expect(text, contains('단순 평균이 아니며'));
+      expect(text, contains('80.4점(70%)과 손 속도 36.6점(30%)'));
+      expect(text, contains('단순 평균이 아니에요'));
       r['overall'].remove('speed_score');
-      expect(explainScores(r), isNot(contains('× 70%')));
+      expect(explainScores(r), isNot(contains('(70%)')));
       r['overall']['score'] = r['overall']['posture_score'];
       expect(explainScores(r), contains('자세 점수 80.4점만'));
       r['model_version'] = '0.1';
@@ -346,8 +346,8 @@ void main() {
     const old = '구간이 짧아(3프레임) 템포를 판정하지 않았습니다. 더 높은 fps 로 촬영하면 판정할 수 있습니다.';
     final text = safeTempoWarning(old, 30.15);
     expect(text, contains('기준 구간'));
-    expect(text, contains('30.15'));
-    expect(text, contains('사용자 영상의 프레임 수가 아니며'));
+    expect(text, contains('약 3프레임'));
+    expect(text, contains('사용자 영상의 프레임 수는 아니에요'));
     expect(safeTempoWarning('추적 품질 부족', 60), '추적 품질 부족');
   });
 
@@ -379,7 +379,7 @@ void main() {
         );
         expect(item.currentScore, raw['score']);
       }
-      expect(f.coachSource, contains('규칙 기반'));
+      expect(f.coachSource, contains('기본 설명'));
       final parts = repo.buildPartAnalyses(f);
       expect(
         parts.map((p) => p.summary).join(),
@@ -399,8 +399,8 @@ void main() {
       final r = sample();
       r['coaching'] = {'overall_summary': '저장 요약', 'overall_coach': '저장 문구'};
       final f = await repoFor(r).fetchFeedback('fixture');
-      expect(f.coachSource, contains('규칙 기반'));
-      expect(f.summarySource, contains('규칙 기반'));
+      expect(f.coachSource, contains('기본 설명'));
+      expect(f.summarySource, contains('기본 설명'));
       expect(f.coaching, isNull);
       expect(f.coachingReview.canDisplay, isFalse);
       r['overall']['reliability'] = 'low';
@@ -423,7 +423,7 @@ void main() {
           .buildPartAnalyses(f)
           .firstWhere((p) => p.key == 'lead_arm');
       expect(arm.pointsTitle, '먼저 확인할 움직임');
-      expect(arm.summary, contains('모든 순간의 자세는 다를'));
+      expect(arm.summary, contains('순간마다 자세 차이는 있을'));
       expect(arm.points.first, contains('스트라이드'));
     },
   );
