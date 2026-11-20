@@ -599,15 +599,9 @@ class _ScoreContributionCard extends StatelessWidget {
 
   final List<ScoreContribution> contributions;
 
-  // 상태색: 잘함(초록) / 개선필요(빨강) / 알수없음(회색).
-  static const Color _good = Color(0xFF4CC38A);
-  static const Color _bad = AppColors.primary;
-  static const Color _unknown = Color(0xFFC9CDD3);
-
-  Color _barColor(ScoreContribution c) {
-    if (c.score == null) return _unknown;
-    return c.score! >= FeedbackRepository.goodScore ? _good : _bad;
-  }
+  // 막대는 '점수를 깎은 비중'(길이)만 나타낸다. 잘함/개선필요 같은 상태는 아래 부위 카드에
+  // 이미 색으로 보이므로, 여기서는 상태색을 쓰지 않고 중립 단색으로 둔다(색=상태로 오해 방지).
+  static const Color _bar = Color(0xFF6B7FB3);
 
   @override
   Widget build(BuildContext context) {
@@ -655,7 +649,7 @@ class _ScoreContributionCard extends StatelessWidget {
                           value: c.share.clamp(0.0, 1.0),
                           minHeight: 9,
                           backgroundColor: const Color(0xFFEEF0F2),
-                          valueColor: AlwaysStoppedAnimation(_barColor(c)),
+                          valueColor: const AlwaysStoppedAnimation(_bar),
                         ),
                       ),
                     ),

@@ -89,7 +89,12 @@ class FeatureAnalysis {
     this.phaseScores,
     this.reliability = 'medium',
     this.eventBasedSeries = false,
+    this.contribution,
   });
+
+  /// 부위 내 점수 영향 비중(0~1). 같은 부위의 표시 피처들끼리 합하면 1.
+  /// 저신뢰 피처나 0.2.x 이전 기록에는 없어 null.
+  final double? contribution;
 
   /// 서버 피처 키. 예) 'lead_elbow_angle'.
   final String key;

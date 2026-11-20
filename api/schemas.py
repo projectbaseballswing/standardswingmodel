@@ -156,6 +156,8 @@ class JointFeedback(BaseModel):
         None, description="higher / lower 일 때 '기준보다' 뒤에 붙일 말. 예) {'higher': '더 펴져 있어요'}")
     available: bool = Field(True, description="이 관절을 비교할 수 있었는지")
     reliability: Reliability = "medium"
+    contribution: Optional[float] = Field(
+        None, description="부위 내 점수 영향 비중(0~1). 같은 부위의 표시 피처들끼리 합하면 1. 저신뢰 피처는 null")
     level: Level
     worst_phase: Optional[str] = Field(None, description="가장 많이 벌어진 구간. available=false 면 null")
     impact: Optional[JointImpact] = None
