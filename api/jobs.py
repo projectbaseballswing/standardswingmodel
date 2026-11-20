@@ -121,6 +121,7 @@ class JobManager:
         openai_model: str = "",
         coaching_scope: str = "overall",
         pose_storage_factory=None,
+        coaching_enabled: bool = False,
     ):
         self.store = store
         self.reference_fps = reference_fps
@@ -129,6 +130,7 @@ class JobManager:
         self.openai_api_key = openai_api_key
         self.openai_model = openai_model
         self.coaching_scope = coaching_scope
+        self.coaching_enabled = coaching_enabled is True
         self._pose_storage_factory = pose_storage_factory
         self._pipeline_factory = pipeline_factory
         self._pipeline: Optional[SwingPipeline] = None
@@ -266,8 +268,10 @@ class JobManager:
         if not isinstance(job.result, dict):
             return
         sink = {}
-        failure_reason = "not_configured" if not self.openai_api_key else "generation_failed"
-        if self.openai_api_key:
+        enabled = getattr(self, "coaching_enabled", False)
+        failure_reason = ("generation_disabled" if not enabled else
+                          "not_configured" if not self.openai_api_key else "generation_failed")
+        if enabled and self.openai_api_key:
             try:
                 generate_coaching(
                     job.result, api_key=self.openai_api_key, model=self.openai_model,
@@ -284,7 +288,7 @@ class JobManager:
 
     def _attach_extended_coaching(self, job: Job) -> None:
         """Merge new text into the private candidate and invalidate prior approval."""
-        if not isinstance(job.result, dict):
+        if not getattr(self, "coaching_enabled", False) or not isinstance(job.result, dict):
             return
         old = job.result.get(PRIVATE_KEY) or {}
         candidate = old.get("candidate")

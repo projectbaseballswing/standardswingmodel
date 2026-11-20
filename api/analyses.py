@@ -65,6 +65,7 @@ async def lifespan(app: FastAPI):
         openai_model=settings.openai_model,
         coaching_scope=settings.coaching_scope,
         pose_storage_factory=lambda: create_storage(),
+        coaching_enabled=settings.coaching_enabled,
     )
     app.state.jobs = jobs
     try:

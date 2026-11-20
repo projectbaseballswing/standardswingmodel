@@ -181,7 +181,7 @@ def test_auth_remains_required_for_approved_coaching(mock_client):
 
 def test_jobs_capture_review_sink_and_failure_does_not_change_analysis(monkeypatch):
     import api.jobs as jobs
-    manager=object.__new__(JobManager);manager.openai_api_key='fake';manager.openai_model='offline'
+    manager=object.__new__(JobManager);manager.openai_api_key='fake';manager.openai_model='offline';manager.coaching_enabled=True
     def generate(r,*,review_sink,**kwargs):review_sink.update(candidate=candidate(),validation={});return None
     monkeypatch.setattr(jobs,'generate_coaching',generate)
     r=report();h=report_fingerprint(r);job=Job('a',{},status='done',user_id='u',result=r)
@@ -196,7 +196,7 @@ def test_jobs_capture_review_sink_and_failure_does_not_change_analysis(monkeypat
 
 def test_extended_text_invalidates_approval(monkeypatch):
     import api.jobs as jobs
-    manager=object.__new__(JobManager);manager.openai_api_key='fake';manager.openai_model='offline'
+    manager=object.__new__(JobManager);manager.openai_api_key='fake';manager.openai_model='offline';manager.coaching_enabled=True
     r=report();ctx=context_for('a','u');r[PRIVATE_KEY]=approved(r,ctx)
     def generate(r,*,review_sink,**kwargs):review_sink['candidate']={'joints':[],'phases':[]};return None
     monkeypatch.setattr(jobs,'generate_extended_coaching',generate)
@@ -208,7 +208,7 @@ def test_extended_text_invalidates_approval(monkeypatch):
 
 def test_extended_rejected_fields_are_not_silently_dropped_before_review(monkeypatch):
     import api.jobs as jobs
-    manager=object.__new__(JobManager);manager.openai_api_key='fake';manager.openai_model='offline'
+    manager=object.__new__(JobManager);manager.openai_api_key='fake';manager.openai_model='offline';manager.coaching_enabled=True
     r=report();ctx=context_for('a','u');r[PRIVATE_KEY]=approved(r,ctx)
     def generate(r,*,review_sink,**kwargs):
         review_sink['candidate']={'joints':[],'phases':[], 'unapproved_extra':'must be rejected'}
