@@ -45,6 +45,14 @@ class GroupScore(BaseModel):
     score: Optional[float] = None
 
 
+class ScoreContribution(BaseModel):
+    key: str = Field(description="lead_arm / rear_arm / torso / lead_leg / rear_leg")
+    name: str = Field(description="화면 표시용 부위 이름. 좌우타에 맞춰 변환됨")
+    reliability: Reliability = Field("medium", description="낮으면 화면에서 흐리게(참고용) 표시. 비중 계산에는 포함")
+    score: Optional[float] = Field(None, description="그 부위 점수(0~100). 막대 색/상태 판정용")
+    share: float = Field(description="자세 점수를 깎은 비중(0~1). 표시된 부위들끼리 합하면 1")
+
+
 class WorstSegment(BaseModel):
     start_frame: int
     end_frame: int
@@ -90,6 +98,8 @@ class OverallFeedback(BaseModel):
     distance: Optional[float] = Field(None, description="기준 템플릿과의 거리")
     typical_pro_distance: Optional[float] = Field(None, description="80점에 해당하는 거리")
     group_scores: List[GroupScore]
+    score_contributions: List[ScoreContribution] = Field(
+        default_factory=list, description="점수 산출 근거: 부위별로 자세 점수를 깎은 비중(합 1). 저신뢰 부위도 포함")
     worst_segment: Optional[WorstSegment] = None
     frame_distances: List[Optional[float]] = Field(
         description="기준 시간축 지점별 거리. 0.1 은 80프레임, 0.2 는 구간 4개 × 20등분")

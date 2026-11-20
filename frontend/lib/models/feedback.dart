@@ -357,6 +357,33 @@ class Coaching {
   bool get isExtendedPending => extendedStatus == 'pending';
 }
 
+/// 점수 산출 근거: 한 부위가 자세 점수를 깎은 비중.
+///
+/// 기준 자세와 많이 벌어진(편차가 큰) 부위일수록 [share] 가 크다.
+/// 표시되는 부위들의 [share] 합은 1 이다. 신뢰도 낮은 부위(뒷팔 등)도 포함되며
+/// [reliability] 가 'low' 면 화면에서 흐리게(참고용) 표시한다.
+class ScoreContribution {
+  const ScoreContribution({
+    required this.key,
+    required this.name,
+    required this.share,
+    this.score,
+    this.reliability = 'medium',
+  });
+
+  final String key;
+  final String name;
+
+  /// 0~1. 자세 점수를 깎은 비중.
+  final double share;
+
+  /// 그 부위 점수(0~100). 막대 색/상태 판정용. 없을 수 있다.
+  final double? score;
+  final String reliability;
+
+  bool get isLowReliability => reliability == 'low';
+}
+
 /// 종합 피드백 1건.
 class OverallFeedback {
   const OverallFeedback({
@@ -380,7 +407,11 @@ class OverallFeedback {
     this.postureCapped = false,
     this.coaching,
     this.analysisId = '',
+    this.scoreContributions = const [],
   });
+
+  /// 점수 산출 근거: 부위별로 점수를 깎은 비중(합 1). 0.2.x 이전 기록엔 없어 빈 목록.
+  final List<ScoreContribution> scoreContributions;
 
   /// 분석 id. 관절·구간 코칭이 아직 생성 중(pending)일 때 상세 화면이 재조회하는 데 쓴다.
   final String analysisId;

@@ -52,6 +52,11 @@ void main() {
       expect(feedback.totalDelta, isNull);
       expect(feedback.hasComparison, isFalse);
       expect(feedback.summary, isNot(contains('첫')));
+      // 점수 영향도: 서버 순서·비중 보존, 저신뢰 부위도 포함.
+      expect(feedback.scoreContributions.length, 2);
+      expect(feedback.scoreContributions.first.name, '오른쪽 팔꿈치');
+      expect(feedback.scoreContributions.first.share, 0.6);
+      expect(feedback.scoreContributions.first.isLowReliability, isTrue);
       final item = feedback.items.single;
       expect(item.currentScore, 63.8);
       expect(item.previousScore, isNull);
