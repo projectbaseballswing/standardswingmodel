@@ -41,6 +41,7 @@ Map<String, dynamic> storedAnalysis() => {
         'body_part': 'lead_arm',
         'available': true,
         'reliability': 'high',
+        'contribution': 0.72,
         'level': 'caution',
         'description': '실제 팔꿈치 분석',
         'unit': 'deg',

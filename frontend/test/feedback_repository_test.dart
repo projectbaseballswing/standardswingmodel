@@ -63,6 +63,7 @@ void main() {
       expect(item.delta, isNull);
       final feature = item.features.single;
       expect(feature.key, 'lead_elbow_angle');
+      expect(feature.contribution, 0.72); // 부위 내 점수 영향 비중 보존.
       expect(feature.impact!.user, 123.4);
       expect(feature.rangeOfMotion!.user, 20.5);
       expect(feature.series!.map((sample) => sample.user), [

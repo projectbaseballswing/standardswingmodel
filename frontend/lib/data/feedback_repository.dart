@@ -384,6 +384,7 @@ class FeedbackRepository {
       phaseScores: _phaseScores(j['phases'], eventBased: eventBased),
       reliability: _reliability(j['reliability']),
       eventBasedSeries: eventBased,
+      contribution: _number(j['contribution']),
     );
   }
 

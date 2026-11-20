@@ -88,6 +88,32 @@ def test_score_contributions_decompose_posture_score(model, skeleton):
     assert low_available <= keys
 
 
+def test_joint_contribution_splits_part_score(model, skeleton):
+    """관절별 기여도: 같은 부위의 표시 피처들끼리 부위 내 비중 합이 1, 저신뢰 피처는 null."""
+    joints = _compare(model, skeleton).joints()
+    from feedback.compare_v2 import BODY_PARTS
+
+    by_part: dict = {}
+    for j in joints:
+        assert "contribution" in j
+        if j["reliability"] == "low":
+            assert j["contribution"] is None  # 저신뢰 피처는 비중을 매기지 않는다
+            continue
+        if not j["available"]:
+            continue
+        c = j["contribution"]
+        if c is None:
+            continue
+        assert 0.0 <= c <= 1.0
+        by_part.setdefault(BODY_PARTS.get(j["key"], "other"), []).append(c)
+
+    # 둘 이상 표시 피처가 있는 부위는 그 피처들 비중 합이 1 이어야 한다.
+    multi = {p: vals for p, vals in by_part.items() if len(vals) >= 2}
+    assert multi, "표시 피처가 2개 이상인 부위가 없습니다."
+    for part, vals in multi.items():
+        assert abs(sum(vals) - 1.0) < 1e-2, f"{part} 부위 내 비중 합이 1 이 아님: {sum(vals)}"
+
+
 def test_speed_metrics_are_filled(model, skeleton):
     """0.1 에서 비어 있던 속도 지표가 0.2 에서는 값을 가진다."""
     speed = _compare(model, skeleton).speed_feedback()
