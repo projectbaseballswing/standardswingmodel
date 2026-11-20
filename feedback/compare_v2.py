@@ -471,8 +471,42 @@ class SwingComparisonV2:
     # ------------------------------------------------------------------
     # 관절별
     # ------------------------------------------------------------------
+    # TODO(관절별 기여도): 종합 '점수 영향도' 브랜치 머지 후 아래 주석을 풀어 활성화.
+    #   부위를 선택하면 그 부위 안에서 어떤 피처가 점수를 깎았는지(부위 내 비중) 보여준다.
+    #   활성화하려면: (1) 아래 _feature_part_shares 주석 해제,
+    #                (2) joints() 안의 `feature_shares = ...` 주석 해제,
+    #                (3) joint dict 의 `"contribution": ...` 주석 해제,
+    #                (4) api/schemas.py JointFeedback.contribution 주석 해제.
+    # def _feature_part_shares(self) -> Dict[str, Optional[float]]:
+    #     """피처별 '부위 내 비중': 그 부위 점수에서 이 피처가 깎은 몫.
+    #
+    #     점수 영향도(부위 단위, _score_contributions)를 한 단계 더 쪼갠 것. 화면에서 숨기는
+    #     저신뢰 피처는 분모에서 빼서, 표시되는 피처들끼리 합이 1 이 되게 한다(저신뢰 피처 자신은 None).
+    #     """
+    #     feat_rel = {name: _worse(self.reliability, FEATURE_RELIABILITY.get(name, "high"))
+    #                 for name in self.model.feature_names}
+    #     feat_ss = {name: 0.0 for name in self.model.feature_names}
+    #     for z in self.diff_z.values():
+    #         squared = np.square(z)
+    #         for index, name in enumerate(self.model.feature_names):
+    #             feat_ss[name] += float(np.nansum(squared[:, index]))
+    #
+    #     part_ss: Dict[str, float] = {}
+    #     for name, value in feat_ss.items():
+    #         if feat_rel[name] != "low":
+    #             part = BODY_PARTS.get(name, "other")
+    #             part_ss[part] = part_ss.get(part, 0.0) + value
+    #
+    #     shares: Dict[str, Optional[float]] = {}
+    #     for name in self.model.feature_names:
+    #         total = part_ss.get(BODY_PARTS.get(name, "other"), 0.0)
+    #         shares[name] = (_r(feat_ss[name] / total, 3)
+    #                         if feat_rel[name] != "low" and total > 0 else None)
+    #     return shares
+
     def joints(self, include_series: bool = False) -> List[Dict[str, Any]]:
         results = []
+        # feature_shares = self._feature_part_shares()  # TODO(관절별 기여도): 머지 후 주석 해제
         for index, name in enumerate(self.model.feature_names):
             phases = []
             for key in PHASE_EVENTS:
@@ -537,6 +571,7 @@ class SwingComparisonV2:
                                              FEATURE_DIRECTION_LABELS.get(name, ("더 커요", "더 작아요")))),
                 "available": bool(measured),
                 "reliability": _worse(self.reliability, FEATURE_RELIABILITY.get(name, "high")),
+                # "contribution": feature_shares.get(name),  # TODO(관절별 기여도): 머지 후 주석 해제
                 "level": worst["level"] if worst else "good",
                 "worst_phase": worst["phase"] if worst else None,
                 "impact": impact,
