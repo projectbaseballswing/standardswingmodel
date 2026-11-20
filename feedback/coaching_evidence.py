@@ -65,6 +65,25 @@ def score_basis(r):
       'explanation_status':'verified' if verified or only else 'insufficient_or_inconsistent',
       'meaning':'자세는 표준화 곡선 차이의 RMS 거리에서 환산, 속도는 임팩트 주변 최대 손 속도. 부위 점수 평균·부위 감점 기여도·배트/타구 속도가 아님.'}
 
+def score_contribution_context(overall):
+    """Stored score context only: never reweight shares or promote priorities."""
+    supplied=overall.get('score_contributions')
+    items=rows(supplied)
+    counts=Counter(x.get('key') for x in items if isinstance(x.get('key'),str))
+    accepted=[];excluded=[]
+    for item in items:
+        key=item.get('key');share=item.get('share')
+        if (not isinstance(key,str) or key not in PARTS or counts[key]!=1 or not finite(share) or not 0<=share<=1
+                or item.get('reliability') not in ('low','medium','high')):
+            excluded.append({'key':safe_text(key),'reason':'invalid_or_duplicate_contribution'})
+            continue
+        accepted.append({'key':key,'name':safe_text(item.get('name')),'share':share,
+            'score':score(item.get('score')),'reliability':item['reliability'],
+            'use':'score_context_only_not_correction_priority'})
+    return {'available':bool(accepted),'rows':accepted,'excluded':excluded,
+        'meaning':'표시 부위 내 표준화 차이 z² 합의 상대 비중. 저장값 그대로이며 재정규화하지 않음.',
+        'limits':'종합점수 감점량·자세 오류 원인·교정 효과가 아님. 자세 70%/속도 30% 합산 비율과 다름. low도 계산에는 포함되지만 참고용이며 교정 후보가 아님.'}
+
 def phase_evidence(p,j,phase):
     if p.get('available') is not True or p.get('level') not in ('good','caution','warning'):return None
     if not all(finite(p.get(k)) for k in ('user_mean','reference_mean','diff','z_score')):return None
@@ -141,6 +160,9 @@ def build_evidence_input(report,*,scope='overall',previous=None):
               'reliability':j['reliability'],'phases':ee,'impact':measured_event(j.get('impact')),
               'range_of_motion':measured_range(j.get('range_of_motion'))}
         item['impact_diff']=item['impact']['diff'] if item['impact'] else None
+        if 'contribution' in j:
+            value=number(j.get('contribution'))
+            item['part_difference_share']=value if value is not None and 0<=value<=1 else None
         item['range_of_motion_diff']=item['range_of_motion']['diff'] if item['range_of_motion'] else None
         flat.append(item);parts[j['body_part']]['features'].append(item);observations.extend(ee)
     parts={k:p for k,p in parts.items() if p['features']}
@@ -162,6 +184,10 @@ def build_evidence_input(report,*,scope='overall',previous=None):
       'priority_policy':'3-A: explicit high/medium at overall/part/joint/phase, finite measurements; |z| descending, joint+phase tie break, unique joint. Not score contribution.',
       'comparison':{'available':False,'reason':'previous_report_not_provided'},
       'rotation_issues':[]}
+    if 'score_contributions' in o:
+        result['score_contributions']=score_contribution_context(o)
+    if any('part_difference_share' in item for item in flat):
+        result['feature_contribution_meaning']='부위 내 저신뢰 피처를 제외한 표시 피처끼리의 z² 상대 비중. 종합 부위별 비중과 분모가 다름. 감점량·원인·교정 우선순위가 아님.'
     # Retain measured rotation magnitudes only; omit prior free-text causal messages.
     if quality(o) and 'torso' in parts:
         for c in rows(o.get('rotation_checks')):

@@ -151,6 +151,10 @@ class _JointAnalysisScreenState extends State<JointAnalysisScreen> {
                       ),
                       const SizedBox(height: 14),
                       _ScoreCard(part: _parts[_selected]),
+                      if (_ContributionCard.hasData(_parts[_selected])) ...[
+                        const SizedBox(height: 14),
+                        _ContributionCard(part: _parts[_selected]),
+                      ],
                       const SizedBox(height: 8),
                     ]),
                   ),
@@ -667,6 +671,101 @@ class _ScoreCard extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 점수 영향도: 이 부위 점수에서 각 세부 항목(피처)이 깎은 비중. 종합 화면과 같은 패턴.
+// ---------------------------------------------------------------------------
+class _ContributionCard extends StatelessWidget {
+  const _ContributionCard({required this.part});
+
+  final PartAnalysis part;
+
+  // 비중이 있는 세부 항목만, 큰 순으로.
+  static List<FeatureAnalysis> _rows(PartAnalysis part) {
+    final rows = [
+      for (final f in part.features)
+        if (f.contribution != null) f,
+    ];
+    rows.sort((a, b) => b.contribution!.compareTo(a.contribution!));
+    return rows;
+  }
+
+  static bool hasData(PartAnalysis part) => _rows(part).isNotEmpty;
+
+  // 막대는 '점수를 깎은 비중'(길이)만 나타낸다. 상태(잘함/개선필요)는 위 점수 카드에 이미
+  // 보이므로 여기서는 중립 단색으로 둔다(종합 화면과 동일 규칙).
+  static const Color _bar = Color(0xFF6B7FB3);
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = _rows(part);
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '점수 영향도',
+            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '이 부위에서 신뢰도가 낮아 제외된 항목을 뺀 뒤, '
+            '표시 항목들의 기준 대비 차이를 비율로 보여줘요. '
+            '종합 화면의 부위별 비중과는 비교 범위가 달라요. '
+            '감점량이나 교정 우선순위를 뜻하지는 않아요.',
+            style: TextStyle(fontSize: 12, color: AppColors.hint, height: 1.4),
+          ),
+          const SizedBox(height: 13),
+          for (final f in rows)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 11),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 92,
+                    child: Text(
+                      f.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.subtitle,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(5),
+                      child: LinearProgressIndicator(
+                        value: f.contribution!.clamp(0.0, 1.0),
+                        minHeight: 9,
+                        backgroundColor: const Color(0xFFEEF0F2),
+                        valueColor: const AlwaysStoppedAnimation(_bar),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    width: 38,
+                    child: Text(
+                      '${(f.contribution! * 100).round()}%',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

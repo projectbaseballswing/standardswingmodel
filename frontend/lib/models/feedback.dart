@@ -91,7 +91,12 @@ class FeatureAnalysis {
     this.eventBasedSeries = false,
     this.evidence,
     this.ruleComment = '',
+    this.contribution,
   });
+
+  /// 부위 내 점수 영향 비중(0~1). 같은 부위의 표시 피처들끼리 합하면 1.
+  /// 저신뢰 피처나 0.2.x 이전 기록에는 없어 null.
+  final double? contribution;
 
   /// 서버 피처 키. 예) 'lead_elbow_angle'.
   final String key;
@@ -420,6 +425,33 @@ class FeedbackEvidence {
       '원본에서도 차이가 확인되면 해당 구간을 천천히 재현하고, 다음 촬영에서 같은 차이가 반복되는지 확인하세요.';
 }
 
+/// 점수 산출 근거: 한 부위가 자세 점수를 깎은 비중.
+///
+/// 기준 자세와 많이 벌어진(편차가 큰) 부위일수록 [share] 가 크다.
+/// 표시되는 부위들의 [share] 합은 1 이다. 신뢰도 낮은 부위(뒷팔 등)도 포함되며
+/// [reliability] 가 'low' 면 화면에서 흐리게(참고용) 표시한다.
+class ScoreContribution {
+  const ScoreContribution({
+    required this.key,
+    required this.name,
+    required this.share,
+    this.score,
+    this.reliability = 'medium',
+  });
+
+  final String key;
+  final String name;
+
+  /// 0~1. 자세 점수를 깎은 비중.
+  final double share;
+
+  /// 그 부위 점수(0~100). 막대 색/상태 판정용. 없을 수 있다.
+  final double? score;
+  final String reliability;
+
+  bool get isLowReliability => reliability == 'low';
+}
+
 /// 종합 피드백 1건.
 class OverallFeedback {
   const OverallFeedback({
@@ -449,7 +481,11 @@ class OverallFeedback {
     this.coachSource = '분석 근거 안내 · 규칙 기반',
     this.summarySource = '분석 근거 안내 · 규칙 기반',
     this.coachingReview = const CoachingReview(),
+    this.scoreContributions = const [],
   });
+
+  /// 점수 산출 근거: 부위별로 점수를 깎은 비중(합 1). 0.2.x 이전 기록엔 없어 빈 목록.
+  final List<ScoreContribution> scoreContributions;
 
   /// 분석 id. 관절·구간 코칭이 아직 생성 중(pending)일 때 상세 화면이 재조회하는 데 쓴다.
   final String analysisId;

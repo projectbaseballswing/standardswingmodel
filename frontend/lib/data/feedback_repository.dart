@@ -312,6 +312,17 @@ class FeedbackRepository {
           : '분석 근거 안내 · 규칙 기반',
       items: items,
       coaching: coaching,
+      scoreContributions: [
+        for (final c in _rows(overall['score_contributions']))
+          if ((c['key'] as String?)?.isNotEmpty ?? false)
+            ScoreContribution(
+              key: c['key'] as String,
+              name: (c['name'] as String?) ?? '부위',
+              share: _number(c['share']) ?? 0,
+              score: _number(c['score']),
+              reliability: _reliability(c['reliability']),
+            ),
+      ],
       // 직전 분석이 있으면 이전 전체 점수를 실어 반복 피드백(증감)을 켠다.
       previousTotalScore: previousTotal,
     );
@@ -447,6 +458,7 @@ class FeedbackRepository {
           : evidence.isIssue
           ? '${evidence.observation} ${evidence.action}'
           : '${evidence.observation} 이 구간의 측정값에 대한 설명이며, 전 구간이 안정적이라는 뜻은 아니에요.',
+      contribution: _number(j['contribution']),
     );
   }
 

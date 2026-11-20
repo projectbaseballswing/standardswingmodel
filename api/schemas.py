@@ -45,6 +45,14 @@ class GroupScore(BaseModel):
     score: Optional[float] = None
 
 
+class ScoreContribution(BaseModel):
+    key: str = Field(description="lead_arm / rear_arm / torso / lead_leg / rear_leg")
+    name: str = Field(description="화면 표시용 부위 이름. 좌우타에 맞춰 변환됨")
+    reliability: Reliability = Field("medium", description="낮으면 화면에서 흐리게(참고용) 표시. 비중 계산에는 포함")
+    score: Optional[float] = Field(None, description="그 부위 점수(0~100). 막대 색/상태 판정용")
+    share: float = Field(description="자세 계산의 표준화 차이 제곱합 중 부위의 상대 비중(0~1). 표시 부위 내 합은 반올림 오차를 제외하면 1. 종합점수 감점량이 아님")
+
+
 class WorstSegment(BaseModel):
     start_frame: int
     end_frame: int
@@ -90,6 +98,8 @@ class OverallFeedback(BaseModel):
     distance: Optional[float] = Field(None, description="기준 템플릿과의 거리")
     typical_pro_distance: Optional[float] = Field(None, description="80점에 해당하는 거리")
     group_scores: List[GroupScore]
+    score_contributions: List[ScoreContribution] = Field(
+        default_factory=list, description="자세 계산에 사용한 표준화 차이의 부위별 상대 비중. 저신뢰 부위도 포함하며 코칭 우선순위가 아님. 과거 기록은 없을 수 있음")
     worst_segment: Optional[WorstSegment] = None
     frame_distances: List[Optional[float]] = Field(
         description="기준 시간축 지점별 거리. 0.1 은 80프레임, 0.2 는 구간 4개 × 20등분")
@@ -146,6 +156,8 @@ class JointFeedback(BaseModel):
         None, description="higher / lower 일 때 '기준보다' 뒤에 붙일 말. 예) {'higher': '더 펴져 있어요'}")
     available: bool = Field(True, description="이 관절을 비교할 수 있었는지")
     reliability: Reliability = "medium"
+    contribution: Optional[float] = Field(
+        None, description="같은 부위 내 표시 피처의 표준화 차이 상대 비중(0~1). 저신뢰 피처는 null이며 분모에서도 제외. 종합점수 감점량이 아님")
     level: Level
     worst_phase: Optional[str] = Field(None, description="가장 많이 벌어진 구간. available=false 면 null")
     impact: Optional[JointImpact] = None

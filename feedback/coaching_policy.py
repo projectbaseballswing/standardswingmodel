@@ -186,6 +186,9 @@ def validate_coaching_output(
                 add("history_absence_not_confirmed", "review", field, "이전 비교가 제공되지 않은 것과 실제 이전 기록이 없는 것은 다릅니다. 기록 부재가 확인되지 않았다면 이번 분석에 비교 자료가 제공되지 않았다고 설명하세요.")
             if _EXACT_TARGET.search(sentence) and not negated:
                 add("average_as_exact_target", "review", field, "구간 평균의 차이를 정확한 한 순간의 목표 위치·자세로 바꾸었는지 검토하세요. 목표 순간이나 자세를 직접 관측한 근거가 필요합니다.")
+            if (re.search(r"영향도|비중|기여", sentence) and not negated
+                    and re.search(r"\d+(?:\.\d+)?\s*점.{0,12}(?:낮|깎|감점)|(?:원인|때문|교정|고쳐|고치)", sentence)):
+                add("contribution_interpretation_review", "review", field, "자세 차이의 상대 비중을 점수 감점량·원인·교정 우선순위로 바꾸었는지 검토하세요.")
             if any(name in sentence for name in excluded_names) and not negated:
                 add("excluded_item_in_text", "review", field, "제외된 항목 이름이 문장에 있습니다. 보류 안내인지 저신뢰 항목의 교정 지시인지 검토하세요.")
             if re.search(r"(?:리듬|템포).{0,12}유지", sentence) and not negated:
@@ -205,6 +208,10 @@ def validate_coaching_output(
                 # Decimal points in a preceding component score are not sentence
                 # boundaries ("자세 80.4점의 60%" still needs a ratio check).
                 for match in re.finditer(rf"(?:{label})(?:[^.!?\n]|\.(?=\d)){{0,35}}?(\d+(?:\.\d+)?)\s*(?:%|퍼센트)", text):
+                    if (re.search(r"영향도|비중|기여", match.group())
+                            and not re.search(r"가중|반영|합산|곱|×", match.group())):
+                        # A posture-difference share is not the 70/30 formula.
+                        continue
                     weight = (score_basis.get("weights") or {}).get(weight_key)
                     if not score_basis.get("verified_composition") or not _finite(weight) or abs(float(match.group(1)) - 100 * weight) > .001:
                         add("score_formula_conflict", "review", field, "명시한 합산 비율이 검증된 계산 관계와 다릅니다. 다른 모델의 비율을 소급 적용했는지 검토하세요.")

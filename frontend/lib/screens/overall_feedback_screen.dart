@@ -253,6 +253,12 @@ class _FeedbackBody extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (feedback.scoreContributions.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _ScoreContributionCard(
+                    contributions: feedback.scoreContributions,
+                  ),
+                ],
                 const SizedBox(height: 12),
                 _CoachCard(feedback: feedback),
                 const SizedBox(height: 12),
@@ -505,7 +511,7 @@ class _ScoreCard extends StatelessWidget {
                 Text(
                   feedbackNumber(feedback.totalScore),
                   style: const TextStyle(
-                    fontSize: 38,
+                    fontSize: 30,
                     height: 1.0,
                     fontWeight: FontWeight.w700,
                     color: AppColors.primary,
@@ -610,6 +616,103 @@ class _SubScore extends StatelessWidget {
 
 /// 피그마 보조 글자색.
 const Color _gray = Color(0xFF8E8E93);
+
+// ---------------------------------------------------------------------------
+// 점수 영향도: 어느 부위가 점수를 얼마나 깎았는지(기준과 벌어진 비중) 막대로.
+// ---------------------------------------------------------------------------
+class _ScoreContributionCard extends StatelessWidget {
+  const _ScoreContributionCard({required this.contributions});
+
+  final List<ScoreContribution> contributions;
+
+  // 막대는 '점수를 깎은 비중'(길이)만 나타낸다. 잘함/개선필요 같은 상태는 아래 부위 카드에
+  // 이미 색으로 보이므로, 여기서는 상태색을 쓰지 않고 중립 단색으로 둔다(색=상태로 오해 방지).
+  static const Color _bar = Color(0xFF6B7FB3);
+
+  @override
+  Widget build(BuildContext context) {
+    final hasLow = contributions.any((c) => c.isLowReliability);
+    // 막대 길이는 비중 그대로(트랙 전체=100%). "전체 중 이만큼"으로 읽히게.
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '점수 영향도',
+            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '자세 점수 계산에 쓰인 기준과의 차이를 부위별 비중으로 보여줘요. '
+            '표시된 부위 안에서 비교한 비율이며, 종합점수가 몇 점 낮아졌다는 뜻은 아니에요.',
+            style: TextStyle(fontSize: 12, color: AppColors.hint, height: 1.4),
+          ),
+          const SizedBox(height: 13),
+          for (final c in contributions)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 11),
+              child: Opacity(
+                opacity: c.isLowReliability ? 0.5 : 1,
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 84,
+                      child: Text(
+                        c.isLowReliability ? '${c.name} *' : c.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.subtitle,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(5),
+                        child: LinearProgressIndicator(
+                          value: c.share.clamp(0.0, 1.0),
+                          minHeight: 9,
+                          backgroundColor: const Color(0xFFEEF0F2),
+                          valueColor: const AlwaysStoppedAnimation(_bar),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    SizedBox(
+                      width: 38,
+                      child: Text(
+                        '${(c.share * 100).round()}%',
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (hasLow)
+            const Padding(
+              padding: EdgeInsets.only(top: 1),
+              child: Text(
+                '* 몸에 가려 검출 신뢰도가 낮아 참고용이에요. 비중 계산에는 포함돼 있어요.',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppColors.hint,
+                  height: 1.5,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 /// ▼9 / ▲8 같은 증감 배지.
 class _DeltaBadge extends StatelessWidget {

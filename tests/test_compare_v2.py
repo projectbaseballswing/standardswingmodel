@@ -62,6 +62,58 @@ def test_reference_swing_scores_reasonably(model, skeleton):
     assert overall["distance"] is not None
 
 
+def test_score_contributions_decompose_posture_score(model, skeleton):
+    """점수 산출 근거: 부위별 비중이 1 로 합쳐지고, 저신뢰 부위도 포함한다."""
+    overall = _compare(model, skeleton).overall()
+    rows = overall["score_contributions"]
+    assert rows, "점수 영향도 데이터가 비어 있습니다."
+
+    # 표시되는 부위들의 비중은 합이 1 이어야 한다 (표시 부위들끼리의 상대 비중).
+    total = sum(r["share"] for r in rows)
+    assert abs(total - 1.0) < 1e-2, f"비중 합이 1 이 아님: {total}"
+
+    # 비중 내림차순 정렬 + 각 행 필드 계약
+    shares = [r["share"] for r in rows]
+    assert shares == sorted(shares, reverse=True)
+    keys = {r["key"] for r in rows}
+    group_keys = {g["key"] for g in overall["group_scores"] if g["available"]}
+    assert keys <= group_keys
+    for r in rows:
+        assert 0.0 <= r["share"] <= 1.0
+        assert r["reliability"] in ("low", "medium", "high")
+
+    # 저신뢰 부위(뒷팔 등)도 비중 계산에 들어간다: group_scores 의 저신뢰 가용 부위는 빠지지 않는다.
+    low_available = {g["key"] for g in overall["group_scores"]
+                    if g["available"] and g["reliability"] == "low"}
+    assert low_available <= keys
+
+
+def test_joint_contribution_splits_part_score(model, skeleton):
+    """관절별 기여도: 같은 부위의 표시 피처들끼리 부위 내 비중 합이 1, 저신뢰 피처는 null."""
+    joints = _compare(model, skeleton).joints()
+    from feedback.compare_v2 import BODY_PARTS
+
+    by_part: dict = {}
+    for j in joints:
+        assert "contribution" in j
+        if j["reliability"] == "low":
+            assert j["contribution"] is None  # 저신뢰 피처는 비중을 매기지 않는다
+            continue
+        if not j["available"]:
+            continue
+        c = j["contribution"]
+        if c is None:
+            continue
+        assert 0.0 <= c <= 1.0
+        by_part.setdefault(BODY_PARTS.get(j["key"], "other"), []).append(c)
+
+    # 둘 이상 표시 피처가 있는 부위는 그 피처들 비중 합이 1 이어야 한다.
+    multi = {p: vals for p, vals in by_part.items() if len(vals) >= 2}
+    assert multi, "표시 피처가 2개 이상인 부위가 없습니다."
+    for part, vals in multi.items():
+        assert abs(sum(vals) - 1.0) < 1e-2, f"{part} 부위 내 비중 합이 1 이 아님: {sum(vals)}"
+
+
 def test_speed_metrics_are_filled(model, skeleton):
     """0.1 에서 비어 있던 속도 지표가 0.2 에서는 값을 가진다."""
     speed = _compare(model, skeleton).speed_feedback()
