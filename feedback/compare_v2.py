@@ -372,6 +372,7 @@ class SwingComparisonV2:
             "distance": _r(distance, 3),
             "typical_pro_distance": _r(self.model.typical_distance, 3),
             "group_scores": group_scores,
+            "score_contributions": self._score_contributions(group_scores),
             "worst_segment": None if worst is None else {
                 "start_frame": worst[2],
                 "end_frame": worst[2] + 1,
@@ -433,6 +434,39 @@ class SwingComparisonV2:
         rows = [r for r in self._candidates(joints) if r["level"] != "good"]
         rows.sort(key=lambda item: abs(item["z_score"]), reverse=True)
         return self._pick_distinct(rows, top_k)
+
+    def _score_contributions(self, group_scores: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """자세 점수 산출 근거: 어느 부위가 점수를 얼마나 깎았는지(비중).
+
+        자세 점수는 모든 구간·지점 z 의 RMS(_overall_distance)로 환산하므로, 그 거리²는
+        피처별 z² 합으로 정확히 분해된다. 부위별 z² 합 / (표시 부위들의 z² 합) = 그 부위가
+        점수에서 차지하는 비중이고, 표시 부위들끼리 합하면 1 이 된다.
+
+        신뢰도 낮은 부위(뒷팔 팔꿈치 등)도 점수에는 들어가므로 비중 계산에 포함한다
+        (화면에서 흐리게 표시). 각 행의 reliability 로 구분하면 된다.
+        """
+        part_ss: Dict[str, float] = {}
+        for z in self.diff_z.values():
+            squared = np.square(z)
+            for index, name in enumerate(self.model.feature_names):
+                part = BODY_PARTS.get(name, "other")
+                part_ss[part] = part_ss.get(part, 0.0) + float(np.nansum(squared[:, index]))
+
+        rows_raw = [(g, part_ss.get(g["key"], 0.0)) for g in group_scores
+                    if g.get("available") and part_ss.get(g["key"], 0.0) > 0]
+        total = sum(value for _, value in rows_raw)
+        if total <= 0:
+            return []
+
+        rows = [{
+            "key": g["key"],
+            "name": g["name"],
+            "reliability": g["reliability"],
+            "score": g["score"],
+            "share": _r(value / total, 3),
+        } for g, value in rows_raw]
+        rows.sort(key=lambda r: r["share"] or 0.0, reverse=True)
+        return rows
 
     # ------------------------------------------------------------------
     # 관절별

@@ -262,6 +262,17 @@ class FeedbackRepository {
             ),
       items: items,
       coaching: coaching,
+      scoreContributions: [
+        for (final c in _rows(overall['score_contributions']))
+          if ((c['key'] as String?)?.isNotEmpty ?? false)
+            ScoreContribution(
+              key: c['key'] as String,
+              name: (c['name'] as String?) ?? '부위',
+              share: _number(c['share']) ?? 0,
+              score: _number(c['score']),
+              reliability: _reliability(c['reliability']),
+            ),
+      ],
       // 직전 분석이 있으면 이전 전체 점수를 실어 반복 피드백(증감)을 켠다.
       previousTotalScore: previousTotal,
     );

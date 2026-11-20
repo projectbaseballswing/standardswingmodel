@@ -17,6 +17,22 @@ Map<String, dynamic> storedAnalysis() => {
           'reliability': 'high',
         },
       ],
+      'score_contributions': [
+        <String, dynamic>{
+          'key': 'rear_arm',
+          'name': '오른쪽 팔꿈치',
+          'reliability': 'low',
+          'score': 55.0,
+          'share': 0.6,
+        },
+        <String, dynamic>{
+          'key': 'lead_arm',
+          'name': '왼쪽 팔',
+          'reliability': 'high',
+          'score': 63.8,
+          'share': 0.4,
+        },
+      ],
     },
     'joints': [
       {
