@@ -211,13 +211,15 @@ class FeedbackRepository {
               ? '이 부위는 분석할 수 없습니다.'
               : score == null
               ? '부위 점수가 제공되지 않았습니다.'
-              : features.isEmpty
-              ? '신뢰할 수 있는 세부 관절 데이터가 없어 부위 점수만 표시합니다.'
               : groupReliability == 'low'
-              ? '검출 신뢰도가 낮습니다. 점수는 참고용으로 확인하세요.'
+              ? '이 부위는 관절 추정이 불확실해 점수만 참고용으로 보여드려요. 점수 차이가 실제 자세의 개선이나 악화를 뜻하지는 않아요.'
+              : features.isEmpty
+              ? '비교할 세부 관절 정보가 없어 부위 점수만 참고용으로 보여드려요.'
               : _partDescription(features),
           reliability: groupReliability,
-          features: groupAvailable ? features : const [],
+          features: groupAvailable && groupReliability != 'low'
+              ? features
+              : const [],
         ),
       );
     }
@@ -724,7 +726,7 @@ class FeedbackRepository {
   List<PartAnalysis> buildPartAnalyses(OverallFeedback feedback) {
     final list = <PartAnalysis>[];
     for (final item in feedback.items) {
-      final status = _statusOf(item, hasComparison: feedback.hasComparison);
+      final status = item.status(hasComparison: feedback.hasComparison);
       final hasIssue = item.features.any((f) => f.evidence?.isIssue == true);
       // LLM 부위 코칭이 있으면 요약/포인트를 그걸로 대체(없으면 규칙 기반).
       // - 측정 불가(limited) 부위는 안내 문구를 써야 하므로 LLM 로 덮지 않는다.
@@ -775,23 +777,6 @@ class FeedbackRepository {
       );
     }
     return list;
-  }
-
-  /// 부위 상태를 정한다.
-  ///  - 이전 비교가 없으면 부위 점수(level) 대비로
-  ///    "잘함([proGood]) / 개선 필요([proBad])" 를 나눈다.
-  ///  - 반복 피드백: 이전 대비 증감으로 개선/개선 필요/변화 없음을 나눈다.
-  JointStatus _statusOf(FeedbackItem item, {required bool hasComparison}) {
-    if (item.limited || item.features.isEmpty) return JointStatus.limited;
-    if (!hasComparison) {
-      return item.level == 'good' ? JointStatus.proGood : JointStatus.proBad;
-    }
-    final delta = item.delta;
-    if (delta == null) return JointStatus.limited;
-    const band = 2; // |증감| 이 이 값 이하면 "변화 없음".
-    if (delta > band) return JointStatus.improved;
-    if (delta < -band) return JointStatus.worsened;
-    return JointStatus.unchanged;
   }
 
   String _jointSummary(FeedbackItem item, JointStatus status) {

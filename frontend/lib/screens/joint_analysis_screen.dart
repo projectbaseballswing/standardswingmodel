@@ -535,7 +535,8 @@ class _ScoreCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = _statusStyle(part.status);
-    final delta = part.delta;
+    final limited = part.status == JointStatus.limited;
+    final delta = limited ? null : part.delta;
     // 비교할 이전 점수가 있어야 이전/변화·비교 기간 선택을 보여준다.
     final hasComparison = part.previousScore != null;
     return _Card(
@@ -591,50 +592,52 @@ class _ScoreCard extends StatelessWidget {
             Row(
               children: [
                 _StatBox(
-                  label: '이전 점수',
+                  label: limited ? '이전 점수 · 참고' : '이전 점수',
                   value: part.previousScore?.toString() ?? '-',
                 ),
                 const SizedBox(width: 10),
                 _StatBox(
-                  label: '현재 점수',
+                  label: limited ? '현재 점수 · 참고' : '현재 점수',
                   value: feedbackNumber(part.currentScore),
                   valueColor: style.color,
                 ),
-                const SizedBox(width: 10),
-                _StatBox(
-                  label: '점수 변화',
-                  child: delta == null
-                      ? const Text(
-                          '-',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.hint,
-                          ),
-                        )
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              delta > 0
-                                  ? Icons.arrow_drop_up
-                                  : (delta < 0
-                                        ? Icons.arrow_drop_down
-                                        : Icons.remove),
-                              size: 18,
-                              color: style.color,
+                if (!limited) ...[
+                  const SizedBox(width: 10),
+                  _StatBox(
+                    label: '점수 변화',
+                    child: delta == null
+                        ? const Text(
+                            '-',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.hint,
                             ),
-                            Text(
-                              feedbackNumber(delta.abs()),
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                delta > 0
+                                    ? Icons.arrow_drop_up
+                                    : (delta < 0
+                                          ? Icons.arrow_drop_down
+                                          : Icons.remove),
+                                size: 18,
                                 color: style.color,
                               ),
-                            ),
-                          ],
-                        ),
-                ),
+                              Text(
+                                feedbackNumber(delta.abs()),
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: style.color,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ],
               ],
             )
           else
@@ -1808,10 +1811,10 @@ _StatusStyle _statusStyle(JointStatus status) {
       );
     case JointStatus.limited:
       return const _StatusStyle(
-        color: Color(0xFFBDBDBD),
+        color: Color(0xFF757575),
         soft: Color(0xFFF4F4F4),
         textOnSoft: Color(0xFF757575),
-        badge: '평가 제한',
+        badge: '측정 확인 필요',
         messageIcon: Icons.info_outline,
       );
     case JointStatus.proGood:

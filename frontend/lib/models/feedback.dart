@@ -50,6 +50,19 @@ class FeedbackItem {
   bool get limited =>
       !available || currentScore == null || reliability == 'low';
 
+  /// One classification shared by the overall and body-part screens.
+  JointStatus status({required bool hasComparison}) {
+    if (limited || features.isEmpty) return JointStatus.limited;
+    if (!hasComparison) {
+      return level == 'good' ? JointStatus.proGood : JointStatus.proBad;
+    }
+    final change = delta;
+    if (change == null) return JointStatus.limited;
+    if (change > 2) return JointStatus.improved;
+    if (change < -2) return JointStatus.worsened;
+    return JointStatus.unchanged;
+  }
+
   /// 설명 문구(2줄 내외).
   final String description;
 
@@ -557,7 +570,7 @@ String feedbackNumber(num? value) => value == null
 String reliabilityLabel(String value) => switch (value) {
   'high' => '신뢰도 높음',
   'medium' => '신뢰도 보통 · 참고해서 확인하세요',
-  'low' => '신뢰도 낮음 · 참고용',
+  'low' => '측정 확인 필요 · 점수는 참고용',
   _ => '신뢰도 정보 없음',
 };
 

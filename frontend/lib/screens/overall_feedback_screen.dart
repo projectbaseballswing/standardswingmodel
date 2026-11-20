@@ -291,9 +291,16 @@ class _FeedbackBody extends StatelessWidget {
     final sections = <_CategorySpec>[];
     sections.add(
       _CategorySpec(
-        title: '참고용 · 분석 제한',
+        title: '측정 확인 필요',
         tone: _Tone.neutral,
-        items: f.items.where((i) => i.limited).toList(),
+        limited: true,
+        items: f.items
+            .where(
+              (i) =>
+                  i.status(hasComparison: f.hasComparison) ==
+                  JointStatus.limited,
+            )
+            .toList(),
       ),
     );
     if (!f.hasComparison) {
@@ -302,33 +309,46 @@ class _FeedbackBody extends StatelessWidget {
         _CategorySpec(
           title: '잘한 부분',
           tone: _Tone.good,
-          items: f.items.where((i) => !i.limited && i.level == 'good').toList(),
+          items: f.items
+              .where(
+                (i) => i.status(hasComparison: false) == JointStatus.proGood,
+              )
+              .toList(),
         ),
       );
       sections.add(
         _CategorySpec(
           title: '개선이 필요한 부분',
           tone: _Tone.bad,
-          items: f.items.where((i) => !i.limited && i.level != 'good').toList(),
+          items: f.items
+              .where(
+                (i) => i.status(hasComparison: false) == JointStatus.proBad,
+              )
+              .toList(),
         ),
       );
     } else {
       // 반복 피드백: 이전 대비 증감으로 나눈다.
-      // |증감| 이 이 값 이하면 "큰 변화 없음" 으로 보고 유지로 분류한다.
-      // TODO(backend): 기준 폭은 추후 실제 점수 분포에 맞춰 조정.
-      const maintainBand = 2;
       sections.add(
         _CategorySpec(
           title: '개선된 부분',
           tone: _Tone.good,
-          items: f.items.where((i) => (i.delta ?? 0) > maintainBand).toList(),
+          items: f.items
+              .where(
+                (i) => i.status(hasComparison: true) == JointStatus.improved,
+              )
+              .toList(),
         ),
       );
       sections.add(
         _CategorySpec(
           title: '개선이 필요한 부분',
           tone: _Tone.bad,
-          items: f.items.where((i) => (i.delta ?? 0) < -maintainBand).toList(),
+          items: f.items
+              .where(
+                (i) => i.status(hasComparison: true) == JointStatus.worsened,
+              )
+              .toList(),
         ),
       );
       sections.add(
@@ -336,7 +356,9 @@ class _FeedbackBody extends StatelessWidget {
           title: '유지된 부분',
           tone: _Tone.neutral,
           items: f.items
-              .where((i) => (i.delta ?? 0).abs() <= maintainBand)
+              .where(
+                (i) => i.status(hasComparison: true) == JointStatus.unchanged,
+              )
               .toList(),
         ),
       );
@@ -618,16 +640,16 @@ class _SubScore extends StatelessWidget {
 const Color _gray = Color(0xFF8E8E93);
 
 // ---------------------------------------------------------------------------
-// 점수 영향도: 어느 부위가 점수를 얼마나 깎았는지(기준과 벌어진 비중) 막대로.
+// 점수 영향도: 자세 계산의 표준화 차이 제곱합을 부위별로 나눈 상대 비중.
 // ---------------------------------------------------------------------------
 class _ScoreContributionCard extends StatelessWidget {
   const _ScoreContributionCard({required this.contributions});
 
   final List<ScoreContribution> contributions;
 
-  // 막대는 '점수를 깎은 비중'(길이)만 나타낸다. 잘함/개선필요 같은 상태는 아래 부위 카드에
-  // 이미 색으로 보이므로, 여기서는 상태색을 쓰지 않고 중립 단색으로 둔다(색=상태로 오해 방지).
+  // PR87's single neutral color is retained; uncertain values use gray.
   static const Color _bar = Color(0xFF6B7FB3);
+  static const Color _unknown = Color(0xFFC9CDD3);
 
   @override
   Widget build(BuildContext context) {
@@ -652,14 +674,14 @@ class _ScoreContributionCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(bottom: 11),
               child: Opacity(
-                opacity: c.isLowReliability ? 0.5 : 1,
+                opacity: 1,
                 child: Row(
                   children: [
                     SizedBox(
                       width: 84,
                       child: Text(
-                        c.isLowReliability ? '${c.name} *' : c.name,
-                        maxLines: 1,
+                        c.isLowReliability ? '${c.name}\n측정 확인 필요' : c.name,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 12.5,
@@ -673,10 +695,13 @@ class _ScoreContributionCard extends StatelessWidget {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(5),
                         child: LinearProgressIndicator(
+                          key: ValueKey('score-contribution-${c.key}'),
                           value: c.share.clamp(0.0, 1.0),
                           minHeight: 9,
                           backgroundColor: const Color(0xFFEEF0F2),
-                          valueColor: const AlwaysStoppedAnimation(_bar),
+                          valueColor: AlwaysStoppedAnimation(
+                            c.isLowReliability ? _unknown : _bar,
+                          ),
                         ),
                       ),
                     ),
@@ -700,7 +725,8 @@ class _ScoreContributionCard extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.only(top: 1),
               child: Text(
-                '* 몸에 가려 검출 신뢰도가 낮아 참고용이에요. 비중 계산에는 포함돼 있어요.',
+                '측정 확인 필요 부위도 계산 비중에는 포함돼요. '
+                '회색 막대는 참고용이며, 비중이 크다는 이유로 교정 대상이 되지는 않아요.',
                 style: TextStyle(
                   fontSize: 11,
                   color: AppColors.hint,
@@ -748,11 +774,17 @@ class _DeltaBadge extends StatelessWidget {
 enum _Tone { good, bad, neutral }
 
 class _CategorySpec {
-  _CategorySpec({required this.title, required this.tone, required this.items});
+  _CategorySpec({
+    required this.title,
+    required this.tone,
+    required this.items,
+    this.limited = false,
+  });
 
   final String title;
   final _Tone tone;
   final List<FeedbackItem> items;
+  final bool limited;
 }
 
 class _CategoryCard extends StatefulWidget {
@@ -827,7 +859,7 @@ class _CategoryCardState extends State<_CategoryCard> {
                 thickness: 0.6,
                 color: Color(0xFFEDEDED),
               ),
-            _ItemRow(item: visible[i], tone: spec.tone),
+            _ItemRow(item: visible[i], tone: spec.tone, limited: spec.limited),
           ],
         ],
       ),
@@ -836,14 +868,19 @@ class _CategoryCardState extends State<_CategoryCard> {
 }
 
 class _ItemRow extends StatelessWidget {
-  const _ItemRow({required this.item, required this.tone});
+  const _ItemRow({
+    required this.item,
+    required this.tone,
+    required this.limited,
+  });
 
   final FeedbackItem item;
   final _Tone tone;
+  final bool limited;
 
   @override
   Widget build(BuildContext context) {
-    final delta = item.delta;
+    final delta = limited ? null : item.delta;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -866,7 +903,18 @@ class _ItemRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // 이름 + 점수
-              if (delta != null)
+              if (limited)
+                Text(
+                  '${item.label} · 참고용\n'
+                  '${item.previousScore == null ? '' : '이전 ${feedbackNumber(item.previousScore)}점 · '}'
+                  '현재 ${feedbackNumber(item.currentScore)}점',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    height: 1.5,
+                    color: AppColors.subtitle,
+                  ),
+                )
+              else if (delta != null)
                 // 반복 피드백: 이름  72 → 80점  (+8) — 길면 줄바꿈된다.
                 Text.rich(
                   TextSpan(
