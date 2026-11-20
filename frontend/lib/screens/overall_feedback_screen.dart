@@ -985,7 +985,7 @@ class _CoachCard extends StatelessWidget {
             _CoachStep(
               icon: Icons.check_circle_outline,
               label: '잘한 점 · 기준과 가까운 구간',
-              text: '${strength.observation}\n다른 구간까지 모두 안정적이라는 뜻은 아니에요.',
+              text: '${strength.observation}\n다른 구간에서는 결과가 달라질 수 있어요.',
             ),
           if (feedback.coaching != null)
             _CoachStep(
@@ -1003,22 +1003,15 @@ class _CoachCard extends StatelessWidget {
               icon: Icons.search,
               label: '원본에서 먼저 확인',
               text:
-                  '${first.phaseName} 구간 전체에서 ${first.name} 측정이 실제 자세와 맞는지 확인하세요. '
-                  '구간 평균은 한 순간에 맞춰야 할 목표 자세가 아니에요.',
-            ),
-            const _CoachStep(
-              icon: Icons.build_outlined,
-              label: '작게 시도해 볼 조절',
-              text:
-                  '차이가 실제로 보일 때만 기준 쪽으로 조금 조절해 보세요. '
-                  '원인이나 필요한 조절량은 현재 분석만으로 확정하기 어려워요.',
+                  '${first.action}\n이 설명은 구간의 평균을 비교한 것이에요. '
+                  '한순간의 자세를 이 값에 맞추라는 뜻은 아니에요.',
             ),
             const _CoachStep(
               icon: Icons.sports_baseball_outlined,
-              label: '확인 연습 · 일반적인 제안',
+              label: '원본을 보는 방법',
               text:
-                  '해당 구간을 천천히 재현하고 같은 구도로 다시 촬영해 비교해 보세요. '
-                  '이 연습의 교정 효과를 분석으로 검증한 것은 아니에요.',
+                  '해당 구간의 처음·중간·끝 장면을 천천히 비교해 보세요. '
+                  '어떤 동작을 얼마나 바꿀지는 이 결과만으로 정하기 어려워요.',
               isLast: true,
             ),
           ] else

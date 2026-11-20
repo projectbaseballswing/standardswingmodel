@@ -12,6 +12,8 @@
 ///                  보여주고 "개선 / 개선 필요 / 유지" 로 나눈다.
 library;
 
+import '../data/feedback_language.dart';
+
 /// 신체 부위. 아이콘·색·인체 그림 구분에만 쓴다.
 enum BodyPart { leg, arm, torso }
 
@@ -129,7 +131,7 @@ class FeatureAnalysis {
   final String ruleComment;
   String get displayedComment => comment.isNotEmpty ? comment : ruleComment;
   String get commentSource =>
-      comment.isNotEmpty ? 'GPT 코칭 · 검토 완료' : '분석 근거 안내 · 규칙 기반';
+      comment.isNotEmpty ? 'GPT 코칭 · 검토 완료' : '분석 결과 안내 · 기본 설명';
 
   /// 임팩트 순간의 내 값 vs 기준.
   final Measure? impact;
@@ -225,7 +227,7 @@ class PartAnalysis {
     required this.summary,
     required this.coachComment,
     required this.pointsTitle,
-    this.pointsSource = '분석 근거 안내 · 규칙 기반',
+    this.pointsSource = '분석 결과 안내 · 기본 설명',
     required this.points,
     this.previousScore,
   });
@@ -400,7 +402,7 @@ class CoachingReview {
     'review_required' => 'GPT 코칭은 사람 검토가 필요해 표시하지 않습니다. 분석 근거 안내를 보여드려요.',
     'blocked' => '코칭 검증 조건을 충족하지 못해 분석 근거 안내를 보여드려요.',
     'generation_failed' => 'GPT 코칭 생성에 실패해 분석 근거 안내를 보여드려요.',
-    _ => '승인된 GPT 코칭이 없어 분석 근거 안내를 보여드려요.',
+    _ => '현재는 분석 결과를 바탕으로 한 기본 안내를 보여드려요.',
   };
 }
 
@@ -419,17 +421,16 @@ class FeedbackEvidence {
   final String joint, part, name, phase, phaseName, direction;
   final double z;
   final bool isIssue;
-  String get observation => '$phaseName 구간 평균의 $name: $direction.';
-  String get action =>
-      '원본의 $phaseName 구간에서 $name 측정이 실제 자세와 맞는지, 관절이 가려지지 않았는지 확인하세요. '
-      '원본에서도 차이가 확인되면 해당 구간을 천천히 재현하고, 다음 촬영에서 같은 차이가 반복되는지 확인하세요.';
+  String get observation =>
+      feedbackObservation(joint, name, phaseName, direction);
+  String get action => feedbackObservationAction(joint, name, phaseName);
 }
 
-/// 점수 산출 근거: 한 부위가 자세 점수를 깎은 비중.
+/// 자세 계산에 사용한 표준화 차이 제곱합의 부위별 상대 비중.
 ///
 /// 기준 자세와 많이 벌어진(편차가 큰) 부위일수록 [share] 가 크다.
-/// 표시되는 부위들의 [share] 합은 1 이다. 신뢰도 낮은 부위(뒷팔 등)도 포함되며
-/// [reliability] 가 'low' 면 화면에서 흐리게(참고용) 표시한다.
+/// 표시 부위의 [share] 합은 반올림 오차를 제외하면 1이다. 저신뢰도 계산에는
+/// 포함하며, [reliability] 가 'low' 면 회색으로 참고용 표시한다.
 class ScoreContribution {
   const ScoreContribution({
     required this.key,
@@ -442,7 +443,7 @@ class ScoreContribution {
   final String key;
   final String name;
 
-  /// 0~1. 자세 점수를 깎은 비중.
+  /// 0~1. 표시 부위 내 상대 비중. 종합 점수의 감점량이 아니다.
   final double share;
 
   /// 그 부위 점수(0~100). 막대 색/상태 판정용. 없을 수 있다.
@@ -478,13 +479,13 @@ class OverallFeedback {
     this.priorities = const [],
     this.strengths = const [],
     this.scoreExplanation = '',
-    this.coachSource = '분석 근거 안내 · 규칙 기반',
-    this.summarySource = '분석 근거 안내 · 규칙 기반',
+    this.coachSource = '분석 결과 안내 · 기본 설명',
+    this.summarySource = '분석 결과 안내 · 기본 설명',
     this.coachingReview = const CoachingReview(),
     this.scoreContributions = const [],
   });
 
-  /// 점수 산출 근거: 부위별로 점수를 깎은 비중(합 1). 0.2.x 이전 기록엔 없어 빈 목록.
+  /// 자세 차이의 부위별 상대 비중. 필드가 없는 과거 기록은 빈 목록.
   final List<ScoreContribution> scoreContributions;
 
   /// 분석 id. 관절·구간 코칭이 아직 생성 중(pending)일 때 상세 화면이 재조회하는 데 쓴다.

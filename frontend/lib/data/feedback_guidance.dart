@@ -1,5 +1,6 @@
 // Presentation policy only: never recalculates scores or mutates the report.
 import '../models/feedback.dart';
+import 'feedback_language.dart';
 
 bool reliableFeedback(dynamic value) => value == 'high' || value == 'medium';
 double? feedbackValue(dynamic v) =>
@@ -71,18 +72,18 @@ bool _consistentPhase(Map<String, dynamic> p) {
 }
 
 String featureDirection(String key, String direction, {String? serverText}) {
-  if (direction == 'similar') return '기준 범위와 비슷하게 측정됐어요';
+  if (direction == 'similar') return '기준과 비슷하게 나타났어요';
   if (direction != 'higher' && direction != 'lower') return '차이 방향을 확인할 수 없어요';
   const labels = <String, List<String>>{
-    'lead_elbow_angle': ['더 펴져 있어요', '더 굽혀져 있어요'],
-    'rear_elbow_angle': ['더 펴져 있어요', '더 굽혀져 있어요'],
-    'lead_knee_angle': ['더 펴져 있어요', '더 굽혀져 있어요'],
-    'rear_knee_angle': ['더 펴져 있어요', '더 굽혀져 있어요'],
+    'lead_elbow_angle': ['더 펴진 것으로 나타났어요', '더 굽혀진 것으로 나타났어요'],
+    'rear_elbow_angle': ['더 펴진 것으로 나타났어요', '더 굽혀진 것으로 나타났어요'],
+    'lead_knee_angle': ['더 펴진 것으로 나타났어요', '더 굽혀진 것으로 나타났어요'],
+    'rear_knee_angle': ['더 펴진 것으로 나타났어요', '더 굽혀진 것으로 나타났어요'],
     'torso_lean': ['투수 쪽으로 더 기울어 있어요', '포수 쪽으로 더 기울어 있어요'],
     'shoulder_tilt': ['뒤 어깨가 더 내려가 있어요', '앞 어깨가 더 내려가 있어요'],
     'hip_tilt': ['뒤 골반이 더 내려가 있어요', '앞 골반이 더 내려가 있어요'],
     'hand_x_from_shoulder': ['투수 쪽으로 더 나가 있어요', '포수 쪽으로 더 들어가 있어요'],
-    'hand_y_from_shoulder': ['더 높아요', '더 낮아요'],
+    'hand_y_from_shoulder': ['높게 나타났어요', '낮게 나타났어요'],
     'lead_ankle_x_from_hip': ['더 멀리 나가 있어요', '덜 나가 있어요'],
     'lead_ankle_y_from_hip': ['더 높이 들려 있어요', '더 낮아요'],
     'shoulder_x_from_hip': ['투수 쪽으로 더 쏠려 있어요', '포수 쪽으로 더 남아 있어요'],
@@ -91,6 +92,15 @@ String featureDirection(String key, String direction, {String? serverText}) {
     'hip_turn': ['더 열려 있어요', '덜 열려 있어요'],
     'hip_shoulder_separation': ['꼬임이 덜해요 (어깨가 더 열림)', '꼬임이 더 커요 (어깨가 더 닫힘)'],
   };
+  if (key == 'hip_tilt' || key == 'shoulder_tilt') {
+    final side = direction == 'higher' ? '뒤쪽' : '앞쪽';
+    final subject = key == 'hip_tilt' ? '골반이' : '어깨가';
+    return '화면에서 $side $subject 기준보다 낮게 나타났어요';
+  }
+  if (key == 'lead_ankle_x_from_hip') {
+    return '화면에서 골반 기준 앞발이 기준보다 투수 쪽으로 '
+        '${direction == 'higher' ? '더' : '덜'} 나와 있었어요';
+  }
   final pair = labels[key];
   if (pair != null) return '기준보다 ${pair[direction == 'higher' ? 0 : 1]}';
   return serverText?.isNotEmpty == true
@@ -104,17 +114,16 @@ String contextualDirection(
   String? phase, {
   String? serverText,
 }) =>
-    '${phase?.isNotEmpty == true ? '$phase 구간: ' : '구간 정보 미제공: '}'
+    '${phase?.isNotEmpty == true ? '$phase 구간에서 ' : '구간 정보 미제공: '}'
     '${featureDirection(key, direction, serverText: serverText)}';
 
 String safeTempoWarning(String warning, double? analysisFps) {
   if (!warning.contains('더 높은 fps') || !warning.contains('구간이 짧아')) {
-    return warning;
+    return feedbackReportNotice(warning);
   }
   final frames = RegExp(r'\((\d+)프레임\)').firstMatch(warning)?.group(1);
-  return '기준 구간 길이가 분석 FPS${analysisFps == null ? '' : ' $analysisFps'}에서 '
-      '${frames == null ? '짧게' : '약 $frames프레임으로'} 환산되어 템포 판정을 보류했어요. '
-      '사용자 영상의 프레임 수가 아니며, 촬영 FPS만 높여 해결된다고 보장할 수 없어요.';
+  return '기준 구간을 분석 프레임으로 환산하면 ${frames == null ? '너무 짧아' : '약 $frames프레임이라'} '
+      '동작 시간 비교를 보류했어요. 사용자 영상의 프레임 수는 아니에요. 촬영 FPS만 높여 해결된다고 보장할 수는 없어요.';
 }
 
 class FeedbackGuidance {
@@ -174,7 +183,7 @@ FeedbackGuidance buildFeedbackGuidance(Map<String, dynamic> result) {
           FeedbackEvidence(
             joint: key,
             part: j['body_part'] as String,
-            name: j['name'] as String? ?? key,
+            name: feedbackFeatureName(key, j['name'] as String? ?? key),
             phase: p['phase'] as String,
             phaseName:
                 p['phase_name'] as String? ??
@@ -231,27 +240,26 @@ String explainScores(Map<String, dynamic> result) {
       total != null &&
       (posture * .7 + speed * .3 - total).abs() <= .11) {
     text.write(
-      '자세 ${feedbackNumber(posture)}점 × 70% + 속도 ${feedbackNumber(speed)}점 × 30%로 종합 ${feedbackNumber(total)}점이 산출됐어요. ',
+      '이번 종합 점수 ${feedbackNumber(total)}점은 자세 ${feedbackNumber(posture)}점(70%)과 손 속도 ${feedbackNumber(speed)}점(30%)을 합친 결과예요. ',
     );
   } else if (posture != null && speed == null && total == posture) {
     text.write('속도 점수가 없어 자세 점수 ${feedbackNumber(posture)}점만 종합 점수로 제공됐어요. ');
   } else {
-    text.write(
-      '이 기록에는 현재 합산식을 확인할 구성 점수가 충분하지 않아요. 저장된 종합 점수를 그대로 표시하며 기여도를 추정하지 않아요. ',
-    );
+    text.write('이 기록은 점수 구성 항목이 부족해 합산 과정을 확인하기 어려워요. 기록된 종합 점수는 그대로 보여드려요. ');
   }
   text.write(
-    '자세·부위 점수는 관절과 구간의 차이를 프로 선수의 변동 폭에 맞춰 비교한 점수예요. '
-    '종합 점수는 부위 점수의 단순 평균이 아니며, 특정 부위가 몇 점을 낮췄는지는 계산하지 않아요. ',
+    '자세·부위 점수는 관절 움직임이 기준 선수들의 동작과 얼마나 비슷한지 비교한 결과예요. '
+    '종합 점수는 부위 점수의 단순 평균이 아니에요. 한 부위가 몇 점을 낮췄는지도 따로 계산하지 않았어요. ',
   );
   if (speed != null) {
     text.write(
-      '속도 점수는 임팩트 주변 최대 손 속도를 기준 분포와 비교해요. 프로 중앙값은 80점, 상위 10% 기준은 100점이며 실제 타구 속도는 아니에요. ',
+      '손 속도 점수는 추정 임팩트 시점 주변의 최대 손 속도를 기준 선수들과 비교해요. '
+      '기준 선수들의 중간 수준을 80점, 상위 10% 수준을 100점으로 환산했어요. 실제 타구 속도는 아니에요. ',
     );
   }
   if (o['posture_capped'] == true) {
     text.write('이 기록은 골반·어깨 회전 확인이 모두 미충족되어 자세 점수에 40점 상한이 적용됐어요. ');
   }
-  text.write('점수와 차이의 크기는 실제 자세 정확도나 부상·타격 성과를 뜻하지 않아요.');
+  text.write('점수는 추정한 자세를 비교한 참고 지표예요. 실제 경기 성적이나 부상 위험을 직접 평가한 것은 아니에요.');
   return text.toString();
 }

@@ -678,7 +678,7 @@ class _ScoreCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 점수 영향도: 이 부위 점수에서 각 세부 항목(피처)이 깎은 비중. 종합 화면과 같은 패턴.
+// 부위 내 표시 항목의 표준화 차이 제곱합 비중. 종합점수의 감점량이 아니다.
 // ---------------------------------------------------------------------------
 class _ContributionCard extends StatelessWidget {
   const _ContributionCard({required this.part});
@@ -744,6 +744,7 @@ class _ContributionCard extends StatelessWidget {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(5),
                       child: LinearProgressIndicator(
+                        key: ValueKey('feature-contribution-${f.key}'),
                         value: f.contribution!.clamp(0.0, 1.0),
                         minHeight: 9,
                         backgroundColor: const Color(0xFFEEF0F2),
@@ -1169,6 +1170,31 @@ class _FeatureDetail extends StatelessWidget {
               ),
             ),
           ],
+          if (feature.description.isNotEmpty)
+            Material(
+              color: Colors.transparent,
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text(
+                  '측정 항목과 단위 보기',
+                  style: TextStyle(fontSize: 12),
+                ),
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '${feature.description}'
+                      '${feature.unit == 'body' ? '\n몸통 길이를 기준으로 맞춘 상대 위치예요. 실제 거리(cm)나 이동 거리가 아니에요.' : ''}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        height: 1.5,
+                        color: AppColors.subtitle,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -1195,7 +1221,7 @@ class _CoachCard extends StatelessWidget {
               Icon(Icons.auto_awesome, size: 16, color: Color(0xFF8A6BEA)),
               SizedBox(width: 6),
               Text(
-                '분석 근거 안내 · 규칙 기반',
+                '분석 결과 안내 · 기본 설명',
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
               ),
             ],

@@ -5,6 +5,7 @@ import '../api/auth_api.dart' show ApiException;
 import '../models/feedback.dart';
 import 'session.dart';
 import 'feedback_guidance.dart';
+import 'feedback_language.dart';
 
 /// 종합 피드백 데이터 공급.
 ///
@@ -117,7 +118,7 @@ class FeedbackRepository {
           name: c['name'] as String? ?? '',
           passed: c['passed'] as bool?,
           affectsScore: c['affects_score'] == true,
-          message: c['message'] as String? ?? '',
+          message: feedbackReportNotice(c['message'] as String? ?? ''),
         ),
     ];
 
@@ -257,7 +258,9 @@ class FeedbackRepository {
       modelVersion: version,
       available: available,
       reliability: reliability,
-      warnings: _strings(_map(overall['quality'])['warnings']),
+      warnings: _strings(
+        _map(overall['quality'])['warnings'],
+      ).map(feedbackReportNotice).toList(),
       phases: _mapPhases(
         _map(result['phases'])['phases'],
         swingChecks: rotationChecks,
@@ -266,7 +269,10 @@ class FeedbackRepository {
         jointDescriptions: {
           for (final j in _rows(result['joints']))
             if (j['key'] is String)
-              (j['key'] as String): (j['description'] as String?) ?? '',
+              (j['key'] as String): feedbackFeatureDescription(
+                j['key'] as String,
+                j['description'] as String? ?? '',
+              ),
         },
         guidance: guidance,
         analysisFps: _number(_map(result['phases'])['user_fps']),
@@ -289,15 +295,15 @@ class FeedbackRepository {
           : (coaching != null && coaching.overallSummary.isNotEmpty)
           ? coaching.overallSummary
           : guidance.issues.isNotEmpty
-          ? '프로 기준과 비교해 확인할 차이가 있어요. 아래에서 잘한 구간과 먼저 확인할 동작을 살펴보세요.'
-          : '측정 가능한 항목을 프로 기준과 비교했어요. 교정을 우선 제안할 충분한 차이 근거는 없어요.',
+          ? '기준 스윙과 차이가 있는 동작을 살펴볼게요. 먼저 확인할 부분을 아래에 정리했어요.'
+          : '측정 가능한 동작을 기준 스윙과 비교했어요. 지금은 먼저 고치라고 권할 만큼 확실한 차이가 없어요.',
       coachComment: !available || reliability == 'low'
           ? '분석 정보가 부족하거나 신뢰도가 낮아 자세에 대한 판단을 보류합니다.'
           : (coaching != null && coaching.overallCoach.isNotEmpty)
           ? coaching.overallCoach
           : guidance.issues.isNotEmpty
           ? '${guidance.issues.first.observation} ${guidance.issues.first.action}'
-          : '현재 측정값만으로 바꿔야 할 동작을 단정하지 않아요. 원본 영상과 측정 가능한 구간을 확인하세요.',
+          : '지금 측정만으로 꼭 고쳐야 할 동작을 단정할 수는 없어요. 원본 영상에서 확인되는 구간부터 살펴보세요.',
       priorities: guidance.issues.take(3).toList(),
       strengths: guidance.strengths.take(2).toList(),
       scoreExplanation: guidance.scoreExplanation,
@@ -306,10 +312,10 @@ class FeedbackRepository {
           coaching?.overallCoach.isNotEmpty == true ||
               coaching?.coachFeedback != null
           ? coaching!.sourceLabel
-          : '분석 근거 안내 · 규칙 기반',
+          : '분석 결과 안내 · 기본 설명',
       summarySource: coaching?.overallSummary.isNotEmpty == true
           ? coaching!.sourceLabel
-          : '분석 근거 안내 · 규칙 기반',
+          : '분석 결과 안내 · 기본 설명',
       items: items,
       coaching: coaching,
       scoreContributions: [
@@ -429,11 +435,11 @@ class FeedbackRepository {
     ).where((p) => p['phase'] == j['worst_phase']).firstOrNull;
     return FeatureAnalysis(
       key: key,
-      name: (j['name'] as String?) ?? '항목',
+      name: feedbackFeatureName(key, (j['name'] as String?) ?? '항목'),
       level: (j['level'] as String?) ?? 'good',
       direction: _worstPhaseDirection(j),
       directionText: evidence != null
-          ? '${evidence.phaseName} 구간: ${evidence.direction}'
+          ? '${evidence.phaseName} 구간에서 ${evidence.direction}'
           : contextualDirection(
               key,
               _worstPhaseDirection(j),
@@ -441,9 +447,9 @@ class FeedbackRepository {
               serverText: _worstPhaseDirectionText(j),
             ),
       unit: (j['unit'] as String?) ?? 'deg',
-      description: ((j['description'] as String?) ?? '').replaceAll(
-        '촬영 방향과 무관.',
-        '촬영 구도와 관절 추정 오차의 영향을 받을 수 있어요.',
+      description: feedbackFeatureDescription(
+        key,
+        (j['description'] as String?) ?? '',
       ),
       comment: coaching?.joints[key] ?? '',
       impact: _measure(j['impact']),
@@ -454,10 +460,10 @@ class FeedbackRepository {
       eventBasedSeries: eventBased,
       evidence: evidence,
       ruleComment: evidence == null
-          ? '구간과 신뢰도가 충분한 근거가 없어 교정 판단을 보류해요.'
+          ? '이 구간은 관절을 믿고 비교하기 어려워 교정 안내를 보류할게요.'
           : evidence.isIssue
           ? '${evidence.observation} ${evidence.action}'
-          : '${evidence.observation} 이 구간의 측정값에 대한 설명이며, 전 구간이 안정적이라는 뜻은 아니에요.',
+          : '${evidence.observation} 다른 구간에서는 결과가 달라질 수 있어요.',
       contribution: _number(j['contribution']),
     );
   }
@@ -601,7 +607,9 @@ class FeedbackRepository {
           available: p['available'] != false,
           reliability: _reliability(p['reliability']),
           score: p['available'] == false ? null : _number(p['score']),
-          unavailableReason: p['unavailable_reason'] as String?,
+          unavailableReason: p['unavailable_reason'] is String
+              ? feedbackReportNotice(p['unavailable_reason'] as String)
+              : null,
           userDurationMs: p['available'] == false
               ? null
               : _number(p['user_duration_ms']),
@@ -617,7 +625,7 @@ class FeedbackRepository {
               p['warnings'],
             ).map((w) => safeTempoWarning(w, analysisFps)),
             if (shown.length < originalDeviations.length)
-              '신뢰도 또는 측정 근거가 부족한 관절 ${originalDeviations.length - shown.length}개는 구간별 교정 설명에서 제외했어요. 점수는 변경하지 않았어요.',
+              '관절 ${originalDeviations.length - shown.length}곳은 측정 근거가 부족해 이 구간의 교정 안내에서 제외했어요. 분석 점수는 그대로 유지했어요.',
           ],
           checks: key == 'swing' ? swingChecks : const [],
           deviations: p['available'] == false
@@ -626,7 +634,10 @@ class FeedbackRepository {
                   for (final d in shown)
                     PhaseDeviation(
                       joint: d['joint'] as String? ?? '',
-                      name: d['joint_name'] as String? ?? '관절',
+                      name: feedbackFeatureName(
+                        d['joint'] as String? ?? '',
+                        d['joint_name'] as String? ?? '관절',
+                      ),
                       diff: _number(d['diff']),
                       zScore: _number(d['z_score']),
                       direction: d['direction'] as String? ?? 'similar',
@@ -644,7 +655,7 @@ class FeedbackRepository {
           coachComment: coach?.comment ?? '',
           coachTip: coach?.tip ?? '',
           ruleTip: evidence == null
-              ? '이 구간에서 교정을 우선 제안할 충분한 관절 차이 근거는 없어요. 측정 여부와 원본을 확인하세요.'
+              ? '이 구간은 우선 교정을 권할 만큼 확실한 관절 차이가 확인되지 않았어요. 원본에서 동작을 살펴보세요.'
               : '${evidence.observation} ${evidence.action}',
         );
       }(),
@@ -698,7 +709,7 @@ class FeedbackRepository {
         .firstOrNull;
     return strength != null
         ? strength.evidence!.observation
-        : '교정을 제안할 구간별 측정 근거가 충분하지 않아요.';
+        : '이 구간에서는 자세 교정을 제안할 만큼 확실한 측정 근거가 없어요.';
   }
 
   // -------------------------------------------------------------------------
@@ -753,7 +764,7 @@ class FeedbackRepository {
               : '측정 근거 안내',
           pointsSource: llmPoints.isNotEmpty
               ? 'GPT 코칭 · 검토 완료'
-              : '분석 근거 안내 · 규칙 기반',
+              : '분석 결과 안내 · 기본 설명',
           points: llmPoints.isNotEmpty
               ? llmPoints
               : [
@@ -790,46 +801,42 @@ class FeedbackRepository {
       final change = delta.abs() <= 2
           ? '2점 이내로 변했어요'
           : '${feedbackNumber(delta.abs())}점 ${delta > 0 ? '올랐어요' : '낮아졌어요'}';
-      return '${item.label}: 직전 대비 부위 점수가 $change. '
-          '점수 변화만으로 동작 원인을 단정하지 않아요. 현재 프로 기준 차이는 아래에서 확인하세요.';
+      return '${item.label} 점수가 직전보다 $change. '
+          '점수만으로 원인을 알 수는 없어요. 기준 스윙과의 차이는 아래에서 확인하세요.';
     }
-    return '${item.label}: 부위 자세 유사도는 ${feedbackNumber(item.currentScore)}점이에요. '
-        '${item.description} 평균적인 유사도와 모든 순간의 자세는 다를 수 있어요.';
+    return '${item.label}의 자세 유사도는 ${feedbackNumber(item.currentScore)}점이에요. '
+        '전체적인 점수가 좋아도 순간마다 자세 차이는 있을 수 있어요.';
   }
 
   String _jointCoach(FeedbackItem item, JointStatus status) {
     if (status == JointStatus.limited) {
-      return '${item.description} ${reliabilityLabel(item.reliability)}';
+      return '관절을 믿고 비교하기 어려워 자세 교정은 안내하지 않을게요. 점수는 참고로만 확인해 주세요.';
     }
     final issue = item.features
         .where((f) => f.evidence?.isIssue == true)
         .firstOrNull;
     return issue != null
-        ? '${issue.evidence!.observation} ${issue.evidence!.action}'
-        : '교정할 움직임을 단정할 근거가 충분하지 않아요. 부위 점수만으로 각도 유지나 템포를 권하지 않아요.';
+        ? issue.evidence!.action
+        : '지금 결과만으로 특정 동작을 고치라고 말하기는 어려워요. 아래에서 확인된 구간을 살펴보세요.';
   }
 
   List<String> _jointPoints(FeedbackItem item, JointStatus status) {
     if (status == JointStatus.limited) {
-      return ['측정되지 않았거나 신뢰하기 어려운 값으로 자세를 판정하지 않습니다.'];
+      return ['점수 차이가 실제 자세의 개선이나 악화를 뜻하지는 않아요.'];
     }
     final issues = item.features
         .where((f) => f.evidence?.isIssue == true)
         .take(3)
         .toList();
     if (issues.isNotEmpty) {
-      return [
-        for (final f in issues)
-          '${f.evidence!.observation} ${f.evidence!.action}',
-      ];
+      return [for (final f in issues) f.evidence!.observation];
     }
     final strengths = item.features
         .where((f) => f.evidence?.isIssue == false)
         .take(2);
     return [
-      for (final f in strengths)
-        '${f.evidence!.observation} 다른 구간까지 같은 상태라고 단정하지 않아요.',
-      '템포는 구간별 시간 분석에서 따로 확인하세요. 자세 점수만으로 같은 리듬을 권하지 않아요.',
+      for (final f in strengths) f.evidence!.observation,
+      '다른 구간에서는 결과가 달라질 수 있어요.',
     ];
   }
 }

@@ -647,7 +647,7 @@ Widget _buildTipBox(AnalysisPhase phase) {
     );
   }
   return _TipBox(
-    title: '분석 근거 안내 · 규칙 기반',
+    title: '분석 결과 안내 · 기본 설명',
     tip: !phase.available
         ? '분석되지 않은 구간의 자세는 판정하지 않습니다.'
         : phase.reliability == 'low'
@@ -885,7 +885,7 @@ String _statusText(AnalysisPhase p) => !p.available
     : p.score == null
     ? '점수 미제공'
     : p.reliability == 'low'
-    ? '참고용'
+    ? '측정 확인 필요'
     : const ['high', 'medium'].contains(p.reliability)
     ? '측정 완료'
     : '신뢰도 미제공';
