@@ -394,6 +394,7 @@ class CoachingReview {
     this.status = 'unverified',
     this.source = 'rules',
     this.displayAllowed = false,
+    this.reason = '',
   });
 
   factory CoachingReview.fromJson(dynamic raw) {
@@ -402,10 +403,11 @@ class CoachingReview {
       status: raw['status'] is String ? raw['status'] as String : 'unverified',
       source: raw['source'] is String ? raw['source'] as String : 'rules',
       displayAllowed: raw['display_allowed'] == true,
+      reason: raw['reason'] is String ? raw['reason'] as String : '',
     );
   }
 
-  final String status, source;
+  final String status, source, reason;
   final bool displayAllowed;
   bool get canDisplay =>
       status == 'approved' && source == 'openai' && displayAllowed;
@@ -414,8 +416,11 @@ class CoachingReview {
     'approved' when canDisplay => '검토가 완료된 GPT 코칭입니다.',
     'review_required' => 'GPT 코칭은 사람 검토가 필요해 표시하지 않습니다. 분석 근거 안내를 보여드려요.',
     'blocked' => '코칭 검증 조건을 충족하지 못해 분석 근거 안내를 보여드려요.',
-    'generation_failed' => 'GPT 코칭 생성에 실패해 분석 근거 안내를 보여드려요.',
-    _ => '현재는 분석 결과를 바탕으로 한 기본 안내를 보여드려요.',
+    'generation_failed' when reason == 'generation_disabled' =>
+      '현재는 분석 결과를 바탕으로 기본 피드백을 제공해요.',
+    'generation_failed' when reason == 'generation_failed' =>
+      'AI 코칭을 불러오지 못해 기본 피드백을 제공해요.',
+    _ => '현재는 기본 피드백을 제공하고 있어요.',
   };
 }
 

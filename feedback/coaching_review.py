@@ -181,7 +181,14 @@ def public_coaching(report: dict, envelope: Any, *, context: dict,
     if envelope.get("context") != context or envelope.get("report_sha256") != report_hash:
         return None, _status("review_required", "stale_review_context")
     if state == "generation_failed":
-        return None, _status(state, "generation_failed")
+        validation = envelope.get("validation")
+        reason = validation.get("reason") if isinstance(validation, dict) else None
+        # Never expose provider details or infer an actual failure from old metadata.
+        if not isinstance(reason, str) or reason not in (
+            "generation_disabled", "not_configured", "not_generated", "generation_failed",
+        ):
+            reason = "not_generated"
+        return None, _status(state, reason)
     candidate = envelope.get("candidate")
     if not isinstance(candidate, dict):
         return None, _status("blocked", "missing_candidate")

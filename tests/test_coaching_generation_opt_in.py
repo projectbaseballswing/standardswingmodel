@@ -30,7 +30,35 @@ def test_no_implicit_generation_or_extended_call(monkeypatch, enabled, key):
     assert report_fingerprint(job.result) == before
     assert job.result[PRIVATE_KEY]['validation']['reason'] == (
         'not_configured' if enabled else 'generation_disabled')
-    assert public_result(job.result, context=context_for('opt-in', 'owner'))['coaching'] is None
+    public = public_result(job.result, context=context_for('opt-in', 'owner'))
+    assert public['coaching'] is None
+    assert public['coaching_review'] == {
+        'status': 'generation_failed', 'source': 'rules', 'display_allowed': False,
+        'reason': 'not_configured' if enabled else 'generation_disabled',
+    }
+
+
+def test_enabled_provider_failure_reports_failure_without_retry(monkeypatch):
+    import api.jobs as jobs
+    overall = Mock(side_effect=RuntimeError('Mock provider failure'))
+    extended = Mock(side_effect=AssertionError('Unexpected extended generation'))
+    monkeypatch.setattr(jobs, 'generate_coaching', overall)
+    monkeypatch.setattr(jobs, 'generate_extended_coaching', extended)
+    manager = object.__new__(JobManager)
+    manager.coaching_enabled = True
+    manager.openai_api_key, manager.openai_model = 'offline-key', 'offline'
+    r = report(); before = report_fingerprint(r)
+    job = Job('failure', {}, status='done', user_id='owner', result=r)
+    manager._attach_overall_coaching(job)
+    manager._attach_extended_coaching(job)
+    overall.assert_called_once(); extended.assert_not_called()
+    public = public_result(job.result, context=context_for('failure', 'owner'))
+    assert public['coaching'] is None
+    assert public['coaching_review'] == {
+        'status': 'generation_failed', 'source': 'rules',
+        'display_allowed': False, 'reason': 'generation_failed',
+    }
+    assert report_fingerprint(job.result) == before and job.status == 'done'
 
 
 def test_disabled_extension_preserves_existing_review(monkeypatch):

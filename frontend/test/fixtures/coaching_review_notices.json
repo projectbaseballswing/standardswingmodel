@@ -1,0 +1,30 @@
+{
+  "disabled": {
+    "review": {"status": "generation_failed", "source": "rules", "display_allowed": false, "reason": "generation_disabled"},
+    "notice": "현재는 분석 결과를 바탕으로 기본 피드백을 제공해요."
+  },
+  "unconfigured": {
+    "review": {"status": "generation_failed", "source": "rules", "display_allowed": false, "reason": "not_configured"},
+    "notice": "현재는 기본 피드백을 제공하고 있어요."
+  },
+  "not_generated": {
+    "review": {"status": "generation_failed", "source": "rules", "display_allowed": false, "reason": "not_generated"},
+    "notice": "현재는 기본 피드백을 제공하고 있어요."
+  },
+  "failed": {
+    "review": {"status": "generation_failed", "source": "rules", "display_allowed": false, "reason": "generation_failed"},
+    "notice": "AI 코칭을 불러오지 못해 기본 피드백을 제공해요."
+  },
+  "pending": {
+    "review": {"status": "review_required", "source": "rules", "display_allowed": false, "reason": "awaiting_human_review"},
+    "notice": "GPT 코칭은 사람 검토가 필요해 표시하지 않습니다. 분석 근거 안내를 보여드려요."
+  },
+  "blocked": {
+    "review": {"status": "blocked", "source": "rules", "display_allowed": false, "reason": "policy_blocked"},
+    "notice": "코칭 검증 조건을 충족하지 못해 분석 근거 안내를 보여드려요."
+  },
+  "approved": {
+    "review": {"status": "approved", "source": "openai", "display_allowed": true, "reason": "human_review_completed"},
+    "notice": "검토가 완료된 GPT 코칭입니다."
+  }
+}
