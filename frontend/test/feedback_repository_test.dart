@@ -11,6 +11,13 @@ import 'package:swing_analysis/models/feedback.dart';
 
 import 'feedback_fixture.dart';
 
+// Synthetic review envelope for client contract tests; not a GPT generation.
+const approvedReviewFixture = {
+  'status': 'approved',
+  'source': 'openai',
+  'display_allowed': true,
+};
+
 http.Response response(Map<String, dynamic> body, [int status = 200]) =>
     http.Response(
       jsonEncode(body),
@@ -169,7 +176,7 @@ void main() {
       expect(feedback.totalScore, 0);
       expect(feedback.items.single.currentScore, isNull);
       expect(feedback.items.single.limited, isTrue);
-      expect(feedback.coachComment, contains('정보가 없습니다'));
+      expect(feedback.coachComment, contains('원본 영상'));
     },
   );
 
@@ -239,35 +246,54 @@ void main() {
     );
   }
 
-  test('LLM coaching overrides rule-based summary/coach and part points', () async {
-    final body = storedAnalysis();
-    (body['result'] as Map<String, dynamic>)['coaching'] = {
-      'overall_summary': 'LLM 종합 요약입니다.',
-      'overall_coach': 'LLM 코치 한마디입니다.',
-      'parts': [
-        {
-          'key': 'lead_arm',
-          'summary': 'LLM 앞팔 요약.',
-          'keep_points': <String>[],
-          'improve_points': ['앞팔 팔꿈치를 더 펴 보세요.'],
-        },
-      ],
-    };
-    final repo = repositoryFor((_) async => response(body));
+  test(
+    'LLM coaching overrides rule-based summary/coach and part points',
+    () async {
+      final body = storedAnalysis();
+      body['result']['coaching_review'] = approvedReviewFixture;
+      (body['result'] as Map<String, dynamic>)['coaching'] = {
+        'overall_summary': 'LLM 종합 요약입니다.',
+        'overall_coach': 'LLM 코치 한마디입니다.',
+        'parts': [
+          {
+            'key': 'lead_arm',
+            'summary': 'LLM 앞팔 요약.',
+            'keep_points': <String>[],
+            'improve_points': ['앞팔 팔꿈치를 더 펴 보세요.'],
+          },
+        ],
+      };
+      final repo = repositoryFor((_) async => response(body));
 
-    final feedback = await repo.fetchFeedback('saved-analysis');
-    expect(feedback.summary, 'LLM 종합 요약입니다.');
-    expect(feedback.coachComment, 'LLM 코치 한마디입니다.');
-    expect(feedback.coaching, isNotNull);
+      final feedback = await repo.fetchFeedback('saved-analysis');
+      expect(feedback.summary, 'LLM 종합 요약입니다.');
+      expect(feedback.coachComment, 'LLM 코치 한마디입니다.');
+      expect(feedback.coaching, isNotNull);
 
-    final part = repo.buildPartAnalyses(feedback).single;
-    expect(part.summary, 'LLM 앞팔 요약.');
-    expect(part.points, ['앞팔 팔꿈치를 더 펴 보세요.']);
-  });
+      final part = repo.buildPartAnalyses(feedback).single;
+      expect(part.summary, 'LLM 앞팔 요약.');
+      expect(part.points, ['앞팔 팔꿈치를 더 펴 보세요.']);
+    },
+  );
 
   test('full-scope coaching maps joint comment and phase coaching', () async {
     final body = storedAnalysis();
+    body['result']['overall']['reliability'] = 'high';
+    body['result']['overall']['available'] = true;
     final result = body['result'] as Map<String, dynamic>;
+    result['coaching_review'] = approvedReviewFixture;
+    result['joints'][0]['phases'] = [
+      {
+        'phase': 'swing',
+        'available': true,
+        'level': 'caution',
+        'direction': 'higher',
+        'user_mean': 123.4,
+        'reference_mean': 111.2,
+        'diff': 12.2,
+        'z_score': 1.5,
+      },
+    ];
     result['phases'] = {
       'phases': [
         {
@@ -312,6 +338,7 @@ void main() {
   test('overall-scope coaching leaves joint/phase coaching empty', () async {
     final body = storedAnalysis();
     final result = body['result'] as Map<String, dynamic>;
+    result['coaching_review'] = approvedReviewFixture;
     result['phases'] = {
       'phases': [
         {
@@ -344,11 +371,12 @@ void main() {
     final repo = repositoryFor((_) async => response(storedAnalysis()));
     final feedback = await repo.fetchFeedback('saved-analysis');
     expect(feedback.coaching, isNull);
-    expect(feedback.summary, contains('스윙 분석 결과')); // _buildSummary 문구.
+    expect(feedback.summary, contains('프로 기준과 비교'));
   });
 
   test('malformed coaching (missing overall fields) is ignored', () async {
     final body = storedAnalysis();
+    body['result']['coaching_review'] = approvedReviewFixture;
     (body['result'] as Map<String, dynamic>)['coaching'] = {
       'parts': [
         {'key': 'lead_arm', 'summary': 'x'},
@@ -358,7 +386,59 @@ void main() {
     final feedback = await repo.fetchFeedback('saved-analysis');
     // overall_summary/overall_coach 가 없으면 통째로 무시 → 규칙 기반.
     expect(feedback.coaching, isNull);
-    expect(feedback.summary, contains('스윙 분석 결과'));
+    expect(feedback.summary, contains('프로 기준과 비교'));
+  });
+
+  for (final envelope in <dynamic>[
+    null,
+    'malformed',
+    {'status': 'review_required', 'display_allowed': true, 'source': 'openai'},
+    {'status': 'blocked', 'display_allowed': true, 'source': 'openai'},
+    {
+      'status': 'generation_failed',
+      'display_allowed': true,
+      'source': 'openai',
+    },
+    {'status': 'approved', 'display_allowed': false, 'source': 'openai'},
+    {'status': 'approved', 'display_allowed': 'true', 'source': 'openai'},
+    {'status': 'approved', 'display_allowed': true, 'source': 'rules'},
+  ]) {
+    test('never displays unapproved candidate: $envelope', () async {
+      final body = storedAnalysis();
+      body['result']['coaching_review'] = envelope;
+      body['result']['coaching'] = {
+        'overall_summary': 'PRIVATE CANDIDATE',
+        'overall_coach': 'PRIVATE CANDIDATE',
+        // Even malformed nested candidate content must not crash the screen.
+        'parts': 123,
+      };
+      final repo = repositoryFor((_) async => response(body));
+      final f = await repo.fetchFeedback('saved-analysis');
+      expect(f.coaching, isNull);
+      expect(f.coachingReview.canDisplay, isFalse);
+      expect(f.summary, isNot(contains('PRIVATE')));
+      expect(f.coachSource, contains('규칙 기반'));
+      expect(
+        repo.buildPartAnalyses(f).single.points.join(),
+        isNot(contains('PRIVATE')),
+      );
+    });
+  }
+
+  test('malformed approved candidate fails closed to rules', () async {
+    final body = storedAnalysis();
+    body['result']['coaching_review'] = approvedReviewFixture;
+    body['result']['coaching'] = {
+      'overall_summary': 'invalid',
+      'overall_coach': 'invalid',
+      'parts': 12,
+    };
+    final f = await repositoryFor(
+      (_) async => response(body),
+    ).fetchFeedback('saved-analysis');
+    expect(f.coaching, isNull);
+    expect(f.coachingReview.status, 'blocked');
+    expect(f.totalScore, 77.3);
   });
 
   group('comparison (반복 피드백)', () {
@@ -366,6 +446,7 @@ void main() {
     tearDown(() => Session.instance.clear());
 
     Map<String, dynamic> comparisonBody() => {
+      'coaching_review': approvedReviewFixture,
       'has_previous': true,
       'previous_analysis_id': 'prev-1',
       'overall_previous_score': 70.0,
@@ -421,26 +502,49 @@ void main() {
       expect(part.points, ['지금 리듬을 유지해 보세요.']);
     });
 
-    test('has_previous=false falls back to first-feedback (no comparison)',
-        () async {
-      final repo = repoWithComparison({'has_previous': false});
-      final feedback = await repo.fetchFeedback('saved-analysis');
-      expect(feedback.hasComparison, isFalse);
-      expect(feedback.previousTotalScore, isNull);
-      expect(feedback.items.single.previousScore, isNull);
-    });
+    test(
+      'unapproved comparison coaching preserves scores, not its text',
+      () async {
+        final comparison = comparisonBody();
+        comparison['coaching_review'] = {
+          'status': 'review_required',
+          'source': 'rules',
+          'display_allowed': false,
+        };
+        final f = await repoWithComparison(
+          comparison,
+        ).fetchFeedback('saved-analysis');
+        expect(f.coaching, isNull);
+        expect(f.hasComparison, isTrue);
+        expect(f.previousTotalScore, 70);
+        expect(f.summary, isNot(contains('좋아졌어요')));
+      },
+    );
 
-    test('comparison fetch failure is swallowed (still shows first feedback)',
-        () async {
-      final repo = repositoryFor((request) async {
-        if (request.url.path.endsWith('/comparison')) {
-          return response({'detail': 'nope'}, 500);
-        }
-        return response(storedAnalysis());
-      });
-      final feedback = await repo.fetchFeedback('saved-analysis');
-      expect(feedback.hasComparison, isFalse);
-      expect(feedback.totalScore, 77.3);
-    });
+    test(
+      'has_previous=false falls back to first-feedback (no comparison)',
+      () async {
+        final repo = repoWithComparison({'has_previous': false});
+        final feedback = await repo.fetchFeedback('saved-analysis');
+        expect(feedback.hasComparison, isFalse);
+        expect(feedback.previousTotalScore, isNull);
+        expect(feedback.items.single.previousScore, isNull);
+      },
+    );
+
+    test(
+      'comparison fetch failure is swallowed (still shows first feedback)',
+      () async {
+        final repo = repositoryFor((request) async {
+          if (request.url.path.endsWith('/comparison')) {
+            return response({'detail': 'nope'}, 500);
+          }
+          return response(storedAnalysis());
+        });
+        final feedback = await repo.fetchFeedback('saved-analysis');
+        expect(feedback.hasComparison, isFalse);
+        expect(feedback.totalScore, 77.3);
+      },
+    );
   });
 }

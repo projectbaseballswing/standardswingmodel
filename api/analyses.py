@@ -34,6 +34,7 @@ from feedback.compare import MODEL_VERSION
 from feedback.features import to_template_features
 from feedback.pipeline import SwingPipeline
 from feedback.reference import ReferenceStore
+from feedback.coaching_review import context_for, public_result
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "analysis_sample.json"
 
@@ -64,6 +65,7 @@ async def lifespan(app: FastAPI):
         openai_model=settings.openai_model,
         coaching_scope=settings.coaching_scope,
         pose_storage_factory=lambda: create_storage(),
+        coaching_enabled=settings.coaching_enabled,
     )
     app.state.jobs = jobs
     try:
@@ -101,7 +103,7 @@ def _to_analysis(job: Job) -> schemas.Analysis:
         finished_at=job.finished_at,
         input=job.input,
         error=job.error,
-        result=job.result,
+        result=public_result(job.result, context=context_for(job.analysis_id, job.user_id)),
         user_id=job.user_id,
         recorded_at=job.recorded_at,
     )
@@ -115,7 +117,7 @@ def _finished_result(request: Request, analysis_id: str) -> dict:
         raise HTTPException(422, job.error)
     if job.status != "done":
         raise HTTPException(status.HTTP_409_CONFLICT, f"아직 분석 중입니다 (status={job.status}, stage={job.stage}).")
-    return job.result
+    return public_result(job.result, context=context_for(job.analysis_id, job.user_id))
 
 
 def _strip_series(joints: list) -> list:

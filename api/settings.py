@@ -42,7 +42,9 @@ class Settings:
     worker_id: str = os.getenv("SWING_WORKER_ID") or socket.gethostname()
     # SWING_MOCK=1 이면 모델을 불러오지 않고 고정된 샘플 응답을 돌려준다 (프론트/백엔드 개발용)
     mock: bool = os.getenv("SWING_MOCK", "") == "1"
-    # LLM(OpenAI) 코칭 문장 생성. 키가 없으면 규칙 기반 폴백을 쓴다.
+    # 키 설정만으로 유료 생성하지 않는다. 명시적으로 1일 때만 자동 생성한다.
+    coaching_enabled: bool = os.getenv("OPENAI_COACHING_ENABLED", "0") == "1"
+    # 생성 비활성화 또는 키 미설정이면 규칙 기반 폴백을 쓴다.
     openai_api_key: str = field(default=os.getenv("OPENAI_API_KEY", ""), repr=False)
     # gpt-6-luna: 코칭 생성은 짧은 구조화 JSON 이라 소형·고속 모델로 충분하다.
     # 한국어 뉘앙스가 아쉬우면 OPENAI_MODEL=gpt-6.1-terra 등으로 올린다.

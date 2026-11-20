@@ -119,7 +119,9 @@ void main() {
       expect(f.phases[0].tempoRatio, 1.2);
       expect(f.phases[1].tempoLevel, isNull);
       expect(f.phases[1].warnings.single, contains('판정하지'));
-      expect(f.phases[2].deviations.single.zScore, 1);
+      // This minimal fixture has no measured phase means/diff: do not turn a
+      // detached top_deviations entry into a correction target.
+      expect(f.phases[2].deviations, isEmpty);
       expect(f.items.first.features.single.phaseScores![2].score, 80);
       expect(f.speedMetrics[1].unit, 'body/s');
       expect(f.speedMetrics[1].user, 26.7);
@@ -404,7 +406,9 @@ void main() {
       expect(tester.takeException(), isNull);
       final feedback = await repo.fetchFeedback('legacy');
       await tester.pumpWidget(
-        MaterialApp(home: JointAnalysisScreen(feedback: feedback, videoBuilder: noVideo)),
+        MaterialApp(
+          home: JointAnalysisScreen(feedback: feedback, videoBuilder: noVideo),
+        ),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('팔'));
@@ -431,8 +435,15 @@ void main() {
       joint['phases'][3]['z_score'] = null;
       final feedback = await repository(body).fetchFeedback('partial');
       await tester.pumpWidget(
-        MaterialApp(home: JointAnalysisScreen(feedback: feedback, videoBuilder: noVideo)),
+        MaterialApp(
+          home: JointAnalysisScreen(feedback: feedback, videoBuilder: noVideo),
+        ),
       );
+      await tester.pumpAndSettle();
+      // Insufficient correction evidence does not auto-expand this feature.
+      // Users can still open its measured graph and scrub the original video.
+      await tester.scrollUntilVisible(find.text('앞팔 팔꿈치 각도'), 250);
+      await tester.tap(find.text('앞팔 팔꿈치 각도'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('feature-series-lead_elbow_angle')),
@@ -487,8 +498,15 @@ void main() {
       smallView(tester);
       final feedback = await repository(v2()).fetchFeedback('model-v2-test');
       await tester.pumpWidget(
-        MaterialApp(home: JointAnalysisScreen(feedback: feedback, videoBuilder: noVideo)),
+        MaterialApp(
+          home: JointAnalysisScreen(feedback: feedback, videoBuilder: noVideo),
+        ),
       );
+      await tester.pumpAndSettle();
+      // Insufficient correction evidence does not auto-expand this feature.
+      // Users can still open its measured graph and scrub the original video.
+      await tester.scrollUntilVisible(find.text('앞팔 팔꿈치 각도'), 250);
+      await tester.tap(find.text('앞팔 팔꿈치 각도'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('feature-series-lead_elbow_angle')),
@@ -526,6 +544,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('내 스윙 영상'), findsOneWidget);
+      // Insufficient correction evidence does not auto-expand this feature.
+      // Users can still open its measured graph and scrub the original video.
+      await tester.scrollUntilVisible(find.text('앞팔 팔꿈치 각도'), 250);
+      await tester.tap(find.text('앞팔 팔꿈치 각도'));
+      await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('feature-series-lead_elbow_angle')),
         250,
@@ -613,7 +636,7 @@ void main() {
       final torso = repo
           .buildPartAnalyses(f)
           .singleWhere((p) => p.key == 'torso');
-      expect(torso.pointsTitle, '개선 포인트');
+      expect(torso.pointsTitle, '먼저 확인할 움직임');
       expect(torso.points.first, '골반이 거의 돌지 않았어요.');
       expect(torso.points, isNot(contains('꼬임이 있어요.')));
     },

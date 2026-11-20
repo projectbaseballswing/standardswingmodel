@@ -50,7 +50,7 @@ class ScoreContribution(BaseModel):
     name: str = Field(description="화면 표시용 부위 이름. 좌우타에 맞춰 변환됨")
     reliability: Reliability = Field("medium", description="낮으면 화면에서 흐리게(참고용) 표시. 비중 계산에는 포함")
     score: Optional[float] = Field(None, description="그 부위 점수(0~100). 막대 색/상태 판정용")
-    share: float = Field(description="자세 점수를 깎은 비중(0~1). 표시된 부위들끼리 합하면 1")
+    share: float = Field(description="자세 계산의 표준화 차이 제곱합 중 부위의 상대 비중(0~1). 표시 부위 내 합은 반올림 오차를 제외하면 1. 종합점수 감점량이 아님")
 
 
 class WorstSegment(BaseModel):
@@ -99,7 +99,7 @@ class OverallFeedback(BaseModel):
     typical_pro_distance: Optional[float] = Field(None, description="80점에 해당하는 거리")
     group_scores: List[GroupScore]
     score_contributions: List[ScoreContribution] = Field(
-        default_factory=list, description="점수 산출 근거: 부위별로 자세 점수를 깎은 비중(합 1). 저신뢰 부위도 포함")
+        default_factory=list, description="자세 계산에 사용한 표준화 차이의 부위별 상대 비중. 저신뢰 부위도 포함하며 코칭 우선순위가 아님. 과거 기록은 없을 수 있음")
     worst_segment: Optional[WorstSegment] = None
     frame_distances: List[Optional[float]] = Field(
         description="기준 시간축 지점별 거리. 0.1 은 80프레임, 0.2 는 구간 4개 × 20등분")
@@ -157,7 +157,7 @@ class JointFeedback(BaseModel):
     available: bool = Field(True, description="이 관절을 비교할 수 있었는지")
     reliability: Reliability = "medium"
     contribution: Optional[float] = Field(
-        None, description="부위 내 점수 영향 비중(0~1). 같은 부위의 표시 피처들끼리 합하면 1. 저신뢰 피처는 null")
+        None, description="같은 부위 내 표시 피처의 표준화 차이 상대 비중(0~1). 저신뢰 피처는 null이며 분모에서도 제외. 종합점수 감점량이 아님")
     level: Level
     worst_phase: Optional[str] = Field(None, description="가장 많이 벌어진 구간. available=false 면 null")
     impact: Optional[JointImpact] = None
@@ -292,6 +292,15 @@ class Coaching(BaseModel):
     )
 
 
+class CoachingReviewStatus(BaseModel):
+    """Public status only; private candidates/reviewer notes never leave the API."""
+
+    status: Literal["approved", "review_required", "blocked", "generation_failed"]
+    source: Literal["openai", "rules"]
+    display_allowed: bool = False
+    reason: str
+
+
 class AnalysisReport(BaseModel):
     model_version: str
     overall: OverallFeedback
@@ -301,6 +310,7 @@ class AnalysisReport(BaseModel):
     coaching: Optional[Coaching] = Field(
         None, description="LLM 코칭 문장. 없으면 프론트가 규칙 기반으로 채운다."
     )
+    coaching_review: Optional[CoachingReviewStatus] = None
     phase_frames: Dict[str, List[int]] = Field(
         default_factory=dict,
         description="구간별 프레임 경계 {phase: [start, end]}. 재생 프레임→구간 매핑용(마네킹 품질 색코딩).",
@@ -398,6 +408,7 @@ class ComparisonResponse(BaseModel):
         None,
         description="이전 대비 LLM 코칭. 키 없음/실패 시 null → 프론트는 규칙 기반 폴백.",
     )
+    coaching_review: Optional[CoachingReviewStatus] = None
 
 
 class VideoURL(BaseModel):

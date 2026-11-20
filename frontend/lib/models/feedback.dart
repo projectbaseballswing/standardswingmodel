@@ -89,6 +89,8 @@ class FeatureAnalysis {
     this.phaseScores,
     this.reliability = 'medium',
     this.eventBasedSeries = false,
+    this.evidence,
+    this.ruleComment = '',
     this.contribution,
   });
 
@@ -123,6 +125,11 @@ class FeatureAnalysis {
   final String comment;
   final String reliability;
   final bool eventBasedSeries;
+  final FeedbackEvidence? evidence;
+  final String ruleComment;
+  String get displayedComment => comment.isNotEmpty ? comment : ruleComment;
+  String get commentSource =>
+      comment.isNotEmpty ? 'GPT 코칭 · 검토 완료' : '분석 근거 안내 · 규칙 기반';
 
   /// 임팩트 순간의 내 값 vs 기준.
   final Measure? impact;
@@ -218,6 +225,7 @@ class PartAnalysis {
     required this.summary,
     required this.coachComment,
     required this.pointsTitle,
+    this.pointsSource = '분석 근거 안내 · 규칙 기반',
     required this.points,
     this.previousScore,
   });
@@ -254,6 +262,7 @@ class PartAnalysis {
 
   /// 포인트 상자 제목. 예) "유지 포인트" / "개선 포인트".
   final String pointsTitle;
+  final String pointsSource;
 
   /// 포인트 상자 불릿 목록.
   final List<String> points;
@@ -360,6 +369,60 @@ class Coaching {
 
   /// 관절·구간 서술이 아직 생성 중이라 재조회가 필요한 상태인지.
   bool get isExtendedPending => extendedStatus == 'pending';
+  String get sourceLabel => 'GPT 코칭 · 검토 완료';
+}
+
+/// Approval metadata is independent of whether the response contains text.
+/// Legacy or malformed metadata never grants permission to display GPT text.
+class CoachingReview {
+  const CoachingReview({
+    this.status = 'unverified',
+    this.source = 'rules',
+    this.displayAllowed = false,
+  });
+
+  factory CoachingReview.fromJson(dynamic raw) {
+    if (raw is! Map<String, dynamic>) return const CoachingReview();
+    return CoachingReview(
+      status: raw['status'] is String ? raw['status'] as String : 'unverified',
+      source: raw['source'] is String ? raw['source'] as String : 'rules',
+      displayAllowed: raw['display_allowed'] == true,
+    );
+  }
+
+  final String status, source;
+  final bool displayAllowed;
+  bool get canDisplay =>
+      status == 'approved' && source == 'openai' && displayAllowed;
+
+  String get notice => switch (status) {
+    'approved' when canDisplay => '검토가 완료된 GPT 코칭입니다.',
+    'review_required' => 'GPT 코칭은 사람 검토가 필요해 표시하지 않습니다. 분석 근거 안내를 보여드려요.',
+    'blocked' => '코칭 검증 조건을 충족하지 못해 분석 근거 안내를 보여드려요.',
+    'generation_failed' => 'GPT 코칭 생성에 실패해 분석 근거 안내를 보여드려요.',
+    _ => '승인된 GPT 코칭이 없어 분석 근거 안내를 보여드려요.',
+  };
+}
+
+/// A measured joint/phase difference, not a causal explanation or score attribution.
+class FeedbackEvidence {
+  const FeedbackEvidence({
+    required this.joint,
+    required this.part,
+    required this.name,
+    required this.phase,
+    required this.phaseName,
+    required this.z,
+    required this.direction,
+    required this.isIssue,
+  });
+  final String joint, part, name, phase, phaseName, direction;
+  final double z;
+  final bool isIssue;
+  String get observation => '$phaseName 구간 평균의 $name: $direction.';
+  String get action =>
+      '원본의 $phaseName 구간에서 $name 측정이 실제 자세와 맞는지, 관절이 가려지지 않았는지 확인하세요. '
+      '원본에서도 차이가 확인되면 해당 구간을 천천히 재현하고, 다음 촬영에서 같은 차이가 반복되는지 확인하세요.';
 }
 
 /// 점수 산출 근거: 한 부위가 자세 점수를 깎은 비중.
@@ -412,6 +475,12 @@ class OverallFeedback {
     this.postureCapped = false,
     this.coaching,
     this.analysisId = '',
+    this.priorities = const [],
+    this.strengths = const [],
+    this.scoreExplanation = '',
+    this.coachSource = '분석 근거 안내 · 규칙 기반',
+    this.summarySource = '분석 근거 안내 · 규칙 기반',
+    this.coachingReview = const CoachingReview(),
     this.scoreContributions = const [],
   });
 
@@ -420,6 +489,15 @@ class OverallFeedback {
 
   /// 분석 id. 관절·구간 코칭이 아직 생성 중(pending)일 때 상세 화면이 재조회하는 데 쓴다.
   final String analysisId;
+  final List<FeedbackEvidence> priorities, strengths;
+  final String scoreExplanation, coachSource, summarySource;
+  final CoachingReview coachingReview;
+  bool get confirmedComposite =>
+      modelVersion.startsWith('0.2') &&
+      postureScore != null &&
+      speedScore != null &&
+      totalScore != null &&
+      (postureScore! * .7 + speedScore! * .3 - totalScore!).abs() <= .11;
 
   /// 촬영/분석 시각.
   final DateTime recordedAt;
@@ -551,6 +629,7 @@ class AnalysisPhase {
     this.coachCardLine = '',
     this.coachComment = '',
     this.coachTip = '',
+    this.ruleTip = '',
   });
   final String key;
   final String name;
@@ -573,6 +652,7 @@ class AnalysisPhase {
   final String coachCardLine; // 구간 카드용 짧은 한 줄
   final String coachComment; // 구간 상세 서술(수치·가장 벌어진 관절 근거)
   final String coachTip; // 구간 개선 실천 팁
+  final String ruleTip;
 }
 
 class SpeedMetric {

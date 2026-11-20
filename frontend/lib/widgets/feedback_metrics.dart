@@ -15,7 +15,13 @@ class PhaseMetrics extends StatelessWidget {
       return _note(phase.unavailableReason ?? '이 구간은 분석할 수 없습니다.');
     }
     if (phase.deviations.isEmpty) {
-      return _note('기준과 크게 다른 관절이 없어요.');
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _note('신뢰 가능한 측정값에서 표시할 주요 관절 차이가 없어요.'),
+          for (final warning in phase.warnings) _hint(warning),
+        ],
+      );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -24,9 +30,13 @@ class PhaseMetrics extends StatelessWidget {
           '주요 관절 차이',
           style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
         ),
-        _hint('프로 기준 스윙과 비교한 차이예요. 막대가 길수록 기준에서 많이 벗어난 거예요(색: 초록 양호·주황 주의·빨강 경고).'),
+        _hint(
+          '프로 기준 스윙과 비교한 차이예요. 막대가 길수록 기준에서 많이 벗어난 거예요(색: 초록 양호·주황 주의·빨강 경고).',
+        ),
         for (final deviation in phase.deviations)
           _DeviationRow(deviation: deviation),
+        _hint('차이 크기는 기준 분포와의 비교이며 실제 자세 정확도나 점수 기여도가 아닙니다.'),
+        for (final warning in phase.warnings) _hint(warning),
       ],
     );
   }
@@ -149,7 +159,11 @@ class _DeviationBarPainter extends CustomPainter {
     if (frac <= 0) {
       canvas.drawCircle(Offset(left, cy), r, fill);
     } else {
-      canvas.drawLine(Offset(left, cy), Offset(left + frac * (right - left), cy), fill);
+      canvas.drawLine(
+        Offset(left, cy),
+        Offset(left + frac * (right - left), cy),
+        fill,
+      );
     }
   }
 
