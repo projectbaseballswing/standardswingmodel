@@ -111,7 +111,7 @@ FEATURE_DESCRIPTIONS = {
     "hand_x_from_shoulder": "어깨 중심 기준 손의 앞뒤 위치.",
     "hand_y_from_shoulder": "어깨 중심 기준 손의 높이.",
     "lead_ankle_x_from_hip": "골반 기준 앞발의 앞뒤 위치. 스트라이드 폭.",
-    "lead_ankle_y_from_hip": "골반 기준 앞발의 높이.",
+    "lead_ankle_y_from_hip": "뒷발(바닥) 기준 앞발의 높이. 다리 길이 대비 값이라 체형과 무관하다.",
     "shoulder_x_from_hip": "골반 기준 상체의 앞뒤 쏠림.",
     "shoulder_y_from_hip": "골반 기준 상체의 높이.",
     "shoulder_turn": "가슴이 투수 쪽으로 얼마나 돌아갔는지(열렸는지). 준비 자세에서는 옆으로 서 있다가 "

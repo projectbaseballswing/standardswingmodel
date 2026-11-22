@@ -10,7 +10,7 @@ String feedbackFeatureName(String key, String fallback) =>
       'hand_y_from_shoulder': '어깨 기준 손 높이',
       'hand_x_from_shoulder': '어깨 기준 손의 앞뒤 위치',
       'lead_ankle_x_from_hip': '골반 기준 앞발 위치',
-      'lead_ankle_y_from_hip': '골반 기준 앞발 높이',
+      'lead_ankle_y_from_hip': '앞발 높이',
       'shoulder_x_from_hip': '골반 기준 상체의 앞뒤 위치',
       'shoulder_y_from_hip': '골반 기준 어깨 높이',
       'hip_shoulder_separation': '어깨와 골반의 회전 차이',
@@ -62,7 +62,8 @@ String feedbackFeatureDescription(String key, String fallback) =>
       'hand_y_from_shoulder': '어깨를 기준으로 손이 얼마나 높이 있는지 보는 값이에요.',
       'lead_ankle_x_from_hip':
           '화면에서 골반 중심에 대한 앞발의 앞뒤 위치예요. 준비 자세의 스탠스 폭이나 실제로 앞발을 옮긴 거리가 아니에요.',
-      'lead_ankle_y_from_hip': '골반을 기준으로 앞발이 얼마나 높이 있는지 보는 값이에요.',
+      'lead_ankle_y_from_hip':
+          '뒷발을 바닥 기준으로 삼아 앞발이 얼마나 높이 들렸는지 보는 값이에요. 다리 길이 대비로 재서 키나 체형과는 무관해요.',
       'shoulder_x_from_hip': '골반을 기준으로 상체가 앞뒤로 얼마나 치우쳤는지 보는 값이에요.',
       'shoulder_y_from_hip': '골반을 기준으로 어깨가 얼마나 높이 있는지 보는 값이에요.',
       'shoulder_turn':
