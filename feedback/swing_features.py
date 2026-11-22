@@ -1,7 +1,7 @@
 """프레임별 스윙 피처. 기준 모델과 사용자 분석이 같은 함수를 쓴다.
 
-원본 프레임 좌표(픽셀)에서 계산하고, 길이는 몸 크기로 나눈다. 대부분 어깨 너비를 쓰고,
-앞발 높이만 다리 길이로 나눈다 (_leg_scale_per_frame 참고).
+원본 프레임 좌표(픽셀)에서 계산하고, 길이는 몸 크기로 나눈다. 상체 위치(손, 어깨)는
+몸통 길이, 앞발 높이는 다리 길이, 스트라이드 폭은 어깨 너비로 나눈다 (compute_features 주석 참고).
 각도는 그 자체로 크기와 무관하다. 좌타 영상은 추출 단계에서 좌우반전되어 우타 기준으로 통일돼 있다.
 
 주의: 기울기 계열(상체/어깨/골반)은 화면 기준이라 카메라를 세워서 찍었다고 가정한다.
@@ -171,6 +171,11 @@ def compute_features(pixel_landmarks: np.ndarray) -> np.ndarray:
     arr = np.asarray(pixel_landmarks, dtype=float)
     zoom_frame = find_zoom_frame(arr)
     scale = _scale_per_frame(arr, zoom_frame).reshape(-1, 1)
+    # 상체 위치(손, 어깨)는 몸통 길이로 나눈다. 어깨 너비는 카메라가 비스듬할수록 좁게 찍혀서 값이
+    # 촬영 각도에 끌려간다 (프로 805개, 카메라 각도와 상관: 손 앞뒤 0.33->0.11, 상체 앞뒤 0.47->0.31,
+    # 상체 높이 0.69->0.10). 스트라이드 폭은 화면 가로 거리라 어깨 너비와 같이 줄어들어 상쇄되므로
+    # 어깨 너비가 더 낫다 (카메라 상관 0.16, 몸통 0.32, 다리 0.29).
+    torso_scale = _torso_scale_per_frame(arr, zoom_frame)
     leg_scale = _leg_scale_per_frame(arr, zoom_frame)
 
     joint = {idx: _fill(arr[:, idx, :2]) for idx in range(12)}
@@ -201,12 +206,12 @@ def compute_features(pixel_landmarks: np.ndarray) -> np.ndarray:
         90.0 - tilt(torso),  # 0이면 똑바로 선 자세, +면 투수 쪽으로 기울어짐
         line_tilt(joint[REAR_SHOULDER] - joint[LEAD_SHOULDER]),
         line_tilt(joint[REAR_HIP] - joint[LEAD_HIP]),
-        (hand_center[:, 0] - shoulder_center[:, 0]) / scale[:, 0],
-        -(hand_center[:, 1] - shoulder_center[:, 1]) / scale[:, 0],
+        (hand_center[:, 0] - shoulder_center[:, 0]) / torso_scale,
+        -(hand_center[:, 1] - shoulder_center[:, 1]) / torso_scale,
         (joint[LEAD_ANKLE][:, 0] - hip_center[:, 0]) / scale[:, 0],
         -(joint[LEAD_ANKLE][:, 1] - joint[REAR_ANKLE][:, 1]) / leg_scale,
-        (shoulder_center[:, 0] - hip_center[:, 0]) / scale[:, 0],
-        -(shoulder_center[:, 1] - hip_center[:, 1]) / scale[:, 0],
+        (shoulder_center[:, 0] - hip_center[:, 0]) / torso_scale,
+        -(shoulder_center[:, 1] - hip_center[:, 1]) / torso_scale,
         shoulder_turn,
         hip_turn,
         _wrap(shoulder_turn - hip_turn),
