@@ -229,7 +229,7 @@ def main() -> None:
     # 점수 환산 기준: 기준 스윙 하나하나가 평균 곡선에서 얼마나 떨어져 있는지
     # (사용자 점수를 "프로 스윙은 보통 이 정도 거리"와 견주기 위해 저장한다)
     # 사용자 비교(ReferenceModel)와 같은 편차 하한을 써야 프로 거리와 사용자 거리가 같은 잣대가 된다.
-    floor = min_spread(FEATURE_NAMES)
+    floor = min_spread([payload[f"{key}_std"] for key, *_ in PHASES if f"{key}_std" in payload])
     distances = []
     for index in range(max((len(phase_curves[key]) for key, *_ in PHASES), default=0)):
         diffs = []

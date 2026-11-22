@@ -46,14 +46,23 @@ def test_lifted_foot_height_is_relative_to_leg_length():
     assert np.all(short[5:-5] > 0.15)
 
 
-def test_spread_floor_follows_feature_length_unit():
-    # 하한은 어깨 너비 0.15 개에 해당하는 길이여야 한다. 몸통·다리 길이로 나눈 피처는 숫자가 작아지므로
-    # 하한도 같은 비율로 작아져야 실제 편차가 하한에 묻히지 않는다.
-    from feedback.reference_model import MIN_SPREAD, min_spread
-    from feedback.swing_features import SHOULDER_WIDTHS_PER_SCALE
 
-    floor = dict(zip(FEATURE_NAMES, min_spread(FEATURE_NAMES)))
-    assert floor["lead_knee_angle"] == MIN_SPREAD
-    assert floor["lead_ankle_x_from_hip"] == MIN_SPREAD
-    assert floor["shoulder_y_from_hip"] == pytest.approx(MIN_SPREAD / SHOULDER_WIDTHS_PER_SCALE["torso"])
-    assert floor["lead_ankle_y_from_hip"] == pytest.approx(MIN_SPREAD / SHOULDER_WIDTHS_PER_SCALE["leg"])
+def test_spread_floor_is_relative_to_each_feature():
+    # 하한은 피처마다 자기 편차 중앙값의 일정 비율이다. 단위(도, 몸통 길이, 다리 길이)와 무관하다.
+    from feedback.reference_model import MIN_SPREAD_RATIO, min_spread
+
+    stds = [np.array([[10.0, 0.05], [12.0, 0.06]]), np.array([[14.0, 0.07]])]
+    assert np.allclose(min_spread(stds), MIN_SPREAD_RATIO * np.array([12.0, 0.06]))
+
+
+def test_reference_model_spread_is_never_clipped():
+    # 프로 편차가 작은 피처는 실제로 일관된 동작이라 엄격하게 봐야 한다. 기준 모델의 실제 편차가
+    # 하한에 덮어써지면 그 피처가 둔감해진다 (예전 고정 하한 0.15 에서 상체 높이 99% 가 덮어써짐).
+    from feedback.reference_model import DEFAULT_MODEL_PATH, load_reference_model
+
+    model = load_reference_model()
+    if model is None:
+        pytest.skip("기준 모델(data/reference_model.npz)이 없습니다.")
+    raw = np.load(DEFAULT_MODEL_PATH, allow_pickle=True)
+    for key, phase in model.phases.items():
+        assert np.allclose(phase.std, raw[f"{key}_std"]), key
