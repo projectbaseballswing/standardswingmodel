@@ -99,6 +99,20 @@ FEATURE_UNITS: Dict[str, str] = {
     for name in FEATURE_NAMES
 }
 
+# 길이(body) 피처를 무엇으로 나눴는지. compute_features 와 맞춰야 한다.
+FEATURE_LENGTH_SCALE: Dict[str, str] = {
+    "hand_x_from_shoulder": "torso",
+    "hand_y_from_shoulder": "torso",
+    "lead_ankle_x_from_hip": "shoulder",
+    "lead_ankle_y_from_hip": "leg",
+    "shoulder_x_from_hip": "torso",
+    "shoulder_y_from_hip": "torso",
+}
+
+# 각 길이가 어깨 너비 몇 개인가 (프로 890개 중앙값: 몸통 1.775, 다리 2.483).
+# 단위가 다른 피처끼리 같은 기준(예: 편차 하한)을 쓸 때 어깨 너비 단위로 환산하는 데 쓴다.
+SHOULDER_WIDTHS_PER_SCALE: Dict[str, float] = {"shoulder": 1.0, "torso": 1.775, "leg": 2.483}
+
 
 def _angle(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> np.ndarray:
     """b를 꼭짓점으로 하는 a-b-c 각도(도)."""

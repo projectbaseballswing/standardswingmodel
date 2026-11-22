@@ -30,6 +30,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from feedback.events import detect_events  # noqa: E402
+from feedback.reference_model import min_spread  # noqa: E402
 from feedback.swing_features import FEATURE_NAMES, compute_features, hand_speed  # noqa: E402
 
 PHASES = [
@@ -227,6 +228,8 @@ def main() -> None:
 
     # 점수 환산 기준: 기준 스윙 하나하나가 평균 곡선에서 얼마나 떨어져 있는지
     # (사용자 점수를 "프로 스윙은 보통 이 정도 거리"와 견주기 위해 저장한다)
+    # 사용자 비교(ReferenceModel)와 같은 편차 하한을 써야 프로 거리와 사용자 거리가 같은 잣대가 된다.
+    floor = min_spread(FEATURE_NAMES)
     distances = []
     for index in range(max((len(phase_curves[key]) for key, *_ in PHASES), default=0)):
         diffs = []
@@ -234,7 +237,7 @@ def main() -> None:
             curves = phase_curves[key]
             if index >= len(curves):
                 continue
-            spread = np.maximum(payload[f"{key}_std"], 1e-6)
+            spread = np.maximum(payload[f"{key}_std"], floor)
             diffs.append(np.abs(curves[index] - payload[f"{key}_mean"]) / spread)
         if diffs:
             distances.append(float(np.sqrt(np.mean(np.concatenate(diffs) ** 2))))

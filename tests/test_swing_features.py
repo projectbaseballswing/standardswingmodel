@@ -44,3 +44,16 @@ def test_lifted_foot_height_is_relative_to_leg_length():
     assert np.allclose(short, long, atol=0.02)
     # 앞뒤 끝 프레임은 스무딩 가장자리라 값이 줄어든다. 가운데만 본다.
     assert np.all(short[5:-5] > 0.15)
+
+
+def test_spread_floor_follows_feature_length_unit():
+    # 하한은 어깨 너비 0.15 개에 해당하는 길이여야 한다. 몸통·다리 길이로 나눈 피처는 숫자가 작아지므로
+    # 하한도 같은 비율로 작아져야 실제 편차가 하한에 묻히지 않는다.
+    from feedback.reference_model import MIN_SPREAD, min_spread
+    from feedback.swing_features import SHOULDER_WIDTHS_PER_SCALE
+
+    floor = dict(zip(FEATURE_NAMES, min_spread(FEATURE_NAMES)))
+    assert floor["lead_knee_angle"] == MIN_SPREAD
+    assert floor["lead_ankle_x_from_hip"] == MIN_SPREAD
+    assert floor["shoulder_y_from_hip"] == pytest.approx(MIN_SPREAD / SHOULDER_WIDTHS_PER_SCALE["torso"])
+    assert floor["lead_ankle_y_from_hip"] == pytest.approx(MIN_SPREAD / SHOULDER_WIDTHS_PER_SCALE["leg"])

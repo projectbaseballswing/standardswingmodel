@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from feedback.reference import PROJECT_ROOT
+from feedback.swing_features import FEATURE_LENGTH_SCALE, SHOULDER_WIDTHS_PER_SCALE
 
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "data" / "reference_model.npz"
 
@@ -54,8 +55,18 @@ TIMING_NAMES: Dict[str, str] = {
     "follow_end": "팔로우 종료",
 }
 
-# 편차가 0에 가까운 지점에서 z-score 가 폭주하지 않도록 하는 하한
+# 편차가 0에 가까운 지점에서 z-score 가 폭주하지 않도록 하는 하한.
+# 각도는 도, 길이는 어깨 너비 단위 기준이다. 몸통·다리 길이로 나눈 피처는 숫자가 그만큼 작아서
+# 같은 0.15 를 쓰면 실제 편차가 하한 아래로 내려가 z 가 작아진다 (상체 높이 99%, 앞발 높이 88% 가 걸림).
 MIN_SPREAD = 0.15
+
+
+def min_spread(feature_names: List[str]) -> np.ndarray:
+    """피처별 편차 하한. 길이 피처는 MIN_SPREAD(어깨 너비 단위)를 그 피처의 단위로 환산한다."""
+    return np.array([
+        MIN_SPREAD / SHOULDER_WIDTHS_PER_SCALE[FEATURE_LENGTH_SCALE.get(name, "shoulder")]
+        for name in feature_names
+    ])
 
 
 @dataclass
@@ -79,6 +90,7 @@ class ReferenceModel:
         self.feature_names: List[str] = [str(name) for name in data["feature_names"]]
         self.points = int(data["phase_points"])
 
+        floor = min_spread(self.feature_names)
         self.phases: Dict[str, Phase] = {}
         for key in [str(k) for k in data["phase_keys"]]:
             if f"{key}_mean" not in data.files:
@@ -87,7 +99,7 @@ class ReferenceModel:
                 key=key,
                 name=PHASE_NAMES.get(key, key),
                 mean=np.asarray(data[f"{key}_mean"], dtype=float),
-                std=np.maximum(np.asarray(data[f"{key}_std"], dtype=float), MIN_SPREAD),
+                std=np.maximum(np.asarray(data[f"{key}_std"], dtype=float), floor),
                 count=int(data[f"{key}_count"]),
                 duration_mean=float(data[f"{key}_duration_mean"]),
                 duration_std=float(data[f"{key}_duration_std"]),
