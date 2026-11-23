@@ -464,7 +464,7 @@ class FeedbackRepository {
       ruleComment: evidence == null
           ? '이 구간은 관절을 믿고 비교하기 어려워 교정 안내를 보류할게요.'
           : evidence.isIssue
-          ? '${evidence.observation} ${evidence.action}'
+          ? evidence.observation
           : '${evidence.observation} 다른 구간에서는 결과가 달라질 수 있어요.',
       contribution: _number(j['contribution']),
     );

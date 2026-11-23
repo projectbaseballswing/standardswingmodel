@@ -149,7 +149,9 @@ void main() {
       expect(arm.joint, 'hand_y_from_shoulder');
       expect(arm.phase, 'stride');
       expect(arm.action, contains('원본'));
-      expect(arm.action, contains('같은 차이가 보이는지'));
+      expect(arm.action, contains('양손의 가운데와 양어깨의 가운데'));
+      expect(arm.action, contains('손이 움직인 것인지 어깨 높이가 달라진 것인지'));
+      expect(arm.action, isNot(contains('관절이 가려졌다면')));
       expect(jsonEncode(r), before);
       r['joints'] = (r['joints'] as List).reversed.toList();
       expect(

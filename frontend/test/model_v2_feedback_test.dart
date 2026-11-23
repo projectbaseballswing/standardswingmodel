@@ -102,7 +102,9 @@ void main() {
       expect(f.modelVersion, '0.2');
       expect(f.totalScore, 77.3);
       expect(f.reliability, 'high');
-      expect(f.warnings, ['일부 관절이 가려져 있습니다.']);
+      expect(f.warnings, [
+        '일부 관절의 인식 품질을 확인해 주세요. 이 안내만으로 가림 여부나 원인은 알 수 없어요.',
+      ]);
       expect(f.items.map((i) => i.currentScore), [63.8, 51.2]);
       expect(f.items.last.features, isEmpty);
       expect(f.items.last.limited, isTrue);
@@ -333,7 +335,10 @@ void main() {
       await tester.pumpWidget(MaterialApp.router(routerConfig: router));
       await tester.pumpAndSettle();
       expect(find.text('77.3'), findsOneWidget);
-      expect(find.text('일부 관절이 가려져 있습니다.'), findsOneWidget);
+      expect(
+        find.text('일부 관절의 인식 품질을 확인해 주세요. 이 안내만으로 가림 여부나 원인은 알 수 없어요.'),
+        findsOneWidget,
+      );
       // 저장된 영상은 진입 즉시 URL을 한 번 요청한다.
       expect(requests.where((uri) => uri.path.endsWith('/video')).length, 1);
       expect(find.byType(PhaseMetrics), findsNothing);

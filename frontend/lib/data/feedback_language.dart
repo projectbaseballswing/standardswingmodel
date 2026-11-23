@@ -44,9 +44,89 @@ String feedbackObservation(
       '${feedbackTopic(feedbackFeatureName(key, name))} $direction.';
 }
 
-String feedbackObservationAction(String key, String name, String phase) =>
-    '원본 영상의 $phase 구간에서 ${feedbackFeatureName(key, name)}에 같은 차이가 보이는지 확인해 보세요. '
-    '관절이 가려졌다면 측정이 달라질 수 있어요.';
+String feedbackObservationAction(
+  String key,
+  String name,
+  String phase, {
+  bool hasReferenceSeries = false,
+}) {
+  final focus = switch (key) {
+    'hip_tilt' =>
+      '양쪽 골반을 이은 선과 발 디딤을 함께 보세요. 기울기 자체보다 몸이 흔들려 발을 다시 디디는 등 실제 균형 문제가 보이는지 살펴보세요.',
+    'lead_ankle_x_from_hip' =>
+      '앞발목과 골반 중심을 함께 따라가 보세요. 앞발이 움직인 것인지, 발을 딛은 뒤 골반이 움직인 것인지 나눠 확인해 보세요.',
+    'hand_y_from_shoulder' =>
+      '양손의 가운데와 양어깨의 가운데를 함께 따라가 보세요. 손이 움직인 것인지 어깨 높이가 달라진 것인지 나눠 비교해 보세요.',
+    'lead_elbow_angle' =>
+      '앞쪽 어깨·팔꿈치·손목을 따라가며 팔이 펴지고 굽혀지는 흐름을 보세요. 측정 각도 차이가 커도 교정이 필요하다는 뜻은 아니므로 실제 팔 모양부터 확인하세요.',
+    'rear_elbow_angle' =>
+      '뒤쪽 어깨·팔꿈치·손목을 따라가며 팔이 펴지고 굽혀지는 흐름을 보세요. 측정 각도 차이가 커도 교정이 필요하다는 뜻은 아니므로 실제 팔 모양부터 확인하세요.',
+    _ =>
+      '${feedbackFeatureName(key, name)}의 움직임을 살펴보세요. 안내가 준비되지 않은 항목은 위치를 임의로 바꾸지 마세요.',
+  };
+  final comparison = hasReferenceSeries
+      ? '기준과의 수치 차이는 관절별 분석 그래프에서 확인할 수 있어요. 기준 영상은 제공되지 않아 원본에서는 내 움직임을 살펴봐 주세요.'
+      : '비교 가능한 기준 그래프나 기준 영상이 없어, 원본만으로 기준 자세와의 차이를 직접 확인할 수는 없어요.';
+  return '기존 원본 영상의 $phase 구간을 처음·중간·끝 순서로 천천히 보세요. $focus $comparison';
+}
+
+/// A small, optional observation trial, never a diagnosis or a validated training effect.
+/// Eligibility permits an invitation, not approval of a correction. Confirmation
+/// of actual motion/balance must come from the user watching their existing video.
+String? feedbackConditionalPractice(
+  String key,
+  String phase,
+  String direction, {
+  required bool eligible,
+}) {
+  if (!eligible || !const {'higher', 'lower'}.contains(direction)) return null;
+  final stage = const {
+    'stride': '앞발을 들고 딛는 동안',
+    'transition': '앞발을 딛은 뒤 스윙을 시작하기 전까지',
+    'swing': '스윙 시작부터 추정 임팩트까지',
+    'follow': '추정 임팩트 뒤 마무리하는 동안',
+  }[phase];
+  if (stage == null) return null;
+  const optionalRecording = '원하면 추가 촬영으로 움직임을 비교할 수 있지만, 다시 찍을 필요는 없어요.';
+  switch (key) {
+    case 'hip_tilt':
+      return '원본에서 몸이 흔들려 발을 다시 디디는 등 실제 균형 문제가 확인될 때만, 배트 없이 $stage 동작을 편한 속도로 작게 이어 해보세요. 골반 기울기 수치를 맞추기보다 발을 다시 디뎌야 하는지 살펴보세요. $optionalRecording';
+    case 'lead_ankle_x_from_hip':
+      final task = phase == 'stride'
+          ? '현재 앞발이 출발하는 자리와 딛는 자리를 표시하고, 배트 없이 천천히 앞발을 들었다 딛어 보세요.'
+          : '현재 앞발을 딛는 자리를 표시하고, 배트 없이 느린 빈스윙을 해보세요.';
+      return '기존 영상에서 앞발과 골반의 움직임을 구분할 수 있고 더 살펴보고 싶다면, $task $stage 발목과 골반 중심이 어떻게 움직이는지 느껴보세요. $optionalRecording';
+    case 'hand_y_from_shoulder':
+      return '기존 영상에서 손과 어깨의 움직임이 잘 보이고 직접 살펴보고 싶다면, 배트 없이 느린 빈스윙으로 $stage 양손이 지나가는 길을 이어 움직여 보세요. 기준 수치에 맞춰 손을 올리거나 내리지 말고, 어깨와 손이 함께 움직이는 흐름을 살펴보세요. $optionalRecording';
+    case 'lead_elbow_angle':
+    case 'rear_elbow_angle':
+      final arm = key == 'lead_elbow_angle' ? '앞팔' : '뒷팔';
+      return '기존 영상에서 실제 팔 모양을 확인할 수 있고 직접 살펴보고 싶다면, 배트 없이 느린 빈스윙으로 $stage $arm 팔꿈치의 펴짐·굽힘을 이어 재현해 보세요. 자연스럽게 펴지는 팔을 멈추거나 측정된 차이만큼 각도를 꺾지 마세요. $optionalRecording';
+    default:
+      return null;
+  }
+}
+
+String feedbackMeasurementLimits(String key) {
+  final specific = switch (key) {
+    'hip_tilt' =>
+      '화면상 골반선의 기울기이며 실제 3D 골반 기울기는 아닙니다. 기준에도 기울기가 있으므로 수평으로 고정하지 않습니다.',
+    'lead_ankle_x_from_hip' =>
+      '앞발목과 골반 중심의 화면상 상대 위치를 어깨너비로 정규화한 값입니다. 실제 보폭·스탠스 폭·이동 거리가 아니며, 바닥 표시는 발을 더 멀리 보내기 위한 목표가 아닙니다.',
+    'hand_y_from_shoulder' =>
+      '양 손목 중심과 양 어깨 중심의 상대 높이를 어깨너비로 정규화한 값입니다. 한 손의 궤적이나 실제 높이(cm)가 아닙니다.',
+    'lead_elbow_angle' || 'rear_elbow_angle' =>
+      '어깨·팔꿈치·손목의 IMAGE 좌표와 축소된 추정 깊이로 계산한 각도입니다. 독립적인 실제 3D 측정값은 아닙니다.',
+    _ => '해당 측정의 의미는 관절별 상세 설명에서 확인할 수 있습니다.',
+  };
+  return '$specific 구간 평균은 동작 흐름의 요약이며 한순간의 목표 자세가 아닙니다. '
+      '신뢰도 medium/high는 교정의 타당성을 확인했다는 뜻이 아니며, 큰 각도 차이도 원본 확인이 필요합니다. '
+      '먼저 확인할 항목은 신뢰도 조건을 통과한 구간별 표준화 차이의 크기로 고릅니다. 구간 가중치를 반영한 점수 영향도 순서나 전문적인 교정 우선순위는 아닙니다. '
+      '화면상의 정상적인 움직임과 추정 좌표의 갑작스러운 이동은 구분해서 확인합니다. '
+      '조건부 연습은 차이를 확인하기 위한 작은 비교 시도이며 교정 효과가 검증된 처방은 아닙니다. '
+      '기준 그래프는 여러 선수의 측정 평균이며 특정 선수의 정답 자세 영상이 아닙니다. '
+      '원본에서 내 움직임을 판단할 수 없으면 연습은 보류합니다.';
+}
 
 String feedbackFeatureDescription(String key, String fallback) =>
     const {
@@ -75,6 +155,9 @@ String feedbackFeatureDescription(String key, String fallback) =>
 
 /// Known report notices are translated at the presentation boundary only.
 String feedbackReportNotice(String raw) {
+  if (raw == '일부 관절이 가려져 있습니다.') {
+    return '일부 관절의 인식 품질을 확인해 주세요. 이 안내만으로 가림 여부나 원인은 알 수 없어요.';
+  }
   final rotation = RegExp(
     r'^착지부터 임팩트까지 (골반|어깨)[이가] (-?\d+(?:\.\d+)?)도 돌아갔어요\.$',
   ).firstMatch(raw);

@@ -1049,19 +1049,45 @@ class _CoachCard extends StatelessWidget {
             ),
             _CoachStep(
               icon: Icons.search,
-              label: '원본에서 먼저 확인',
-              text:
-                  '${first.action}\n이 설명은 구간의 평균을 비교한 것이에요. '
-                  '한순간의 자세를 이 값에 맞추라는 뜻은 아니에요.',
+              label: '영상 확인 방법',
+              text: first.action,
             ),
-            const _CoachStep(
-              icon: Icons.sports_baseball_outlined,
-              label: '원본을 보는 방법',
-              text:
-                  '해당 구간의 처음·중간·끝 장면을 천천히 비교해 보세요. '
-                  '어떤 동작을 얼마나 바꿀지는 이 결과만으로 정하기 어려워요.',
-              isLast: true,
-            ),
+            if (first.qualityNotice.isNotEmpty)
+              _CoachStep(
+                icon: Icons.info_outline,
+                label: '인식 품질 확인',
+                text: first.qualityNotice,
+              ),
+            if (first.practice?.isNotEmpty == true)
+              _CoachStep(
+                icon: Icons.sports_baseball_outlined,
+                label: '조건부 연습',
+                text: first.practice!,
+                isLast: true,
+              ),
+            if (first.limitations.isNotEmpty)
+              Material(
+                type: MaterialType.transparency,
+                child: ExpansionTile(
+                  key: const Key('feedback-measurement-limits'),
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: 8),
+                  title: const Text(
+                    '측정 해석과 한계',
+                    style: TextStyle(fontSize: 12, color: AppColors.hint),
+                  ),
+                  children: [
+                    Text(
+                      first.limitations,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        height: 1.5,
+                        color: AppColors.subtitle,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ] else
             Text(feedback.coachComment),
           if (cf != null) ...[

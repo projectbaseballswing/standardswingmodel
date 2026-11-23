@@ -435,13 +435,32 @@ class FeedbackEvidence {
     required this.z,
     required this.direction,
     required this.isIssue,
+    this.directionCode = '',
+    this.practiceEligible = false,
+    this.qualityNotice = '',
+    this.hasReferenceSeries = false,
   });
   final String joint, part, name, phase, phaseName, direction;
+  final String directionCode, qualityNotice;
+  final bool practiceEligible;
+  final bool hasReferenceSeries;
   final double z;
   final bool isIssue;
   String get observation =>
       feedbackObservation(joint, name, phaseName, direction);
-  String get action => feedbackObservationAction(joint, name, phaseName);
+  String get action => feedbackObservationAction(
+    joint,
+    name,
+    phaseName,
+    hasReferenceSeries: hasReferenceSeries,
+  );
+  String? get practice => feedbackConditionalPractice(
+    joint,
+    phase,
+    directionCode,
+    eligible: isIssue && practiceEligible,
+  );
+  String get limitations => feedbackMeasurementLimits(joint);
 }
 
 /// 자세 계산에 사용한 표준화 차이 제곱합의 부위별 상대 비중.
