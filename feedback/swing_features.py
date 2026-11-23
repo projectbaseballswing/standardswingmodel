@@ -1,6 +1,7 @@
 """프레임별 스윙 피처. 기준 모델과 사용자 분석이 같은 함수를 쓴다.
 
-원본 프레임 좌표(픽셀)에서 계산하고, 길이는 모두 몸 크기(어깨 너비)로 나눈다.
+원본 프레임 좌표(픽셀)에서 계산하고, 길이는 몸 크기로 나눈다. 상체 위치(손, 어깨)는
+몸통 길이, 앞발 높이는 다리 길이, 스트라이드 폭은 어깨 너비로 나눈다 (compute_features 주석 참고).
 각도는 그 자체로 크기와 무관하다. 좌타 영상은 추출 단계에서 좌우반전되어 우타 기준으로 통일돼 있다.
 
 주의: 기울기 계열(상체/어깨/골반)은 화면 기준이라 카메라를 세워서 찍었다고 가정한다.
@@ -63,8 +64,8 @@ FEATURE_NAMES: List[str] = [
     "hand_x_from_shoulder",  # 어깨 중심 기준 손 앞뒤 위치
     "hand_y_from_shoulder",  # 어깨 중심 기준 손 높이
     "lead_ankle_x_from_hip",  # 골반 기준 앞발 앞뒤 위치 (스트라이드)
-    "lead_ankle_y_from_hip",  # 골반 기준 앞발 높이
-    "shoulder_x_from_hip",   # 골반 기준 어깨 앞뒤 위치 (상체 쏠림)
+    "lead_ankle_y_from_hip",  # 뒷발목(바닥) 기준 앞발 높이, 다리 길이 단위 (키 이름은 API 호환용)
+    "shoulder_x_from_hip",  # 골반 기준 어깨 앞뒤 위치 (상체 쏠림)
     "shoulder_y_from_hip",   # 골반 기준 어깨 높이
     "shoulder_turn",         # 어깨 회전 (위에서 본 어깨선 방향, +면 투수 쪽으로 열림)
     "hip_turn",              # 골반 회전
@@ -168,7 +169,14 @@ def estimate_depth_scale(pixel_landmarks: np.ndarray, world_landmarks: np.ndarra
 def compute_features(pixel_landmarks: np.ndarray) -> np.ndarray:
     """(T, 12, 3) 픽셀 좌표 -> (T, len(FEATURE_NAMES)) 피처."""
     arr = np.asarray(pixel_landmarks, dtype=float)
-    scale = _scale_per_frame(arr, find_zoom_frame(arr)).reshape(-1, 1)
+    zoom_frame = find_zoom_frame(arr)
+    scale = _scale_per_frame(arr, zoom_frame).reshape(-1, 1)
+    # 상체 위치(손, 어깨)는 몸통 길이로 나눈다. 어깨 너비는 카메라가 비스듬할수록 좁게 찍혀서 값이
+    # 촬영 각도에 끌려간다 (프로 805개, 카메라 각도와 상관: 손 앞뒤 0.33->0.11, 상체 앞뒤 0.47->0.31,
+    # 상체 높이 0.69->0.10). 스트라이드 폭은 화면 가로 거리라 어깨 너비와 같이 줄어들어 상쇄되므로
+    # 어깨 너비가 더 낫다 (카메라 상관 0.16, 몸통 0.32, 다리 0.29).
+    torso_scale = _torso_scale_per_frame(arr, zoom_frame)
+    leg_scale = _leg_scale_per_frame(arr, zoom_frame)
 
     joint = {idx: _fill(arr[:, idx, :2]) for idx in range(12)}
     # 팔꿈치 각도만 3D 로 잰다. 팔은 몸에 가려지고 카메라 쪽으로 뻗어서 2D 각도가 크게 틀어진다.
@@ -198,17 +206,42 @@ def compute_features(pixel_landmarks: np.ndarray) -> np.ndarray:
         90.0 - tilt(torso),  # 0이면 똑바로 선 자세, +면 투수 쪽으로 기울어짐
         line_tilt(joint[REAR_SHOULDER] - joint[LEAD_SHOULDER]),
         line_tilt(joint[REAR_HIP] - joint[LEAD_HIP]),
-        (hand_center[:, 0] - shoulder_center[:, 0]) / scale[:, 0],
-        -(hand_center[:, 1] - shoulder_center[:, 1]) / scale[:, 0],
+        (hand_center[:, 0] - shoulder_center[:, 0]) / torso_scale,
+        -(hand_center[:, 1] - shoulder_center[:, 1]) / torso_scale,
         (joint[LEAD_ANKLE][:, 0] - hip_center[:, 0]) / scale[:, 0],
-        -(joint[LEAD_ANKLE][:, 1] - hip_center[:, 1]) / scale[:, 0],
-        (shoulder_center[:, 0] - hip_center[:, 0]) / scale[:, 0],
-        -(shoulder_center[:, 1] - hip_center[:, 1]) / scale[:, 0],
+        -(joint[LEAD_ANKLE][:, 1] - joint[REAR_ANKLE][:, 1]) / leg_scale,
+        (shoulder_center[:, 0] - hip_center[:, 0]) / torso_scale,
+        -(shoulder_center[:, 1] - hip_center[:, 1]) / torso_scale,
         shoulder_turn,
         hip_turn,
         _wrap(shoulder_turn - hip_turn),
     ]
     return np.stack(columns, axis=1)
+
+
+def _leg_scale_per_frame(pixel_landmarks: np.ndarray, zoom_frame) -> np.ndarray:
+    """프레임별 다리 길이(골반-무릎 + 무릎-발목, 양쪽 평균) 중앙값. 확대 지점이 있으면 앞뒤를 따로 계산한다.
+
+    앞발 높이를 어깨 너비로 나누면 발이 바닥에 있을 때 값이 '다리 길이 / 어깨 너비'가 되어
+    체형과 촬영 각도가 그대로 섞인다 (프로 633개: 바닥 상태 편차 ±0.42, 다리 길이와 상관 -0.64,
+    실제로 들어 올린 높이와 비슷한 크기). 뒷발목 기준 + 다리 길이로 나누면 바닥 상태 편차 ±0.12,
+    다리 길이와 상관 -0.03 이다. 무릎을 굽혀도 마디 길이는 그대로라 자세에 둔감하다.
+    """
+    def segment(a: int, b: int) -> np.ndarray:
+        return np.linalg.norm(pixel_landmarks[:, a, :2] - pixel_landmarks[:, b, :2], axis=1)
+
+    length = (segment(LEAD_HIP, LEAD_KNEE) + segment(LEAD_KNEE, LEAD_ANKLE)
+              + segment(REAR_HIP, REAR_KNEE) + segment(REAR_KNEE, REAR_ANKLE)) / 2
+
+    def median(values: np.ndarray) -> float:
+        value = float(np.nanmedian(values)) if np.isfinite(values).any() else float("nan")
+        return value if np.isfinite(value) and value > 1 else 1.0
+
+    scale = np.full(len(pixel_landmarks), median(length), dtype=float)
+    if zoom_frame is not None:
+        scale[:zoom_frame] = median(length[:zoom_frame])
+        scale[zoom_frame:] = median(length[zoom_frame:])
+    return scale
 
 
 def _torso_scale_per_frame(pixel_landmarks: np.ndarray, zoom_frame) -> np.ndarray:

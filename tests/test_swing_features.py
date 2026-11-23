@@ -1,0 +1,68 @@
+"""스윙 피처가 체형(다리 길이) 차이에 흔들리지 않는지 합성 스켈레톤으로 검증한다."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from feedback.events import (
+    LEAD_ANKLE, LEAD_ELBOW, LEAD_HIP, LEAD_KNEE, LEAD_SHOULDER, LEAD_WRIST,
+    REAR_ANKLE, REAR_ELBOW, REAR_HIP, REAR_KNEE, REAR_SHOULDER, REAR_WRIST,
+)
+from feedback.swing_features import FEATURE_NAMES, compute_features
+
+FOOT_HEIGHT = FEATURE_NAMES.index("lead_ankle_y_from_hip")
+
+
+def standing_pose(leg: float, frames: int = 30, lift: float = 0.0) -> np.ndarray:
+    """정면에서 본 선 자세 (T, 12, 3) 픽셀 좌표. y 는 아래로 증가. lift 는 다리 길이 대비 앞발 높이."""
+    hip_y, shoulder_y = 500.0, 320.0
+    points = {
+        LEAD_SHOULDER: (560, shoulder_y), REAR_SHOULDER: (440, shoulder_y),
+        LEAD_ELBOW: (580, 400), REAR_ELBOW: (420, 400),
+        LEAD_WRIST: (530, 360), REAR_WRIST: (470, 360),
+        LEAD_HIP: (540, hip_y), REAR_HIP: (460, hip_y),
+        LEAD_KNEE: (545, hip_y + leg / 2), REAR_KNEE: (455, hip_y + leg / 2),
+        LEAD_ANKLE: (550, hip_y + leg * (1 - lift)), REAR_ANKLE: (450, hip_y + leg),
+    }
+    pose = np.zeros((12, 3))
+    for joint, (x, y) in points.items():
+        pose[joint, :2] = (x, y)
+    return np.repeat(pose[None], frames, axis=0)
+
+
+@pytest.mark.parametrize("leg", [300.0, 380.0, 460.0])
+def test_foot_on_ground_reads_zero_for_any_leg_length(leg):
+    height = compute_features(standing_pose(leg))[:, FOOT_HEIGHT]
+    assert np.allclose(height, 0.0, atol=1e-6)
+
+
+def test_lifted_foot_height_is_relative_to_leg_length():
+    # 다리 길이가 달라도 다리 길이의 20% 만큼 들면 같은 값이 나와야 한다.
+    short = compute_features(standing_pose(300.0, lift=0.2))[:, FOOT_HEIGHT]
+    long = compute_features(standing_pose(460.0, lift=0.2))[:, FOOT_HEIGHT]
+    assert np.allclose(short, long, atol=0.02)
+    # 앞뒤 끝 프레임은 스무딩 가장자리라 값이 줄어든다. 가운데만 본다.
+    assert np.all(short[5:-5] > 0.15)
+
+
+
+def test_spread_floor_is_relative_to_each_feature():
+    # 하한은 피처마다 자기 편차 중앙값의 일정 비율이다. 단위(도, 몸통 길이, 다리 길이)와 무관하다.
+    from feedback.reference_model import MIN_SPREAD_RATIO, min_spread
+
+    stds = [np.array([[10.0, 0.05], [12.0, 0.06]]), np.array([[14.0, 0.07]])]
+    assert np.allclose(min_spread(stds), MIN_SPREAD_RATIO * np.array([12.0, 0.06]))
+
+
+def test_reference_model_spread_is_never_clipped():
+    # 프로 편차가 작은 피처는 실제로 일관된 동작이라 엄격하게 봐야 한다. 기준 모델의 실제 편차가
+    # 하한에 덮어써지면 그 피처가 둔감해진다 (예전 고정 하한 0.15 에서 상체 높이 99% 가 덮어써짐).
+    from feedback.reference_model import DEFAULT_MODEL_PATH, load_reference_model
+
+    model = load_reference_model()
+    if model is None:
+        pytest.skip("기준 모델(data/reference_model.npz)이 없습니다.")
+    raw = np.load(DEFAULT_MODEL_PATH, allow_pickle=True)
+    for key, phase in model.phases.items():
+        assert np.allclose(phase.std, raw[f"{key}_std"]), key

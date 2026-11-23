@@ -24,7 +24,7 @@ SEMANTICS={
  'hand_x_from_shoulder':'어깨 기준 손 위치: +는 투수 쪽. 위치 차이는 조기 출발·속도를 뜻하지 않음.',
  'hand_y_from_shoulder':'어깨 기준 손 높이: 커지면 더 높음.',
  'lead_ankle_x_from_hip':'골반 기준 앞발 거리: 커지면 더 멀리 나감.',
- 'lead_ankle_y_from_hip':'골반 기준 앞발 높이: 커지면 더 높게 들림.',
+ 'lead_ankle_y_from_hip':'뒷발(바닥) 기준 앞발 높이, 다리 길이 대비: 커지면 더 높게 들림.',
  'shoulder_x_from_hip':'골반 기준 상체 위치: +는 투수 쪽.',
  'shoulder_y_from_hip':'골반 기준 상체 높이: 커지면 더 높음.',
  'shoulder_turn':'어깨의 열림 각도, 회전 시작 순서는 측정하지 않음.',

@@ -54,8 +54,18 @@ TIMING_NAMES: Dict[str, str] = {
     "follow_end": "팔로우 종료",
 }
 
-# 편차가 0에 가까운 지점에서 z-score 가 폭주하지 않도록 하는 하한
-MIN_SPREAD = 0.15
+# 편차 하한 = 그 피처의 프로 편차 중앙값(모든 구간·지점) × 이 비율.
+# 하한은 표본이 적은 지점에서 편차가 우연히 무너져 z 가 폭주하는 것만 막는 안전장치다.
+# 프로끼리 편차가 작은 피처는 실제로 일관된 동작이라 엄격하게 봐야 하므로, 정상 범위의 편차는
+# 건드리지 않는다. 프로 805개 기준 피처별 최소 편차는 중앙값의 56~93% 라 25% 에는 걸리지 않는다.
+# (예전 고정값 0.15 는 단위가 다른 피처에 같은 숫자를 써서, 몸통·다리 길이로 나눈 피처의 편차를 덮어썼다.)
+MIN_SPREAD_RATIO = 0.25
+
+
+def min_spread(stds: List[np.ndarray]) -> np.ndarray:
+    """구간별 편차 (points, n_features) 목록 -> 피처별 하한 (n_features,)."""
+    stacked = np.concatenate([np.asarray(s, dtype=float) for s in stds], axis=0)
+    return MIN_SPREAD_RATIO * np.nanmedian(stacked, axis=0)
 
 
 @dataclass
@@ -79,6 +89,8 @@ class ReferenceModel:
         self.feature_names: List[str] = [str(name) for name in data["feature_names"]]
         self.points = int(data["phase_points"])
 
+        phase_keys = [str(k) for k in data["phase_keys"] if f"{k}_std" in data.files]
+        floor = min_spread([data[f"{k}_std"] for k in phase_keys])
         self.phases: Dict[str, Phase] = {}
         for key in [str(k) for k in data["phase_keys"]]:
             if f"{key}_mean" not in data.files:
@@ -87,7 +99,7 @@ class ReferenceModel:
                 key=key,
                 name=PHASE_NAMES.get(key, key),
                 mean=np.asarray(data[f"{key}_mean"], dtype=float),
-                std=np.maximum(np.asarray(data[f"{key}_std"], dtype=float), MIN_SPREAD),
+                std=np.maximum(np.asarray(data[f"{key}_std"], dtype=float), floor),
                 count=int(data[f"{key}_count"]),
                 duration_mean=float(data[f"{key}_duration_mean"]),
                 duration_std=float(data[f"{key}_duration_std"]),

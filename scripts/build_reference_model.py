@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from feedback.compare_v2 import PHASE_WEIGHTS  # noqa: E402
 from feedback.events import detect_events  # noqa: E402
+from feedback.reference_model import min_spread  # noqa: E402
 from feedback.swing_features import FEATURE_NAMES, compute_features, hand_speed  # noqa: E402
 
 PHASES = [
@@ -231,6 +232,8 @@ def main() -> None:
     # 사용자 점수(_overall_distance)와 같은 구간 가중 RMS 로 낸다. 가중치 근거는
     # docs/scoring-phase-weights.md. 프로 z 는 대략 N(0,1) 이라 가중을 줘도 기준선은
     # 거의 안 변하지만, 자기일관성을 위해 같은 공식을 쓴다.
+    # 사용자 비교(ReferenceModel)와 같은 편차 하한을 써야 프로 거리와 사용자 거리가 같은 잣대가 된다.
+    floor = min_spread([payload[f"{key}_std"] for key, *_ in PHASES if f"{key}_std" in payload])
     distances = []
     for index in range(max((len(phase_curves[key]) for key, *_ in PHASES), default=0)):
         num = den = 0.0
@@ -238,7 +241,7 @@ def main() -> None:
             curves = phase_curves[key]
             if index >= len(curves):
                 continue
-            spread = np.maximum(payload[f"{key}_std"], 1e-6)
+            spread = np.maximum(payload[f"{key}_std"], floor)
             z = np.abs(curves[index] - payload[f"{key}_mean"]) / spread
             weight = PHASE_WEIGHTS.get(key, 1.0)
             num += weight * float(np.sum(z ** 2))
@@ -258,7 +261,7 @@ def main() -> None:
     payload["phase_keys"] = np.asarray([key for key, *_ in PHASES], dtype=object)
     payload["phase_points"] = np.asarray(PHASE_POINTS)
     payload["metadata_json"] = json.dumps({
-        "model_version": "0.2.2-draft",
+        "model_version": "0.2.3",
         "built_from": str(args.skeleton_dir),
         "swings_total": len(files),
         "swings_used": used,
