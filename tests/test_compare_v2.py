@@ -246,3 +246,43 @@ def test_rotation_checks_cap_posture_when_torso_does_not_turn(model, skeleton):
     checks = {c["key"]: c for c in report["overall"]["rotation_checks"]}
     assert checks["hip_opens"]["passed"] is False and checks["shoulder_opens"]["passed"] is False
     assert report["overall"]["posture_score"] <= ROTATION_FAIL_POSTURE_CAP
+
+
+# ---------------------------------------------------------------------------
+# 구간 가중치 (스켈레톤 없이 synthetic diff_z 로 검증)
+# ---------------------------------------------------------------------------
+from types import SimpleNamespace  # noqa: E402
+
+from feedback.compare_v2 import PHASE_WEIGHTS  # noqa: E402
+
+
+def _synthetic(diff_z):
+    c = SwingComparisonV2.__new__(SwingComparisonV2)
+    c.model = SimpleNamespace(feature_names=["lead_elbow_angle", "lead_knee_angle"])
+    c.diff_z = diff_z
+    return c
+
+
+def test_overall_distance_single_phase_ignores_weight():
+    """단일 구간이면 가중 개수로 나눠 상쇄되므로 거리는 그 구간 RMS 그대로다."""
+    c = _synthetic({"stride": np.full((20, 2), 2.0)})
+    assert c._overall_distance() == pytest.approx(2.0)
+
+
+def test_overall_distance_weighted_rms_across_phases():
+    """두 구간이 섞이면 구간 가중 RMS 공식과 일치해야 한다."""
+    c = _synthetic({"stride": np.full((20, 2), 2.0), "swing": np.full((20, 2), 4.0)})
+    ws, ww, n = PHASE_WEIGHTS["stride"], PHASE_WEIGHTS["swing"], 40
+    expected = np.sqrt((ws * 4 * n + ww * 16 * n) / ((ws + ww) * n))
+    assert c._overall_distance() == pytest.approx(expected)
+
+
+def test_stride_deviation_counts_less_than_swing():
+    """같은 크기의 이탈이라도 스트라이드는 스윙보다 거리를 덜 올린다(팔로우=스트라이드)."""
+    def dist(phase):
+        base = {k: np.zeros((20, 2)) for k in ("stride", "transition", "swing", "follow")}
+        base[phase] = np.full((20, 2), 3.0)
+        return _synthetic(base)._overall_distance()
+
+    assert dist("stride") < dist("transition") < dist("swing")
+    assert dist("follow") == pytest.approx(dist("stride"))
