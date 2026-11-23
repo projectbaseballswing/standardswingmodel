@@ -1124,6 +1124,31 @@ class _FeatureDetail extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
+            if (series.length >= 2)
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
+                children: [
+                  if (series.any((s) => s.user != null))
+                    const Text(
+                      '━ 내 측정값',
+                      style: TextStyle(fontSize: 11, color: AppColors.primary),
+                    ),
+                  if (series.any((s) => s.reference != null))
+                    const Text(
+                      '━ 기준 평균',
+                      style: TextStyle(fontSize: 11, color: AppColors.subtitle),
+                    ),
+                  if (series.any(
+                    (s) => s.reference != null && s.referenceStd != null,
+                  ))
+                    const Text(
+                      '옅은 영역: 기준 ±편차',
+                      style: TextStyle(fontSize: 11, color: AppColors.hint),
+                    ),
+                ],
+              ),
+            const SizedBox(height: 4),
             _SyncedSeriesChart(
               feature: feature,
               series: series,
