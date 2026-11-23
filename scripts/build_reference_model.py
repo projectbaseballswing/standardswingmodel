@@ -29,6 +29,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from feedback.compare_v2 import PHASE_WEIGHTS  # noqa: E402
 from feedback.events import detect_events  # noqa: E402
 from feedback.swing_features import FEATURE_NAMES, compute_features, hand_speed  # noqa: E402
 
@@ -227,17 +228,23 @@ def main() -> None:
 
     # 점수 환산 기준: 기준 스윙 하나하나가 평균 곡선에서 얼마나 떨어져 있는지
     # (사용자 점수를 "프로 스윙은 보통 이 정도 거리"와 견주기 위해 저장한다)
+    # 사용자 점수(_overall_distance)와 같은 구간 가중 RMS 로 낸다. 가중치 근거는
+    # docs/scoring-phase-weights.md. 프로 z 는 대략 N(0,1) 이라 가중을 줘도 기준선은
+    # 거의 안 변하지만, 자기일관성을 위해 같은 공식을 쓴다.
     distances = []
     for index in range(max((len(phase_curves[key]) for key, *_ in PHASES), default=0)):
-        diffs = []
+        num = den = 0.0
         for key, *_ in PHASES:
             curves = phase_curves[key]
             if index >= len(curves):
                 continue
             spread = np.maximum(payload[f"{key}_std"], 1e-6)
-            diffs.append(np.abs(curves[index] - payload[f"{key}_mean"]) / spread)
-        if diffs:
-            distances.append(float(np.sqrt(np.mean(np.concatenate(diffs) ** 2))))
+            z = np.abs(curves[index] - payload[f"{key}_mean"]) / spread
+            weight = PHASE_WEIGHTS.get(key, 1.0)
+            num += weight * float(np.sum(z ** 2))
+            den += weight * z.size
+        if den:
+            distances.append(float(np.sqrt(num / den)))
     distances = np.asarray(distances, dtype=float)
     if len(distances):
         low, high = np.percentile(distances, [5, 95])
