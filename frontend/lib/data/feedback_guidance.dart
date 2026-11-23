@@ -30,6 +30,72 @@ const _phases = {'stride', 'transition', 'swing', 'follow'};
 bool _quality(Map<String, dynamic> row) =>
     row['available'] == true && reliableFeedback(row['reliability']);
 
+// Only advertise the existing chart when paired finite samples can be shown.
+// This is a statistical comparison, not an available reference-player video.
+bool feedbackHasReferenceSeries(Map<String, dynamic> joint) {
+  final series = joint['series'];
+  if (series is! Map) return false;
+  final user = series['user'], reference = series['reference'];
+  if (user is! List ||
+      reference is! List ||
+      user.length < 2 ||
+      user.length != reference.length) {
+    return false;
+  }
+  for (var i = 0; i < user.length; i++) {
+    if (feedbackValue(user[i]) != null && feedbackValue(reference[i]) != null) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// These are normalized pipeline names: left is the lead side. Do not swap again
+// for left-handed input. Visibility is a whole-video processed tracking signal,
+// not proof of occlusion or frame-wise jitter (filled values can become zero).
+String feedbackTrackingNotice(
+  Map<String, dynamic> result,
+  Map<String, dynamic> joint,
+) {
+  final series = joint['series'];
+  final user = series is Map ? series['user'] : null;
+  if (user is List &&
+      user.isNotEmpty &&
+      user.any((v) => feedbackValue(v) == null)) {
+    return '이 관절의 전체 비교 곡선에 비어 있는 측정값이 있어요. 원본에서 관절 위치를 먼저 확인해 주세요.';
+  }
+  final points = const <String, List<String>>{
+    'hip_tilt': ['left_hip', 'right_hip'],
+    'lead_ankle_x_from_hip': [
+      'left_ankle',
+      'left_hip',
+      'right_hip',
+      'left_shoulder',
+      'right_shoulder',
+    ],
+    'hand_y_from_shoulder': [
+      'left_wrist',
+      'right_wrist',
+      'left_shoulder',
+      'right_shoulder',
+    ],
+    'lead_elbow_angle': ['left_shoulder', 'left_elbow', 'left_wrist'],
+    'rear_elbow_angle': ['right_shoulder', 'right_elbow', 'right_wrist'],
+  }[joint['key']];
+  final overall = result['overall'];
+  final quality = overall is Map ? overall['quality'] : null;
+  final visibility = quality is Map ? quality['joint_visibility'] : null;
+  if (points != null && visibility is Map) {
+    for (final point in points) {
+      final value = feedbackValue(visibility[point]);
+      if (value != null && value >= 0 && value < .5) {
+        return '관련 관절의 전체 영상 평균 추적 지표가 낮아요. 원본에서 해당 위치가 잘 보이는지 먼저 확인해 주세요.';
+      }
+    }
+  }
+  return '';
+}
+
 Map<String, Map<String, dynamic>> _uniqueRows(
   dynamic raw,
   String key,
@@ -190,6 +256,10 @@ FeedbackGuidance buildFeedbackGuidance(Map<String, dynamic> result) {
                 phase['name'] as String? ??
                 p['phase'],
             z: z,
+            directionCode: p['direction'] as String? ?? '',
+            practiceEligible: feedbackTrackingNotice(result, j).isEmpty,
+            qualityNotice: feedbackTrackingNotice(result, j),
+            hasReferenceSeries: feedbackHasReferenceSeries(j),
             direction: featureDirection(
               key,
               p['direction'] as String? ?? '',
