@@ -39,6 +39,12 @@ SCORE_EXPONENT = 2.0
 # 속도가 빠지면 느리거나 거의 안 움직인 스윙도 높은 점수를 받는다.
 SPEED_SCORE_WEIGHT = 0.3
 
+# 구간 가중치: 종합 자세 거리·부위별 점수·점수 영향도에서 각 구간이 차지하는 비중.
+# 타격이 일어나는 스윙을 1.0 기준으로, 준비(스트라이드·트랜지션)와 임팩트 이후(팔로우)를
+# 낮춘다. 스트라이드는 검출 성공률(프로 77%)도 최저라 추가로 낮게 둔다.
+# 근거: docs/scoring-phase-weights.md. 표시용 값(frame_distances 등)에는 적용하지 않는다.
+PHASE_WEIGHTS = {"stride": 0.3, "transition": 0.6, "swing": 1.0, "follow": 0.3}
+
 # 회전 확인: 착지 -> 임팩트 사이 몸통이 실제로 돌았는지 본다 (프로 649개 통과율).
 #   골반이 열림 98%, 어깨가 열림 99%   -> 둘 다 실패하면 자세 점수 상한 (팔로만 치거나 거꾸로 된 동작)
 #   착지 때 꼬임 89%, 꼬임이 풀림 91% -> 프로도 10% 는 걸려서 점수에는 넣지 않고 피드백만 준다
@@ -270,9 +276,17 @@ class SwingComparisonV2:
         return bool(self.user_curves)
 
     def _overall_distance(self) -> float:
-        if not self.diff_z:
-            return float("nan")
-        return _rms(np.concatenate([z.ravel() for z in self.diff_z.values()]))
+        # 구간 가중 RMS: sqrt( Σ_p w_p·Σ(z_p²) / Σ_p w_p·N_p ). 가중 개수로 나눠 스케일을
+        # 기존(단순 RMS)과 비슷하게 유지한다. 측정된(유효) z 값만 센다.
+        num = den = 0.0
+        for key, z in self.diff_z.items():
+            weight = PHASE_WEIGHTS.get(key, 1.0)
+            finite = z[np.isfinite(z)]
+            if not finite.size:
+                continue
+            num += weight * float(np.sum(finite ** 2))
+            den += weight * finite.size
+        return float(np.sqrt(num / den)) if den else float("nan")
 
     # ------------------------------------------------------------------
     # 종합
@@ -281,10 +295,19 @@ class SwingComparisonV2:
         joints = joints if joints is not None else self.joints()
         distance = self._overall_distance()
 
-        groups: Dict[str, List[float]] = {}
+        # 부위별 거리도 구간 가중. 종합 거리와 같은 가중치라야 "distance² = 부위별 기여 합"
+        # 분해가 유지된다. part_ss = Σ w·z², part_n = Σ w·개수.
+        part_ss: Dict[str, float] = {}
+        part_n: Dict[str, float] = {}
         for key, z in self.diff_z.items():
+            weight = PHASE_WEIGHTS.get(key, 1.0)
             for index, name in enumerate(self.model.feature_names):
-                groups.setdefault(BODY_PARTS.get(name, "other"), []).extend(np.abs(z[:, index]).tolist())
+                part = BODY_PARTS.get(name, "other")
+                finite = z[:, index][np.isfinite(z[:, index])]
+                if not finite.size:
+                    continue
+                part_ss[part] = part_ss.get(part, 0.0) + weight * float(np.sum(finite ** 2))
+                part_n[part] = part_n.get(part, 0.0) + weight * finite.size
         names = BODY_PART_NAMES[self.handedness]
         group_scores = []
         for part in BODY_PART_ORDER:
@@ -297,13 +320,12 @@ class SwingComparisonV2:
             if len(members) < 2:
                 part_reliability = _worse(part_reliability, "medium")
 
-            values = [v for v in groups.get(part, []) if np.isfinite(v)]
-            if not values:
+            if not part_n.get(part):
                 group_scores.append({"key": part, "name": names.get(part, part), "available": False,
                                      "reliability": "low", "feature_count": len(members),
                                      "distance": None, "score": None})
                 continue
-            distance_value = float(np.sqrt(np.mean(np.square(values))))
+            distance_value = float(np.sqrt(part_ss[part] / part_n[part]))
             group_scores.append({
                 "key": part,
                 "name": names.get(part, part),
@@ -446,11 +468,12 @@ class SwingComparisonV2:
         (화면에서 흐리게 표시). 각 행의 reliability 로 구분하면 된다.
         """
         part_ss: Dict[str, float] = {}
-        for z in self.diff_z.values():
+        for key, z in self.diff_z.items():
+            weight = PHASE_WEIGHTS.get(key, 1.0)
             squared = np.square(z)
             for index, name in enumerate(self.model.feature_names):
                 part = BODY_PARTS.get(name, "other")
-                part_ss[part] = part_ss.get(part, 0.0) + float(np.nansum(squared[:, index]))
+                part_ss[part] = part_ss.get(part, 0.0) + weight * float(np.nansum(squared[:, index]))
 
         rows_raw = [(g, part_ss.get(g["key"], 0.0)) for g in group_scores
                     if g.get("available") and part_ss.get(g["key"], 0.0) > 0]
@@ -480,10 +503,11 @@ class SwingComparisonV2:
         feat_rel = {name: _worse(self.reliability, FEATURE_RELIABILITY.get(name, "high"))
                     for name in self.model.feature_names}
         feat_ss = {name: 0.0 for name in self.model.feature_names}
-        for z in self.diff_z.values():
+        for key, z in self.diff_z.items():
+            weight = PHASE_WEIGHTS.get(key, 1.0)
             squared = np.square(z)
             for index, name in enumerate(self.model.feature_names):
-                feat_ss[name] += float(np.nansum(squared[:, index]))
+                feat_ss[name] += weight * float(np.nansum(squared[:, index]))
 
         part_ss: Dict[str, float] = {}
         for name, value in feat_ss.items():
