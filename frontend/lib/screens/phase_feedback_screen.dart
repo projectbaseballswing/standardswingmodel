@@ -535,6 +535,7 @@ class _PhaseCard extends StatelessWidget {
             Text(
               // LLM 구간 카드 한 줄이 있으면 그걸, 없으면 측정 상태 문구로 폴백.
               phase.available &&
+                      !phase.guidanceLimited &&
                       phase.reliability != 'low' &&
                       phase.coachCardLine.isNotEmpty
                   ? phase.coachCardLine
@@ -637,6 +638,7 @@ class _PhaseVideoCard extends StatelessWidget {
 Widget _buildTipBox(AnalysisPhase phase) {
   final hasCoach =
       phase.available &&
+      !phase.guidanceLimited &&
       phase.reliability != 'low' &&
       phase.coachTip.isNotEmpty;
   if (hasCoach) {
@@ -650,6 +652,8 @@ Widget _buildTipBox(AnalysisPhase phase) {
     title: '분석 결과 안내 · 기본 설명',
     tip: !phase.available
         ? '분석되지 않은 구간의 자세는 판정하지 않습니다.'
+        : phase.guidanceLimited
+        ? phase.guidanceNotice
         : phase.reliability == 'low'
         ? '검출 신뢰도가 낮습니다. 측정값은 참고용으로 확인하세요.'
         : phase.ruleTip.isNotEmpty
@@ -848,6 +852,7 @@ enum _PhaseTone { good, bad, neutral }
 /// 분석 불가·점수 없음·신뢰도 낮음은 판정하지 않고 회색.
 _PhaseTone _toneOf(AnalysisPhase p) {
   if (!p.available ||
+      p.guidanceLimited ||
       p.score == null ||
       !const ['high', 'medium'].contains(p.reliability)) {
     return _PhaseTone.neutral;
@@ -884,7 +889,7 @@ String _statusText(AnalysisPhase p) => !p.available
     ? '분석 불가'
     : p.score == null
     ? '점수 미제공'
-    : p.reliability == 'low'
+    : p.guidanceLimited || p.reliability == 'low'
     ? '측정 확인 필요'
     : const ['high', 'medium'].contains(p.reliability)
     ? '측정 완료'

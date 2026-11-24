@@ -120,7 +120,8 @@ void main() {
       expect(f.phases[0].referenceDurationMs, 500);
       expect(f.phases[0].tempoRatio, 1.2);
       expect(f.phases[1].tempoLevel, isNull);
-      expect(f.phases[1].warnings.single, contains('판단하기 어려워요'));
+      expect(f.phases[1].warnings, contains(contains('판단하기 어려워요')));
+      expect(f.phases[1].guidanceLimited, isTrue); // minimal fixture lacks source frame bounds
       // This minimal fixture has no measured phase means/diff: do not turn a
       // detached top_deviations entry into a correction target.
       expect(f.phases[2].deviations, isEmpty);

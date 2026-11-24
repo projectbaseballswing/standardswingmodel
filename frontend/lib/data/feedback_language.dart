@@ -1,4 +1,27 @@
 /// Display wording only. Never rewrites stored reports, scores or GPT responses.
+library;
+
+import 'feedback_measurement_contract.dart';
+
+String feedbackPositionVideoCheck(String key, String phase) {
+  if (key == 'lead_ankle_x_from_hip') {
+    return switch (phase) {
+      'stride' => '앞발을 어디에서 어디로 디디는지, 그동안 골반이 어떻게 움직이는지 확인해 보세요.',
+      'transition' => '앞발을 디딘 위치와, 스윙을 준비하는 동안 골반이 어떻게 움직이는지 확인해 보세요.',
+      'follow' => '앞발을 디딘 위치와, 스윙을 마무리할 때 골반이 어떻게 움직이는지 확인해 보세요.',
+      _ => '앞발을 어디에 디뎠는지, 디딘 뒤 골반이 어떻게 움직이는지 확인해 보세요.',
+    };
+  }
+  final when = switch (phase) {
+    'stride' => '앞발을 들고 딛는 동안',
+    'transition' => '앞발을 디딘 뒤 스윙을 시작하기 전까지',
+    'swing' => '스윙하는 동안',
+    'follow' => '스윙을 마무리할 때',
+    _ => '동작 중',
+  };
+  return '$when 몸이 흔들리거나 뒤로 쏠려 보이는지 확인해 보세요.';
+}
+
 String feedbackFeatureName(String key, String fallback) =>
     const {
       'lead_elbow_angle': '앞팔 팔꿈치',
@@ -49,12 +72,11 @@ String feedbackObservationAction(
   String name,
   String phase, {
   bool hasReferenceSeries = false,
+  String phaseKey = '',
 }) {
   final focus = switch (key) {
-    'hip_tilt' =>
-      '양쪽 골반을 이은 선과 발 디딤을 함께 보세요. 기울기 자체보다 몸이 흔들려 발을 다시 디디는 등 실제 균형 문제가 보이는지 살펴보세요.',
-    'lead_ankle_x_from_hip' =>
-      '앞발목과 골반 중심을 함께 따라가 보세요. 앞발이 움직인 것인지, 발을 딛은 뒤 골반이 움직인 것인지 나눠 확인해 보세요.',
+    'hip_tilt' ||
+    'lead_ankle_x_from_hip' => feedbackPositionVideoCheck(key, phaseKey),
     'hand_y_from_shoulder' =>
       '양손의 가운데와 양어깨의 가운데를 함께 따라가 보세요. 손이 움직인 것인지 어깨 높이가 달라진 것인지 나눠 비교해 보세요.',
     'lead_elbow_angle' =>
@@ -107,18 +129,16 @@ String? feedbackConditionalPractice(
   }
 }
 
-String feedbackMeasurementLimits(String key) {
-  final specific = switch (key) {
-    'hip_tilt' =>
-      '화면상 골반선의 기울기이며 실제 3D 골반 기울기는 아닙니다. 기준에도 기울기가 있으므로 수평으로 고정하지 않습니다.',
-    'lead_ankle_x_from_hip' =>
-      '앞발목과 골반 중심의 화면상 상대 위치를 어깨너비로 정규화한 값입니다. 실제 보폭·스탠스 폭·이동 거리가 아니며, 바닥 표시는 발을 더 멀리 보내기 위한 목표가 아닙니다.',
-    'hand_y_from_shoulder' =>
-      '양 손목 중심과 양 어깨 중심의 상대 높이를 어깨너비로 정규화한 값입니다. 한 손의 궤적이나 실제 높이(cm)가 아닙니다.',
-    'lead_elbow_angle' || 'rear_elbow_angle' =>
-      '어깨·팔꿈치·손목의 IMAGE 좌표와 축소된 추정 깊이로 계산한 각도입니다. 독립적인 실제 3D 측정값은 아닙니다.',
-    _ => '해당 측정의 의미는 관절별 상세 설명에서 확인할 수 있습니다.',
-  };
+String feedbackMeasurementLimits(String key, {String? modelVersion}) {
+  final specific =
+      feedbackNormalizedDefinition(key, modelVersion) ??
+      switch (key) {
+        'hip_tilt' =>
+          '화면상 골반선의 기울기이며 실제 3D 골반 기울기나 무게중심 위치를 측정하지 않습니다. 뒤로 쏠려 보이는 모습만으로 체중 이동이나 균형 문제를 확정하지 않습니다. 기준에도 기울기가 있으므로 수평으로 고정하지 않습니다.',
+        'lead_elbow_angle' || 'rear_elbow_angle' =>
+          '어깨·팔꿈치·손목의 IMAGE 좌표와 축소된 추정 깊이로 계산한 각도입니다. 독립적인 실제 3D 측정값은 아닙니다.',
+        _ => '해당 측정의 의미는 관절별 상세 설명에서 확인할 수 있습니다.',
+      };
   return '$specific 구간 평균은 동작 흐름의 요약이며 한순간의 목표 자세가 아닙니다. '
       '신뢰도 medium/high는 교정의 타당성을 확인했다는 뜻이 아니며, 큰 각도 차이도 원본 확인이 필요합니다. '
       '먼저 확인할 항목은 신뢰도 조건을 통과한 구간별 표준화 차이의 크기로 고릅니다. 구간 가중치를 반영한 점수 영향도 순서나 전문적인 교정 우선순위는 아닙니다. '
@@ -128,7 +148,12 @@ String feedbackMeasurementLimits(String key) {
       '원본에서 내 움직임을 판단할 수 없으면 연습은 보류합니다.';
 }
 
-String feedbackFeatureDescription(String key, String fallback) =>
+String feedbackFeatureDescription(
+  String key,
+  String fallback, {
+  String? modelVersion,
+}) =>
+    feedbackNormalizedDefinition(key, modelVersion) ??
     const {
       'lead_elbow_angle': '앞쪽 어깨·팔꿈치·손목을 연결한 각도예요. 각도가 클수록 팔꿈치가 더 펴진 자세예요.',
       'rear_elbow_angle': '뒤쪽 어깨·팔꿈치·손목을 연결한 각도예요. 각도가 작을수록 팔꿈치가 더 굽혀진 자세예요.',
@@ -138,14 +163,6 @@ String feedbackFeatureDescription(String key, String fallback) =>
       'shoulder_tilt': '화면에서 양쪽 어깨를 이은 선의 기울기예요. 몸통이 실제로 돌아간 각도와는 달라요.',
       'hip_tilt':
           '화면에서 양쪽 골반을 이은 선의 기울기예요. 실제 3D 골반 기울기나 골반을 수평으로 맞추라는 뜻은 아니에요.',
-      'hand_x_from_shoulder': '어깨 중심을 기준으로 손이 투수 쪽에 얼마나 나와 있는지 보는 값이에요.',
-      'hand_y_from_shoulder': '어깨를 기준으로 손이 얼마나 높이 있는지 보는 값이에요.',
-      'lead_ankle_x_from_hip':
-          '화면에서 골반 중심에 대한 앞발의 앞뒤 위치예요. 준비 자세의 스탠스 폭이나 실제로 앞발을 옮긴 거리가 아니에요.',
-      'lead_ankle_y_from_hip':
-          '뒷발을 바닥 기준으로 삼아 앞발이 얼마나 높이 들렸는지 보는 값이에요. 다리 길이 대비로 재서 키나 체형과는 무관해요.',
-      'shoulder_x_from_hip': '골반을 기준으로 상체가 앞뒤로 얼마나 치우쳤는지 보는 값이에요.',
-      'shoulder_y_from_hip': '골반을 기준으로 어깨가 얼마나 높이 있는지 보는 값이에요.',
       'shoulder_turn':
           '어깨가 투수 쪽으로 얼마나 돌아간 것으로 추정되는지 보여줘요. 카메라 방향과 관절 추정 오차의 영향을 받을 수 있어요.',
       'hip_turn': '골반이 투수 쪽으로 얼마나 돌아간 것으로 추정되는지 보여줘요. 실제 타격 힘을 측정한 값은 아니에요.',

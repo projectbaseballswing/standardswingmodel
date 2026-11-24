@@ -31,6 +31,7 @@ from feedback.coaching_review import (
 from feedback.pipeline import PipelineError, SwingPipeline
 from feedback.reference import ReferenceStore
 from feedback.reference_model import load_reference_model
+from feedback.report_contract import build_analysis_contract
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,9 @@ class JobManager:
         self._pipeline: Optional[SwingPipeline] = None
         # 이벤트 기반 기준 모델(0.2). 파일이 없으면 기존 0.1 비교를 쓴다.
         self.model_v2 = load_reference_model()
+        self.analysis_contract = build_analysis_contract(
+            self.model_v2, handedness='right',
+        )
         if self.model_v2 is not None:
             logger.info("기준 모델 %s 사용 (스윙 %d개)", self.model_v2.model_version, self.model_v2.swings_used)
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="swing-worker")
@@ -355,6 +359,10 @@ class JobManager:
                 )
                 job.result = comparison.report(include_series=True)
                 _attach_motion(job.result, skeleton, comparison.events)
+                if self.analysis_contract is not None:
+                    job.result['analysis_contract'] = {
+                        **self.analysis_contract, 'handedness': 'left' if is_left else 'right',
+                    }
             else:
                 # 0.1: 임팩트 기준 80프레임 + DTW (기준 모델 파일이 없을 때)
                 result = self._pipeline.run(video_path, is_left=is_left, on_stage=on_stage)

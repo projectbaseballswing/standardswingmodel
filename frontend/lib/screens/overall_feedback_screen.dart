@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../api/analysis_api.dart';
 import '../api/auth_api.dart' show ApiException;
 import '../data/feedback_repository.dart';
+import '../data/feedback_overview_text.dart';
 import '../models/feedback.dart';
 import '../theme/app_theme.dart';
 import '../video/selected_video.dart';
@@ -196,6 +197,14 @@ class _FeedbackBody extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 _ScoreCard(feedback: feedback),
+                if (feedback.comparisonNotice.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    feedback.comparisonNotice,
+                    key: const Key('comparison-compatibility-notice'),
+                    style: const TextStyle(fontSize: 12, color: AppColors.hint),
+                  ),
+                ],
                 if (feedback.scoreExplanation.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   _Card(
@@ -1033,7 +1042,9 @@ class _CoachCard extends StatelessWidget {
             _CoachStep(
               icon: Icons.check_circle_outline,
               label: '잘한 점 · 기준과 가까운 구간',
-              text: '${strength.observation}\n다른 구간에서는 결과가 달라질 수 있어요.',
+              text: feedback.coaching == null
+                  ? strength.observation
+                  : '${strength.observation}\n다른 구간에서는 결과가 달라질 수 있어요.',
             ),
           if (feedback.coaching != null)
             _CoachStep(
@@ -1050,7 +1061,7 @@ class _CoachCard extends StatelessWidget {
             _CoachStep(
               icon: Icons.search,
               label: '영상 확인 방법',
-              text: first.action,
+              text: overviewVideoCheck(first),
             ),
             if (first.qualityNotice.isNotEmpty)
               _CoachStep(
@@ -1061,8 +1072,8 @@ class _CoachCard extends StatelessWidget {
             if (first.practice?.isNotEmpty == true)
               _CoachStep(
                 icon: Icons.sports_baseball_outlined,
-                label: '조건부 연습',
-                text: first.practice!,
+                label: '선택적 연습',
+                text: overviewOptionalPractice(first)!,
                 isLast: true,
               ),
             if (first.limitations.isNotEmpty)
@@ -1077,6 +1088,26 @@ class _CoachCard extends StatelessWidget {
                     style: TextStyle(fontSize: 12, color: AppColors.hint),
                   ),
                   children: [
+                    Text(
+                      first.action,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        height: 1.5,
+                        color: AppColors.subtitle,
+                      ),
+                    ),
+                    if (first.practice != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        first.practice!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          height: 1.5,
+                          color: AppColors.subtitle,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
                     Text(
                       first.limitations,
                       style: const TextStyle(

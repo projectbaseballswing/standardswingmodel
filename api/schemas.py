@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -303,6 +303,9 @@ class CoachingReviewStatus(BaseModel):
 
 class AnalysisReport(BaseModel):
     model_version: str
+    analysis_contract: Optional[Dict[str, Any]] = Field(
+        None, description='새 분석의 기준 모델·점수 계산 식별 정보. 과거 기록에 현재 값을 소급하지 않는다.',
+    )
     overall: OverallFeedback
     joints: List[JointFeedback]
     phases: PhasesFeedback
@@ -397,6 +400,8 @@ class ComparisonResponse(BaseModel):
     """
 
     has_previous: bool
+    comparable: bool = False
+    comparison_reason: str = 'comparison_metadata_missing'
     previous_analysis_id: Optional[str] = None
     previous_recorded_at: Optional[datetime] = None
     overall_previous_score: Optional[float] = None

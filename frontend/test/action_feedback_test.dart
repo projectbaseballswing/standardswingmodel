@@ -65,7 +65,7 @@ void main() {
       }
       expect(
         feedbackObservationAction('lead_ankle_x_from_hip', '', '스윙'),
-        contains('골반이 움직인 것인지'),
+        contains('디딘 뒤 골반이 어떻게 움직이는지'),
       );
       expect(
         feedbackObservationAction('hand_y_from_shoulder', '', '스윙'),

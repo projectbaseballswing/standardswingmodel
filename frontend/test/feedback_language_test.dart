@@ -23,8 +23,9 @@ void main() {
       final foot = feedbackFeatureDescription(
         'lead_ankle_x_from_hip',
         '스트라이드 폭.',
+        modelVersion: '0.2.3-draft',
       );
-      expect(foot, contains('실제로 앞발을 옮긴 거리가 아니에요'));
+      expect(foot, contains('실제 보폭·스탠스 폭·이동 거리가 아니에요'));
       expect(foot, isNot(contains('스트라이드 폭.')));
       expect(
         feedbackFeatureDescription('unknown', 'original meaning'),
@@ -180,6 +181,7 @@ void main() {
         report,
         comparison: {
           'has_previous': true,
+          'comparable': true,
           'overall_previous_score': 70,
           'parts': [
             {'key': 'rear_arm', 'previous_score': 90},
