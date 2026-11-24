@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:swing_analysis/data/session.dart';
+import 'package:swing_analysis/data/feedback_overview_text.dart';
 import 'package:swing_analysis/screens/overall_feedback_screen.dart';
 import 'package:swing_analysis/screens/joint_analysis_screen.dart';
 
@@ -49,9 +50,11 @@ void main() {
       expect(find.text('잘한 점 · 기준과 가까운 구간'), findsOneWidget);
       expect(find.text('가장 먼저 확인할 동작'), findsOneWidget);
       expect(find.text('영상 확인 방법'), findsOneWidget);
-      expect(find.text('조건부 연습'), findsOneWidget);
-      expect(find.text(first.action), findsOneWidget);
-      expect(find.text(first.practice!), findsOneWidget);
+      expect(find.text('선택적 연습'), findsOneWidget);
+      expect(find.text(overviewVideoCheck(first)), findsOneWidget);
+      expect(find.text(overviewOptionalPractice(first)!), findsOneWidget);
+      expect(find.text(first.action), findsNothing);
+      expect(find.text(first.practice!), findsNothing);
       expect(first.practice, contains('실제 균형 문제가 확인될 때만'));
       expect(first.practice, contains('다시 찍을 필요는 없어요'));
       expect(first.action, contains('기준 영상은 제공되지 않아'));
@@ -63,6 +66,8 @@ void main() {
       await tester.ensureVisible(details);
       await tester.tap(details);
       await tester.pumpAndSettle();
+      expect(find.text(first.action), findsOneWidget);
+      expect(find.text(first.practice!), findsOneWidget);
       expect(find.text(first.limitations), findsOneWidget);
       expect(first.limitations, contains('medium/high는 교정의 타당성을 확인했다는 뜻이 아니'));
       expect(jsonEncode(report), before);
@@ -92,6 +97,12 @@ void main() {
       await tester.ensureVisible(
         find.byKey(const Key('coaching-review-notice')),
       );
+      expect(find.text(overviewVideoCheck(first)), findsOneWidget);
+      expect(find.text(first.action), findsNothing);
+      final details = find.byKey(const Key('feedback-measurement-limits'));
+      await tester.ensureVisible(details);
+      await tester.tap(details);
+      await tester.pumpAndSettle();
       expect(find.text(first.action), findsOneWidget);
       expect(first.action, contains('비교 가능한 기준 그래프나 기준 영상이 없어'));
       expect(first.action, isNot(contains('그래프에서 확인할 수 있어요')));
@@ -160,7 +171,7 @@ void main() {
         await tester.ensureVisible(
           find.byKey(const Key('coaching-review-notice')),
         );
-        expect(find.text('조건부 연습'), findsNothing);
+        expect(find.text('선택적 연습'), findsNothing);
         expect(
           find.byKey(const Key('feedback-measurement-limits')),
           findsNothing,
@@ -195,7 +206,7 @@ void main() {
     expect(find.text('영상 확인 방법'), findsOneWidget);
     expect(find.text('인식 품질 확인'), findsOneWidget);
     expect(find.text(first.qualityNotice), findsOneWidget);
-    expect(find.text('조건부 연습'), findsNothing);
+    expect(find.text('선택적 연습'), findsNothing);
     expect(jsonEncode(report), before);
     expect(tester.takeException(), isNull);
   });
@@ -240,7 +251,7 @@ void main() {
       expect(find.text('SYNTHETIC APPROVED ACTION'), findsOneWidget);
       expect(find.text('SYNTHETIC FIX'), findsOneWidget);
       expect(find.text('SYNTHETIC DRILL'), findsOneWidget);
-      expect(find.text('조건부 연습'), findsNothing);
+      expect(find.text('선택적 연습'), findsNothing);
       expect(find.text('영상 확인 방법'), findsNothing);
       expect(
         find.byKey(const Key('feedback-measurement-limits')),

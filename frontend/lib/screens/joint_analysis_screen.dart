@@ -1161,6 +1161,14 @@ class _FeatureDetail extends StatelessWidget {
             const SizedBox(height: 14),
           ],
           // LLM 관절 코멘트(scope='full' 일 때만). 없으면 표시하지 않는다.
+          for (final notice in feature.measurementNotices)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                notice,
+                style: const TextStyle(fontSize: 12, color: AppColors.subtitle),
+              ),
+            ),
           // 임팩트 순간·움직임 폭은 숫자 카드 대신 이 코멘트가 말로 설명한다.
           if (feature.displayedComment.isNotEmpty) ...[
             const SizedBox(height: 10),
@@ -1211,8 +1219,7 @@ class _FeatureDetail extends StatelessWidget {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      '${feature.description}'
-                      '${feature.unit == 'body' ? '\n몸통 길이를 기준으로 맞춘 상대 위치예요. 실제 거리(cm)나 이동 거리가 아니에요.' : ''}',
+                      feature.description,
                       style: const TextStyle(
                         fontSize: 12,
                         height: 1.5,

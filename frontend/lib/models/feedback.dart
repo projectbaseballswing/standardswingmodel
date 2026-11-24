@@ -107,11 +107,13 @@ class FeatureAnalysis {
     this.evidence,
     this.ruleComment = '',
     this.contribution,
+    this.measurementNotices = const [],
   });
 
   /// 부위 내 점수 영향 비중(0~1). 같은 부위의 표시 피처들끼리 합하면 1.
   /// 저신뢰 피처나 0.2.x 이전 기록에는 없어 null.
   final double? contribution;
+  final List<String> measurementNotices;
 
   /// 서버 피처 키. 예) 'lead_elbow_angle'.
   final String key;
@@ -439,11 +441,13 @@ class FeedbackEvidence {
     this.practiceEligible = false,
     this.qualityNotice = '',
     this.hasReferenceSeries = false,
+    this.modelVersion = 'unknown',
   });
   final String joint, part, name, phase, phaseName, direction;
   final String directionCode, qualityNotice;
   final bool practiceEligible;
   final bool hasReferenceSeries;
+  final String modelVersion;
   final double z;
   final bool isIssue;
   String get observation =>
@@ -453,6 +457,7 @@ class FeedbackEvidence {
     name,
     phaseName,
     hasReferenceSeries: hasReferenceSeries,
+    phaseKey: phase,
   );
   String? get practice => feedbackConditionalPractice(
     joint,
@@ -460,7 +465,8 @@ class FeedbackEvidence {
     directionCode,
     eligible: isIssue && practiceEligible,
   );
-  String get limitations => feedbackMeasurementLimits(joint);
+  String get limitations =>
+      feedbackMeasurementLimits(joint, modelVersion: modelVersion);
 }
 
 /// 자세 계산에 사용한 표준화 차이 제곱합의 부위별 상대 비중.
@@ -520,10 +526,14 @@ class OverallFeedback {
     this.summarySource = '분석 결과 안내 · 기본 설명',
     this.coachingReview = const CoachingReview(),
     this.scoreContributions = const [],
+    this.comparisonNotice = '',
+    this.hasPreviousRecord = false,
   });
 
   /// 자세 차이의 부위별 상대 비중. 필드가 없는 과거 기록은 빈 목록.
   final List<ScoreContribution> scoreContributions;
+  final String comparisonNotice;
+  final bool hasPreviousRecord;
 
   /// 분석 id. 관절·구간 코칭이 아직 생성 중(pending)일 때 상세 화면이 재조회하는 데 쓴다.
   final String analysisId;
@@ -668,6 +678,7 @@ class AnalysisPhase {
     this.coachComment = '',
     this.coachTip = '',
     this.ruleTip = '',
+    this.guidanceNotice = '',
   });
   final String key;
   final String name;
@@ -691,6 +702,8 @@ class AnalysisPhase {
   final String coachComment; // 구간 상세 서술(수치·가장 벌어진 관절 근거)
   final String coachTip; // 구간 개선 실천 팁
   final String ruleTip;
+  final String guidanceNotice;
+  bool get guidanceLimited => guidanceNotice.isNotEmpty;
 }
 
 class SpeedMetric {

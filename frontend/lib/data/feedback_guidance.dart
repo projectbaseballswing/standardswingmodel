@@ -1,6 +1,8 @@
 // Presentation policy only: never recalculates scores or mutates the report.
 import '../models/feedback.dart';
 import 'feedback_language.dart';
+import 'feedback_phase_support.dart';
+import 'feedback_measurement_contract.dart';
 
 bool reliableFeedback(dynamic value) => value == 'high' || value == 'medium';
 double? feedbackValue(dynamic v) =>
@@ -238,6 +240,11 @@ FeedbackGuidance buildFeedbackGuidance(Map<String, dynamic> result) {
         final z = feedbackValue(p['z_score']);
         if (phase == null ||
             !_quality(phase) ||
+            feedbackPhaseSupportNotice(
+                  phase,
+                  fps: feedbackValue(phases['user_fps']),
+                ) !=
+                null ||
             z == null ||
             !_consistentPhase(p)) {
           continue;
@@ -248,6 +255,7 @@ FeedbackGuidance buildFeedbackGuidance(Map<String, dynamic> result) {
         all.add(
           FeedbackEvidence(
             joint: key,
+            modelVersion: feedbackReportVersion(result),
             part: j['body_part'] as String,
             name: feedbackFeatureName(key, j['name'] as String? ?? key),
             phase: p['phase'] as String,

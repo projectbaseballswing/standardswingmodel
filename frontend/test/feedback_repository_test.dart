@@ -302,6 +302,7 @@ void main() {
           'available': true,
           'score': 70.0,
           'reliability': 'high',
+          'user_frames': [0, 10],
         },
       ],
     };
@@ -448,6 +449,7 @@ void main() {
     Map<String, dynamic> comparisonBody() => {
       'coaching_review': approvedReviewFixture,
       'has_previous': true,
+      'comparable': true,
       'previous_analysis_id': 'prev-1',
       'overall_previous_score': 70.0,
       'overall_delta': 7.3,

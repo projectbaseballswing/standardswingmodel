@@ -6,6 +6,8 @@ import '../models/feedback.dart';
 import 'session.dart';
 import 'feedback_guidance.dart';
 import 'feedback_language.dart';
+import 'feedback_phase_support.dart';
+import 'feedback_measurement_contract.dart';
 
 /// 종합 피드백 데이터 공급.
 ///
@@ -78,13 +80,31 @@ class FeedbackRepository {
     if (userId == null || userId.isEmpty) return null;
     try {
       final c = await _api.fetchComparison(userId, analysisId);
-      return c['has_previous'] == true ? c : null;
+      return c;
     } catch (_) {
-      return null; // 비교는 부가 기능 — 실패해도 첫 피드백은 보여준다.
+      return {'comparable': false, 'comparison_reason': 'lookup_failed'};
     }
   }
 
   void dispose() => _api.dispose();
+
+  String _comparisonNotice(Map<String, dynamic>? comparison) {
+    if (comparison == null || comparison['has_previous'] == false) return '';
+    if (comparison['comparable'] == true) {
+      return '같은 분석 기준의 이전 기록과 비교했어요. 촬영 조건 차이가 있어 점수 변화만으로 자세의 개선·악화를 단정하지 않아요.';
+    }
+    if (comparison['comparison_reason'] == 'lookup_failed') {
+      return '이전 기록을 불러오지 못해 이번 분석만 표시해요. 이전 기록의 상태는 확인되지 않았어요.';
+    }
+    final reason = switch (comparison['comparison_reason']) {
+      'model_version_mismatch' => '분석 모델 버전이 달라',
+      'reference_model_mismatch' => '기준 모델이 달라',
+      'scoring_definition_mismatch' => '구간 가중치 등 점수 계산 기준이 달라',
+      'handedness_mismatch' => '좌우 타격 방향이 달라',
+      _ => '동일한 모델·기준·점수 계산 방식인지 확인할 정보가 부족해',
+    };
+    return '이전 기록은 있지만 $reason 점수 증감 비교를 보류해요. 이번 분석은 그대로 확인할 수 있어요.';
+  }
 
   /// 서버 응답을 새 업로드와 과거 기록에 공통으로 사용하는 모델로 변환한다.
   ///
@@ -100,9 +120,7 @@ class FeedbackRepository {
     }
     final overall = result['overall'] as Map<String, dynamic>;
     final guidance = buildFeedbackGuidance(result);
-    final version =
-        (result['model_version'] ?? overall['model_version']) as String? ??
-        'unknown';
+    final version = feedbackReportVersion(result);
     final eventBased = version.startsWith('0.2');
     final rawJoints = (result['joints'] as List?) ?? const [];
     final rawGroups = (overall['group_scores'] as List?) ?? const [];
@@ -125,7 +143,10 @@ class FeedbackRepository {
     // 백엔드 LLM 코칭.
     //  - 비교(직전 분석 있음)면 '이전 대비' 코칭을, 아니면 '프로 기준' 코칭을 쓴다.
     //  - 비교인데 LLM 이 없으면 coaching=null → 규칙 기반(이전 대비 증감) 폴백.
-    final coachingEnvelope = comparison ?? result;
+    final comparable =
+        comparison?['has_previous'] == true &&
+        comparison?['comparable'] == true;
+    final coachingEnvelope = comparable ? comparison! : result;
     var review = CoachingReview.fromJson(coachingEnvelope['coaching_review']);
     Coaching? selectedCoaching;
     if (review.canDisplay) {
@@ -147,9 +168,10 @@ class FeedbackRepository {
     // 부위별 이전 점수 / 전체 이전 점수(비교일 때만).
     final previousByPart = <String, double?>{};
     double? previousTotal;
-    if (comparison != null) {
-      previousTotal = _number(comparison['overall_previous_score']);
-      for (final p in (comparison['parts'] as List?) ?? const []) {
+    if (comparable && reliableFeedback(reliability)) {
+      final previous = comparison!;
+      previousTotal = _number(previous['overall_previous_score']);
+      for (final p in (previous['parts'] as List?) ?? const []) {
         if (p is! Map<String, dynamic>) continue;
         final key = p['key'];
         if (key is String && key.isNotEmpty) {
@@ -168,6 +190,18 @@ class FeedbackRepository {
         _mapFeature(
           j,
           eventBased: eventBased,
+          modelVersion: version,
+          phaseNotices: {
+            for (final phase in _rows((result['phases'] as Map?)?['phases']))
+              if (phase['available'] != false && phase['key'] is String)
+                if (feedbackPhaseSupportNotice(
+                      phase,
+                      fps: _number((result['phases'] as Map?)?['user_fps']),
+                    )
+                    case final String notice)
+                  phase['key'] as String:
+                      '${phase['name'] ?? phase['key']}: $notice',
+          },
           coaching: guidance.eligibleJoints.contains(j['key'])
               ? coaching
               : null,
@@ -258,6 +292,8 @@ class FeedbackRepository {
       recordedAt: _parseTime(body),
       totalScore: totalScore,
       modelVersion: version,
+      hasPreviousRecord: comparison?['has_previous'] == true,
+      comparisonNotice: _comparisonNotice(comparison),
       available: available,
       reliability: reliability,
       warnings: _strings(
@@ -274,6 +310,7 @@ class FeedbackRepository {
               (j['key'] as String): feedbackFeatureDescription(
                 j['key'] as String,
                 j['description'] as String? ?? '',
+                modelVersion: version,
               ),
         },
         guidance: guidance,
@@ -424,6 +461,8 @@ class FeedbackRepository {
   FeatureAnalysis _mapFeature(
     Map<String, dynamic> j, {
     required bool eventBased,
+    String modelVersion = 'unknown',
+    Map<String, String> phaseNotices = const {},
     Coaching? coaching,
     FeedbackGuidance guidance = const FeedbackGuidance(),
   }) {
@@ -452,6 +491,7 @@ class FeedbackRepository {
       description: feedbackFeatureDescription(
         key,
         (j['description'] as String?) ?? '',
+        modelVersion: modelVersion,
       ),
       comment: coaching?.joints[key] ?? '',
       impact: _measure(j['impact']),
@@ -467,6 +507,10 @@ class FeedbackRepository {
           ? evidence.observation
           : '${evidence.observation} 다른 구간에서는 결과가 달라질 수 있어요.',
       contribution: _number(j['contribution']),
+      measurementNotices: [
+        for (final p in _rows(j['phases']))
+          if (phaseNotices[p['phase']] case final String notice) notice,
+      ],
     );
   }
 
@@ -586,8 +630,13 @@ class FeedbackRepository {
     for (final p in _rows(raw))
       () {
         final key = p['key'] as String? ?? '';
+        final supportNotice = p['available'] == false
+            ? null
+            : feedbackPhaseSupportNotice(p, fps: analysisFps);
         final valid =
-            p['available'] != false && reliableFeedback(p['reliability']);
+            p['available'] != false &&
+            reliableFeedback(p['reliability']) &&
+            supportNotice == null;
         final coach = valid ? coaching?.phases[key] : null;
         final originalDeviations = _rows(p['top_deviations']).toList();
         final shown = originalDeviations
@@ -608,6 +657,7 @@ class FeedbackRepository {
           name: p['name'] as String? ?? p['key'] as String? ?? '구간',
           available: p['available'] != false,
           reliability: _reliability(p['reliability']),
+          guidanceNotice: supportNotice ?? '',
           score: p['available'] == false ? null : _number(p['score']),
           unavailableReason: p['unavailable_reason'] is String
               ? feedbackReportNotice(p['unavailable_reason'] as String)
@@ -623,6 +673,7 @@ class FeedbackRepository {
               ? null
               : p['tempo_level'] as String?,
           warnings: [
+            ?supportNotice,
             ..._strings(
               p['warnings'],
             ).map((w) => safeTempoWarning(w, analysisFps)),
@@ -656,9 +707,11 @@ class FeedbackRepository {
           coachCardLine: coach?.cardLine ?? '',
           coachComment: coach?.comment ?? '',
           coachTip: coach?.tip ?? '',
-          ruleTip: evidence == null
-              ? '이 구간은 우선 교정을 권할 만큼 확실한 관절 차이가 확인되지 않았어요. 원본에서 동작을 살펴보세요.'
-              : '${evidence.observation} ${evidence.action}',
+          ruleTip:
+              supportNotice ??
+              (evidence == null
+                  ? '이 구간은 우선 교정을 권할 만큼 확실한 관절 차이가 확인되지 않았어요. 원본에서 동작을 살펴보세요.'
+                  : '${evidence.observation} ${evidence.action}'),
         );
       }(),
   ];
