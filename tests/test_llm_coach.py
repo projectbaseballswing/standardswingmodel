@@ -25,6 +25,8 @@ def _report() -> dict:
 
 def _worse_previous(current: dict) -> dict:
     """현재보다 점수가 낮고 기준과 더 벌어진 '직전' 리포트를 만든다 → 현재가 '개선'으로 나와야 한다."""
+    from tests.test_report_contract import contract
+    current['analysis_contract']=contract(current['model_version'])
     prev = copy.deepcopy(current)
     prev["overall"]["score"] = (current["overall"]["score"] or 0) - 10
     for g in prev["overall"].get("group_scores") or []:

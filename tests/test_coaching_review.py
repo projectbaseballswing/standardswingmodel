@@ -248,6 +248,8 @@ def test_extended_merge_preserves_other_fields_and_rejects_stale_revision(mock_c
 
 def test_comparison_approval_bound_to_exact_previous_record(mock_client):
     client=mock_client;prev=report();cur=report();now=datetime.now(timezone.utc)
+    from tests.test_report_contract import contract
+    for r in (prev,cur):r['analysis_contract']=contract(r['model_version'])
     previous_id=seed(client,prev,when=now-timedelta(days=1));identifier=uuid.uuid4().hex
     ctx=context_for(identifier,client.test_user_id,previous_analysis_id=previous_id,previous=prev)
     cur['comparison']={'previous_analysis_id':previous_id,PRIVATE_KEY:approved(cur,ctx,previous=prev)}

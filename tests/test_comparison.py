@@ -15,11 +15,13 @@ def _part(key: str, name: str, score, *, available=True, reliability="high") -> 
 
 
 def _result(overall_score, parts: list[dict]) -> dict:
-    return {"overall": {"score": overall_score, "group_scores": parts}}
+    from tests.test_report_contract import contract
+    return {"model_version": "0.2.3-draft", "analysis_contract": contract(),
+            "overall": {"score": overall_score, "group_scores": parts, "available": True, "reliability": "high"}}
 
 
 def _phase(key: str, name: str, score, *, available=True, reliability="high") -> dict:
-    return {"key": key, "name": name, "available": available, "reliability": reliability, "score": score}
+    return {"key": key, "name": name, "available": available, "reliability": reliability, "score": score, "user_frames": [0, 10]}
 
 
 def _joint(key: str, name: str, body_part: str, diff, *, available=True, reliability="high") -> dict:

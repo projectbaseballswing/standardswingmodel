@@ -82,6 +82,9 @@ def test_generation_uses_compact_wire_but_validates_full_evidence(monkeypatch,en
         expected=llm.build_llm_input(r,scope='full')
     else:
         previous=sample()
+        from tests.test_report_contract import contract
+        for report in (r, previous):
+            report['analysis_contract']=contract(report['model_version'])
         value=llm.generate_comparison_coaching(r,previous,api_key='synthetic-not-a-key',model='offline',review_sink=sink)
         expected=llm.build_comparison_input(r,previous)
     assert value is None and len(captured)==1

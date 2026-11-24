@@ -26,6 +26,7 @@ from api.schemas import (
 from api.auth import user_path_access
 from api.video_deletion import video_status
 from feedback.coaching_review import PRIVATE_KEY, context_for, public_coaching
+from feedback.report_contract import comparison_compatibility, phase_support_reason
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ def _part_scores(row: Swing) -> dict[str, float]:
             isinstance(key, str)
             and key
             and group.get("available") is not False
+            and group.get("reliability") in ("high", "medium")
             and isinstance(score, (int, float))
             and not isinstance(score, bool)
         ):
@@ -92,7 +94,8 @@ def _phase_scores(row: Swing) -> dict[str, float]:
             isinstance(key, str)
             and key
             and p.get("available") is not False
-            and p.get("reliability") != "low"
+            and p.get("reliability") in ("high", "medium")
+            and phase_support_reason(p, block.get('user_fps')) is None
             and isinstance(score, (int, float))
             and not isinstance(score, bool)
         ):
@@ -114,7 +117,7 @@ def _joint_diffs(row: Swing) -> dict[str, dict]:
         key = j.get("key")
         if not (isinstance(key, str) and key):
             continue
-        if j.get("available") is False or j.get("reliability") == "low":
+        if j.get("available") is False or j.get("reliability") not in ("high", "medium"):
             continue
         diff = (j.get("impact") or {}).get("diff")
         if isinstance(diff, (int, float)) and not isinstance(diff, bool):
@@ -257,11 +260,29 @@ def compare_with_previous(
         .limit(1)
     ).first()
 
-    if previous is None or not isinstance(previous.result, dict):
-        return ComparisonResponse(has_previous=False)
+    if previous is None:
+        return ComparisonResponse(has_previous=False, comparison_reason='no_previous')
 
-    cur_overall = _overall_score(current)
-    prev_overall = _overall_score(previous)
+    comparable, reason = comparison_compatibility(current.result, previous.result)
+    if not comparable:
+        # Keep the actual previous record identity, but no usable deltas or
+        # comparison coaching. Old clients also see null previous scores.
+        return ComparisonResponse(
+            has_previous=True, comparable=False, comparison_reason=reason,
+            previous_analysis_id=previous.analysis_id,
+            previous_recorded_at=_utc_datetime(previous.recorded_at or previous.created_at),
+            coaching_review={'status':'generation_failed','source':'rules',
+                             'display_allowed':False,'reason':'not_generated'},
+        )
+
+    overall_reliable = all(
+        isinstance(row.result.get('overall'), dict)
+        and row.result['overall'].get('available') is not False
+        and row.result['overall'].get('reliability') in ('high', 'medium')
+        for row in (current, previous)
+    )
+    cur_overall = _overall_score(current) if overall_reliable else None
+    prev_overall = _overall_score(previous) if overall_reliable else None
     cur_parts = _part_scores(current)
     prev_parts = _part_scores(previous)
 
@@ -311,6 +332,8 @@ def compare_with_previous(
     coaching, coaching_review = _comparison_coaching(db, current, previous)
     return ComparisonResponse(
         has_previous=True,
+        comparable=True,
+        comparison_reason='compatible',
         previous_analysis_id=previous.analysis_id,
         previous_recorded_at=_utc_datetime(previous.recorded_at or previous.created_at),
         overall_previous_score=prev_overall,

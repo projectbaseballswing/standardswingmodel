@@ -16,7 +16,9 @@ FEATURE_PART={
  'lead_ankle_y_from_hip':'lead_leg','rear_knee_angle':'rear_leg',
  **{k:'torso' for k in ('torso_lean','shoulder_tilt','hip_tilt','shoulder_x_from_hip','shoulder_y_from_hip','shoulder_turn','hip_turn','hip_shoulder_separation')},
 }
-UNMEASURED=['시선','머리 움직임','힘·근력·지면 반력','회전 시작 순서','배트 궤적','원인과 교정 효과']
+from feedback.report_contract import comparison_compatibility, measurement_semantics, phase_support_reason, report_version
+
+UNMEASURED=['시선','머리 움직임','힘·근력·지면 반력','무게중심 위치','회전 시작 순서','배트 궤적','원인과 교정 효과']
 SEMANTICS={
  'torso_lean':'수직 기준 기울기: +는 투수 쪽, -는 포수 쪽. 기준도 기울 수 있으며 목표 0도가 아님.',
  'shoulder_tilt':'어깨선 기울기: 커지면 뒤 어깨가 더 내려감. 회전 순서 아님.',
@@ -40,8 +42,7 @@ def rows(v):return [x for x in v if isinstance(x,dict)] if isinstance(v,list) el
 def obj(v):return v if isinstance(v,dict) else {}
 def quality(v):return v.get('available') is True and v.get('reliability') in ('high','medium')
 def version(r):
-    v=r.get('model_version') or obj(r.get('overall')).get('model_version')
-    return v if isinstance(v,str) else None
+    return report_version(r)
 def safe_text(v):return v[:300] if isinstance(v,str) else ''
 
 def unique(v,key,allowed,kind,excluded):
@@ -134,9 +135,10 @@ def build_evidence_input(report,*,scope='overall',previous=None):
     groups=unique(o.get('group_scores'),'key',PARTS,'part',excluded)
     phases=unique(obj(r.get('phases')).get('phases'),'key',PHASES,'phase',excluded)
     joints=unique(r.get('joints'),'key',set(FEATURE_PART),'joint',excluded)
-    good_phases={k:p for k,p in phases.items() if quality(p) and quality(o)}
+    fps=obj(r.get('phases')).get('user_fps')
+    good_phases={k:p for k,p in phases.items() if quality(p) and quality(o) and phase_support_reason(p,fps) is None}
     for k,p in phases.items():
-        if k not in good_phases:excluded.append({'kind':'phase','key':k,'name':safe_text(p.get('name')),'reason':'quality_or_availability'})
+        if k not in good_phases:excluded.append({'kind':'phase','key':k,'name':safe_text(p.get('name')),'reason':phase_support_reason(p,fps) or 'quality_or_availability'})
     parts={};flat=[];observations=[]
     for k,g in groups.items():
         if quality(g) and quality(o):
@@ -156,7 +158,7 @@ def build_evidence_input(report,*,scope='overall',previous=None):
         if not ee:
             excluded.append({'kind':'joint','key':k,'name':safe_text(j.get('name')),'reason':'no_reliable_phase'});continue
         # No unverified biological mechanisms from old feature descriptions.
-        item={'key':k,'name':safe_text(j.get('name')),'body_part':j['body_part'],'unit':safe_text(j.get('unit')),'measurement_semantics':SEMANTICS[k],
+        item={'key':k,'name':safe_text(j.get('name')),'body_part':j['body_part'],'unit':safe_text(j.get('unit')),'measurement_semantics':measurement_semantics(k,version(r),SEMANTICS[k]),
               'reliability':j['reliability'],'phases':ee,'impact':measured_event(j.get('impact')),
               'range_of_motion':measured_range(j.get('range_of_motion'))}
         item['impact_diff']=item['impact']['diff'] if item['impact'] else None
@@ -202,16 +204,16 @@ def build_evidence_input(report,*,scope='overall',previous=None):
 def comparison_evidence(current,previous,current_payload):
     # Same stored model required. This is a score comparison, not proof of pose improvement.
     if not version(current) or version(current)!=version(previous):return {'available':False,'reason':'model_version_missing_or_different'}
+    compatible,reason=comparison_compatibility(current,previous)
+    if not compatible:return {'available':False,'reason':reason}
     if not quality(obj(previous.get('overall'))) or not quality(obj(current.get('overall'))):return {'available':False,'reason':'overall_quality'}
-    for key in ('handedness','reference_id'):
-        if current.get(key)!=previous.get(key):return {'available':False,'reason':key+'_mismatch'}
     old=build_evidence_input(previous,scope='full');cur=current_payload
     a,b=cur['overall_score'],old['overall_score']
     if a is None or b is None:return {'available':False,'reason':'missing_score'}
     result={'available':True,'model_version':version(current),'overall':{'current_score':a,'previous_score':b,'delta':round(a-b,1)},
             'parts':[],'joints':[],'phases':[],
             'condition_match_verified':False,
-            'metadata_missing':[k for k in ('handedness','reference_id') if current.get(k) is None or previous.get(k) is None],
+            'metadata_missing':[],
             'limitations':['촬영 조건·동일 사용자 여부는 호출부가 확인해야 함','점수 변화는 실제 자세·타격 성과 개선을 보장하지 않음']}
     prior={p['key']:p for p in old['parts']}
     for p in cur['parts']:
