@@ -72,21 +72,11 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             children: [
               const Spacer(flex: 22),
-              // 타이틀
-              const Text(
-                'SWING\nANALYSIS',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 34,
-                  height: 1.15,
-                  fontWeight: FontWeight.w400,
-                  color: Colors.black,
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                '당신의 스윙을 분석하세요',
-                style: TextStyle(fontSize: 14, color: AppColors.subtitle),
+              // 로고
+              Image.asset(
+                'assets/icon/app_icon.png',
+                width: 240,
+                fit: BoxFit.contain,
               ),
               const Spacer(flex: 8),
               // 입력창
